@@ -1,29 +1,26 @@
 use app::MoverService;
-use core::FileRecord;
+use infra::Database;
 use std::path::PathBuf;
 use tracing::info;
 
 /// Execute the move command
-pub async fn move_files(
-    movies_dir: Option<String>,
-    tv_dir: Option<String>,
-) -> Result<(), anyhow::Error> {
+pub async fn move_files(db: &Database, config: &infra::Config) -> Result<(), anyhow::Error> {
     info!("Moving confirmed files");
     
-    let movies_dir = PathBuf::from(movies_dir.unwrap_or_else(|| "movies".to_string()));
-    let tv_dir = PathBuf::from(tv_dir.unwrap_or_else(|| "tv".to_string()));
-    
-    // Create directories if they don't exist
-    std::fs::create_dir_all(&movies_dir)?;
-    std::fs::create_dir_all(&tv_dir)?;
-    
-    // TODO: Load confirmed files from database
-    let records: Vec<FileRecord> = Vec::new();
+    // Load confirmed files from database
+    let records = db.get_files_by_status("Confirmed").await?;
     
     if records.is_empty() {
         println!("No confirmed files to move.");
         return Ok(());
     }
+    
+    let movies_dir = config.movies_directory_buf();
+    let tv_dir = config.tv_directory_buf();
+    
+    // Create directories if they don't exist
+    std::fs::create_dir_all(&movies_dir)?;
+    std::fs::create_dir_all(&tv_dir)?;
     
     println!("Moving {} files to organized library:", records.len());
     println!("  Movies: {}", movies_dir.display());
@@ -44,6 +41,8 @@ pub async fn move_files(
         match mover.move_file(record, &movies_dir, &tv_dir).await {
             Ok(updated_record) => {
                 moved += 1;
+                // Save updated record to database
+                db.update_file(&updated_record).await?;
                 println!("  ✓ {} -> {:?}", record.filename, updated_record.path);
             }
             Err(e) => {
