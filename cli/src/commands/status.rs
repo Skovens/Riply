@@ -6,7 +6,7 @@ pub async fn show_status() -> Result<(), anyhow::Error> {
     info!("Getting pipeline status");
     
     // TODO: Load status from database
-    let mut pipeline_status = PipelineStatus::Idle;
+    let mut pipeline_status = PipelineStatus::Scanned;
     let mut files_scanned = 0;
     let mut files_matched = 0;
     let mut files_needs_review = 0;
