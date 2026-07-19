@@ -1,5 +1,28 @@
+use clap::Subcommand;
 use infra::MakeMkvClient;
 use tracing::info;
+
+/// Subcommands for rip operations
+#[derive(Subcommand, Debug)]
+pub enum RipCommand {
+    /// List available drives
+    List,
+    /// Start ripping on a drive
+    Start {
+        /// Drive index to rip
+        index: usize,
+    },
+    /// Cancel ripping on a drive
+    Cancel {
+        /// Drive index to cancel
+        index: usize,
+    },
+    /// Eject disc from a drive
+    Eject {
+        /// Drive index to eject
+        index: usize,
+    },
+}
 
 /// Execute rip commands
 pub async fn rip_command(command: RipCommand) -> Result<(), anyhow::Error> {
