@@ -1,60 +1,131 @@
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use tracing::info;
 
 /// Application configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    /// Path to scan for media files
-    pub scan_dir: String,
-    /// Path to store movie files
-    pub movies_dir: String,
-    /// Path to store TV show files
-    pub tv_dir: String,
-    /// TMDb API key
-    pub tmdb_api_key: String,
-    /// OMDb API key
-    pub omdb_api_key: String,
-    /// Database path
-    pub db_path: String,
+    /// Path to the SQLite database file
+    pub database_path: String,
+    /// Directory to scan for media files
+    pub scan_directory: Option<String>,
+    /// Movies destination directory
+    pub movies_directory: String,
+    /// TV Shows destination directory
+    pub tv_directory: String,
     /// Enable verbose logging
     pub verbose: bool,
-    /// Enable AutoRip
-    pub autorip_enabled: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            database_path: "riply.db".to_string(),
+            scan_directory: None,
+            movies_directory: "movies".to_string(),
+            tv_directory: "tv".to_string(),
+            verbose: false,
+        }
+    }
 }
 
 impl Config {
-    /// Create a new configuration with default values
-    pub fn new() -> Self {
-        info!("Creating default configuration");
-        Config {
-            scan_dir: String::new(),
-            movies_dir: String::new(),
-            tv_dir: String::new(),
-            tmdb_api_key: String::new(),
-            omdb_api_key: String::new(),
-            db_path: "media.db".to_string(),
-            verbose: false,
-            autorip_enabled: false,
-        }
-    }
-
     /// Load configuration from a TOML file
     pub fn load(path: &str) -> Result<Self, anyhow::Error> {
         info!("Loading configuration from: {}", path);
-        // TODO: Implement TOML file loading
-        Ok(Config::new())
+        
+        let content = std::fs::read_to_string(path)?;
+        let config: Config = toml::from_str(&content)?;
+        
+        info!("Configuration loaded successfully");
+        Ok(config)
     }
 
     /// Save configuration to a TOML file
     pub fn save(&self, path: &str) -> Result<(), anyhow::Error> {
         info!("Saving configuration to: {}", path);
-        // TODO: Implement TOML file saving
+        
+        let content = toml::to_string_pretty(self)?;
+        std::fs::write(path, content)?;
+        
+        info!("Configuration saved successfully");
         Ok(())
+    }
+
+    /// Get the database path as a PathBuf
+    pub fn database_path_buf(&self) -> PathBuf {
+        PathBuf::from(&self.database_path)
+    }
+
+    /// Get the movies directory as a PathBuf
+    pub fn movies_directory_buf(&self) -> PathBuf {
+        PathBuf::from(&self.movies_directory)
+    }
+
+    /// Get the TV directory as a PathBuf
+    pub fn tv_directory_buf(&self) -> PathBuf {
+        PathBuf::from(&self.tv_directory)
+    }
+
+    /// Create a default configuration file if it doesn't exist
+    pub fn create_default(path: &str) -> Result<(), anyhow::Error> {
+        let config = Self::default();
+        config.save(path)
     }
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self::new()
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_default_config() {
+        let config = Config::default();
+        assert_eq!(config.database_path, "riply.db");
+        assert_eq!(config.movies_directory, "movies");
+        assert_eq!(config.tv_directory, "tv");
+        assert!(!config.verbose);
+    }
+
+    #[test]
+    fn test_save_and_load_config() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        
+        let config = Config {
+            database_path: "test.db".to_string(),
+            scan_directory: Some("/test".to_string()),
+            movies_directory: "movies".to_string(),
+            tv_directory: "tv".to_string(),
+            verbose: true,
+        };
+        
+        // Save config
+        config.save(config_path.to_str().unwrap()).unwrap();
+        
+        // Load config
+        let loaded = Config::load(config_path.to_str().unwrap()).unwrap();
+        
+        assert_eq!(loaded.database_path, "test.db");
+        assert_eq!(loaded.scan_directory, Some("/test".to_string()));
+        assert_eq!(loaded.movies_directory, "movies");
+        assert_eq!(loaded.tv_directory, "tv");
+        assert!(loaded.verbose);
+    }
+
+    #[test]
+    fn test_create_default_config() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        
+        Config::create_default(config_path.to_str().unwrap()).unwrap();
+        
+        // Verify file was created
+        assert!(config_path.exists());
+        
+        // Verify we can load it
+        let config = Config::load(config_path.to_str().unwrap()).unwrap();
+        assert_eq!(config.database_path, "riply.db");
     }
 }
