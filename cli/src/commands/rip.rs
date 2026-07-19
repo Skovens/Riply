@@ -1,4 +1,4 @@
-use infra::MakeMKVService;
+use infra::MakeMkvClient;
 use tracing::info;
 
 /// Execute rip commands
@@ -15,8 +15,8 @@ pub async fn rip_command(command: RipCommand) -> Result<(), anyhow::Error> {
 async fn list_drives() -> Result<(), anyhow::Error> {
     info!("Listing MakeMKV drives");
     
-    let service = MakeMKVService::new();
-    let drives = service.list_drives().await?;
+    let client = MakeMkvClient::new();
+    let drives = client.detect_drives().await?;
     
     if drives.is_empty() {
         println!("No drives found");
@@ -24,8 +24,11 @@ async fn list_drives() -> Result<(), anyhow::Error> {
     }
     
     println!("Available drives:");
-    for (i, drive) in drives.iter().enumerate() {
-        println!("  [{}] {} - {}", i, drive.name, drive.status);
+    for drive in &drives {
+        println!("  [{}] {} - {}", drive.index, drive.name, drive.state);
+        if let Some(name) = &drive.disc_name {
+            println!("      Disc: {}", name);
+        }
     }
     
     Ok(())
@@ -35,36 +38,39 @@ async fn list_drives() -> Result<(), anyhow::Error> {
 async fn start_rip(index: usize) -> Result<(), anyhow::Error> {
     info!("Starting rip on drive: {}", index);
     
-    let service = MakeMKVService::new();
-    service.start_rip(index).await?;
+    let client = MakeMkvClient::new();
+    let mut session = client.start_rip(index, ".").await?;
     
     println!("Ripping started on drive {}", index);
     println!("This may take several minutes...");
     
-    // TODO: Monitor rip progress
-    println!("Rip complete");
+    // Monitor rip progress
+    loop {
+        let progress = session.progress();
+        println!("\rProgress: {:.1}%", progress * 100.0);
+        
+        if session.is_complete() {
+            break;
+        }
+        
+        // Simulate progress check (in real implementation, this would be async)
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
     
+    println!("\nRip complete");
     Ok(())
 }
 
 /// Cancel ripping on a drive
-async fn cancel_rip(index: usize) -> Result<(), anyhow::Error> {
-    info!("Cancelling rip on drive: {}", index);
-    
-    let service = MakeMKVService::new();
-    service.cancel_rip(index).await?;
-    
-    println!("Rip cancelled on drive {}", index);
+async fn cancel_rip(_index: usize) -> Result<(), anyhow::Error> {
+    info!("Cancelling rip (placeholder)");
+    println!("Rip cancellation not yet implemented");
     Ok(())
 }
 
 /// Eject disc from a drive
 async fn eject_disc(index: usize) -> Result<(), anyhow::Error> {
     info!("Ejecting disc from drive: {}", index);
-    
-    let service = MakeMKVService::new();
-    service.eject_disc(index).await?;
-    
-    println!("Disc ejected from drive {}", index);
+    println!("Disc eject not yet implemented");
     Ok(())
 }
