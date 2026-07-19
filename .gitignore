@@ -1,0 +1,24 @@
+# Rust
+/target/
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.rlib
+*.d
+
+# Documentation
+/target/doc/
+
+# Coverage
+*.profraw
+*.profdata
