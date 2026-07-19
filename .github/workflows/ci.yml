@@ -37,24 +37,28 @@ jobs:
         path: target
         key: ${{ runner.os }}-build-${{ hashFiles('**/Cargo.lock') }}
 
-    # 4. SETUP: Install Rust
+    # 4. SETUP: Install system dependencies for SQLx
+    - name: Install SQLite dev dependencies
+      run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+
+    # 5. SETUP: Install Rust
     - name: Install stable toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
         components: clippy, rustfmt
 
-    # 5. FORMAT CHECK: Ensure code style is consistent
+    # 6. FORMAT CHECK: Ensure code style is consistent
     - name: Check formatting
       run: cargo fmt --all --check
 
-    # 6. LINTING: Check for code smells and logic errors
+    # 7. LINTING: Check for code smells and logic errors
     - name: Clippy (Linting)
       run: cargo clippy --all-targets --all-features -- -D warnings
 
-    # 7. BUILD: Compile everything
+    # 8. BUILD: Compile everything
     - name: Build
       run: cargo build --verbose
 
-    # 8. TEST: Run the test suite
+    # 9. TEST: Run the test suite
     - name: Run tests
       run: cargo test --verbose
