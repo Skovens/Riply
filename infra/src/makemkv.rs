@@ -1,3 +1,4 @@
+use std::fmt;
 use tracing::info;
 
 /// MakeMKV client adapter - handles CLI interaction and drive management
@@ -13,14 +14,14 @@ impl MakeMkvClient {
     /// Detect available drives
     pub async fn detect_drives(&self) -> Result<Vec<DriveInfo>, anyhow::Error> {
         info!("Detecting drives");
-        // TODO: Implement drive detection
+        // TODO: Implement drive detection using MakeMKV CLI
         Ok(vec![])
     }
 
     /// Start a rip session
     pub async fn start_rip(&self, _drive_index: usize, _destination: &str) -> Result<RipSession, anyhow::Error> {
         info!("Starting rip session");
-        // TODO: Implement rip session
+        // TODO: Implement rip session using MakeMKV CLI
         Ok(RipSession)
     }
 
@@ -52,17 +53,53 @@ pub enum DriveState {
     Error,
 }
 
+impl fmt::Display for DriveState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DriveState::Empty => write!(f, "Empty"),
+            DriveState::Loading => write!(f, "Loading"),
+            DriveState::Ready => write!(f, "Ready"),
+            DriveState::Ripping => write!(f, "Ripping"),
+            DriveState::Complete => write!(f, "Complete"),
+            DriveState::Error => write!(f, "Error"),
+        }
+    }
+}
+
 /// A rip session
 pub struct RipSession;
 
 impl RipSession {
-    /// Get current progress
+    /// Get current progress (0.0 to 1.0)
     pub fn progress(&self) -> f64 {
+        // TODO: Implement actual progress tracking
         0.0
     }
 
     /// Check if session is complete
     pub fn is_complete(&self) -> bool {
+        // TODO: Implement actual completion check
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_drive_state_display() {
+        assert_eq!(format!("{}", DriveState::Empty), "Empty");
+        assert_eq!(format!("{}", DriveState::Ready), "Ready");
+        assert_eq!(format!("{}", DriveState::Ripping), "Ripping");
+        assert_eq!(format!("{}", DriveState::Complete), "Complete");
+        assert_eq!(format!("{}", DriveState::Error), "Error");
+    }
+
+    #[tokio::test]
+    async fn test_detect_drives_empty() {
+        let client = MakeMkvClient::new();
+        let drives = client.detect_drives().await.unwrap();
+        assert!(drives.is_empty());
     }
 }
