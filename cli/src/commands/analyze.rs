@@ -1,13 +1,13 @@
 use app::AnalyzerService;
-use core::FileRecord;
+use infra::Database;
 use tracing::info;
 
 /// Execute the analyze command
-pub async fn analyze_files() -> Result<(), anyhow::Error> {
+pub async fn analyze_files(db: &Database) -> Result<(), anyhow::Error> {
     info!("Analyzing scanned files");
     
-    // TODO: Load scanned records from database
-    let records: Vec<FileRecord> = Vec::new();
+    // Load scanned files from database
+    let records = db.get_files_by_status("Scanned").await?;
     
     if records.is_empty() {
         println!("No scanned files found. Run 'riply scan' first.");
@@ -27,6 +27,9 @@ pub async fn analyze_files() -> Result<(), anyhow::Error> {
         
         match result {
             Ok(updated_record) => {
+                // Save updated record to database
+                db.update_file(&updated_record).await?;
+                
                 match updated_record.status {
                     core::PipelineStatus::Matched => {
                         matched += 1;
@@ -56,6 +59,5 @@ pub async fn analyze_files() -> Result<(), anyhow::Error> {
     println!("  Needs review: {}", needs_review);
     println!("  Failed: {}", failed);
     
-    // TODO: Save updated records to database
     Ok(())
 }
