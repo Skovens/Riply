@@ -1,0 +1,60 @@
+name: Rust CI
+
+# 1. TRIGGERS: When should this run?
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+# 2. JOB: The actual work to be done
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    # 3. CACHING: Speed up future runs
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Cache cargo index
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Cache build directory
+      uses: actions/cache@v4
+      with:
+        path: target
+        key: ${{ runner.os }}-build-${{ hashFiles('**/Cargo.lock') }}
+
+    # 4. SETUP: Install Rust
+    - name: Install stable toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy, rustfmt
+
+    # 5. FORMAT CHECK: Ensure code style is consistent
+    - name: Check formatting
+      run: cargo fmt --all --check
+
+    # 6. LINTING: Check for code smells and logic errors
+    - name: Clippy (Linting)
+      run: cargo clippy --all-targets --all-features -- -D warnings
+
+    # 7. BUILD: Compile everything
+    - name: Build
+      run: cargo build --verbose
+
+    # 8. TEST: Run the test suite
+    - name: Run tests
+      run: cargo test --verbose
