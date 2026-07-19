@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
-use commands::{analyze_files, move_files, review_files, scan_directory, show_status};
-use infra::MakeMkvClient;
+use commands::{analyze_files, move_files, review_files, rip_command, scan_directory, show_status, RipCommand};
+use infra::{Config, Database};
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
@@ -39,14 +39,7 @@ enum Command {
         yolo: bool,
     },
     /// Move confirmed files to organized library
-    Move {
-        /// Movies destination directory
-        #[arg(short, long)]
-        movies_dir: Option<String>,
-        /// TV Shows destination directory
-        #[arg(short, long)]
-        tv_dir: Option<String>,
-    },
+    Move,
     /// Manage disc ripping
     Rip {
         /// Subcommand for rip operations
@@ -88,100 +81,46 @@ async fn main() -> anyhow::Result<()> {
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
 
+    // Load configuration
+    let config = match Config::load(&cli.config) {
+        Ok(config) => config,
+        Err(_) => {
+            info!("Configuration file not found, creating default");
+            Config::create_default(&cli.config)?;
+            Config::load(&cli.config)?
+        }
+    };
+
     info!("Riply starting");
     info!("Config file: {}", cli.config);
+    info!("Database: {}", config.database_path);
+
+    // Initialize database
+    let db = Database::new(&config.database_path).await?;
+    db.migrate().await?;
 
     // Execute command
     match cli.command {
         Command::Scan { directory } => {
-            scan_directory(&directory).await?;
+            scan_directory(&directory, &config).await?;
         }
         Command::Analyze => {
-            analyze_files().await?;
+            analyze_files(&db).await?;
         }
         Command::Review { yolo } => {
-            review_files(yolo).await?;
+            review_files(yolo, &db).await?;
         }
-        Command::Move { movies_dir, tv_dir } => {
-            move_files(movies_dir, tv_dir).await?;
+        Command::Move => {
+            move_files(&db, &config).await?;
         }
         Command::Rip { rip_command } => {
-            match rip_command {
-                RipCommand::List => list_drives().await?,
-                RipCommand::Start { index } => start_rip(index).await?,
-                RipCommand::Cancel { index } => cancel_rip(index).await?,
-                RipCommand::Eject { index } => eject_disc(index).await?,
-            }
+            rip_command(rip_command).await?;
         }
         Command::Status => {
-            show_status().await?;
+            show_status(&db).await?;
         }
     }
 
     info!("Riply finished");
-    Ok(())
-}
-
-/// List available MakeMKV drives
-async fn list_drives() -> Result<(), anyhow::Error> {
-    info!("Listing MakeMKV drives");
-    
-    let client = MakeMkvClient::new();
-    let drives = client.detect_drives().await?;
-    
-    if drives.is_empty() {
-        println!("No drives found");
-        return Ok(());
-    }
-    
-    println!("Available drives:");
-    for drive in &drives {
-        println!("  [{}] {} - {}", drive.index, drive.name, drive.state);
-        if let Some(name) = &drive.disc_name {
-            println!("      Disc: {}", name);
-        }
-    }
-    
-    Ok(())
-}
-
-/// Start ripping on a drive
-async fn start_rip(index: usize) -> Result<(), anyhow::Error> {
-    info!("Starting rip on drive: {}", index);
-    
-    let client = MakeMkvClient::new();
-    let mut session = client.start_rip(index, ".").await?;
-    
-    println!("Ripping started on drive {}", index);
-    println!("This may take several minutes...");
-    
-    // Monitor rip progress
-    loop {
-        let progress = session.progress();
-        println!("\rProgress: {:.1}%", progress * 100.0);
-        
-        if session.is_complete() {
-            break;
-        }
-        
-        // Simulate progress check (in real implementation, this would be async)
-        std::thread::sleep(std::time::Duration::from_secs(1));
-    }
-    
-    println!("\nRip complete");
-    Ok(())
-}
-
-/// Cancel ripping on a drive
-async fn cancel_rip(_index: usize) -> Result<(), anyhow::Error> {
-    info!("Cancelling rip (placeholder)");
-    println!("Rip cancellation not yet implemented");
-    Ok(())
-}
-
-/// Eject disc from a drive
-async fn eject_disc(index: usize) -> Result<(), anyhow::Error> {
-    info!("Ejecting disc from drive: {}", index);
-    println!("Disc eject not yet implemented");
     Ok(())
 }
