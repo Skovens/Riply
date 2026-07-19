@@ -1,13 +1,13 @@
 use app::AnalyzerService;
-use core::FileRecord;
+use infra::Database;
 use tracing::info;
 
 /// Execute the review command
-pub async fn review_files(yolo: bool) -> Result<(), anyhow::Error> {
+pub async fn review_files(yolo: bool, db: &Database) -> Result<(), anyhow::Error> {
     info!("Reviewing files (yolo={})", yolo);
     
-    // TODO: Load files that need review from database
-    let records: Vec<FileRecord> = Vec::new();
+    // Load files that need review from database
+    let records = db.get_files_by_status("Needs Review").await?;
     
     if records.is_empty() {
         println!("No files need review.");
@@ -30,7 +30,7 @@ pub async fn review_files(yolo: bool) -> Result<(), anyhow::Error> {
     
     if yolo {
         println!("YOLO mode enabled - confirming all files without review");
-        confirm_all(&records).await?;
+        confirm_all(&records, db).await?;
     } else {
         println!("Manual review mode:");
         println!("  Enter file numbers to confirm (comma-separated)");
@@ -45,15 +45,16 @@ pub async fn review_files(yolo: bool) -> Result<(), anyhow::Error> {
 }
 
 /// Confirm all files without individual review
-async fn confirm_all(records: &[FileRecord]) -> Result<(), anyhow::Error> {
+async fn confirm_all(records: &[core::FileRecord], db: &Database) -> Result<(), anyhow::Error> {
     info!("Confirming all {} files", records.len());
     
     for record in records {
         let mut updated = record.clone();
         updated.update_status(core::PipelineStatus::Confirmed);
+        db.update_file(&updated).await?;
         info!("Confirmed: {}", record.filename);
     }
     
-    println!("All files confirmed");
+    println!("All {} files confirmed", records.len());
     Ok(())
 }
