@@ -1,7 +1,9 @@
 use axum::{
     routing::{get, post},
     Router,
+    response::sse::{Event, Sse},
 };
+use tokio_stream::wrappers::ReceiverStream;
 use tracing::info;
 
 /// Create the API router with all endpoints
@@ -102,9 +104,8 @@ async fn cancel_rip(axum::extract::Path(index): axum::extract::Path<usize>) -> S
 }
 
 /// SSE endpoint for real-time updates
-async fn sse_endpoint() -> axum::response::sse::Sse<tokio_stream::wrappers::ReceiverStream<axum::response::sse::Event>> {
+async fn sse_endpoint() -> Sse<ReceiverStream<Event>> {
     use axum::response::sse::Event;
-    use tokio_stream::wrappers::ReceiverStream;
     use tokio::sync::mpsc;
     
     info!("SSE endpoint connected");
