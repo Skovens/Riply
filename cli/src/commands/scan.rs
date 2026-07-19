@@ -1,23 +1,37 @@
+use crate::core;
+use app::ScannerService;
+use std::path::Path;
 use tracing::info;
 
-/// Scan command - scans a directory for media files
-pub struct ScanCommand;
-
-impl ScanCommand {
-    /// Execute the scan command
-    pub async fn execute(&self, directory: &str) -> Result<(), anyhow::Error> {
-        info!("Executing scan command for directory: {}", directory);
-        
-        // TODO: Implement actual scan logic
-        // 1. Initialize scanner service
-        // 2. Scan directory for media files
-        // 3. Hash and probe each file
-        // 4. Insert records into database
-        // 5. Display progress and results
-        
-        println!("Scanning directory: {}", directory);
-        println!("Found 0 files");
-        
-        Ok(())
+/// Execute the scan command
+pub async fn scan_directory(directory: &str) -> Result<(), anyhow::Error> {
+    info!("Scanning directory: {}", directory);
+    
+    let path = Path::new(directory);
+    if !path.exists() {
+        return Err(anyhow::anyhow!("Directory does not exist: {}", directory));
     }
+    
+    let scanner = ScannerService::new();
+    let records = scanner.scan_directory(path).await?;
+    
+    if records.is_empty() {
+        println!("No media files found in {}", directory);
+        return Ok(());
+    }
+    
+    println!("Found {} media files:", records.len());
+    println!();
+    
+    for record in &records {
+        println!("  {} [{}]", record.filename, record.id);
+        println!("    Status: {}", record.status);
+        println!("    Size: {:?}", record.size);
+    }
+    
+    // TODO: Save records to database for later processing
+    println!();
+    println!("{} records saved to pipeline", records.len());
+    
+    Ok(())
 }
