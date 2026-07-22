@@ -52,7 +52,10 @@ impl PipelineStatus {
 
     /// Check if this status indicates success.
     pub fn is_successful(&self) -> bool {
-        matches!(self, PipelineStatus::Matched | PipelineStatus::Confirmed | PipelineStatus::Moved)
+        matches!(
+            self,
+            PipelineStatus::Matched | PipelineStatus::Confirmed | PipelineStatus::Moved
+        )
     }
 }
 

@@ -5,18 +5,13 @@ use std::fmt;
 ///
 /// This enum distinguishes between movies and TV shows,
 /// which affects how metadata is searched and how files are organized.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MediaType {
     /// A movie (film).
+    #[default]
     Movie,
     /// A TV show (series).
     Tv,
-}
-
-impl Default for MediaType {
-    fn default() -> Self {
-        MediaType::Movie
-    }
 }
 
 impl fmt::Display for MediaType {

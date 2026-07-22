@@ -1,12 +1,17 @@
-use crate::core;
-use std::fs;
-use std::path::Path;
-use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
+use std::fs;
+use std::hash::{Hash, Hasher};
+use std::path::Path;
 use tracing::info;
 
 /// Scanner service - orchestrates file scanning operations
 pub struct ScannerService;
+
+impl Default for ScannerService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ScannerService {
     /// Create a new scanner service
@@ -16,20 +21,23 @@ impl ScannerService {
     }
 
     /// Scan a directory for media files
-    pub async fn scan_directory(&self, path: &Path) -> Result<Vec<core::FileRecord>, anyhow::Error> {
+    pub async fn scan_directory(
+        &self,
+        path: &Path,
+    ) -> Result<Vec<riply_core::FileRecord>, anyhow::Error> {
         info!("Scanning directory: {:?}", path);
-        
+
         let mut records = Vec::new();
-        
+
         if !path.exists() {
             return Err(anyhow::anyhow!("Directory does not exist: {:?}", path));
         }
 
-        let mut entries = fs::read_dir(path)?;
-        while let Some(entry) = entries.next() {
+        let entries = fs::read_dir(path)?;
+        for entry in entries {
             let entry = entry?;
             let file_path = entry.path();
-            
+
             if file_path.is_file() {
                 if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
                     if is_media_file(ext) {
@@ -37,13 +45,18 @@ impl ScannerService {
                         let id = compute_id(&filename);
                         // Note: hash field is left empty for now. Actual file hashing
                         // will be implemented in Phase 2 when we integrate ffprobe/sha2.
-                        let record = core::FileRecord::new(id, file_path.clone(), filename, String::new());
+                        let record = riply_core::FileRecord::new(
+                            id,
+                            file_path.clone(),
+                            filename,
+                            String::new(),
+                        );
                         records.push(record);
                     }
                 }
             }
         }
-        
+
         info!("Found {} media files in {:?}", records.len(), path);
         Ok(records)
     }
@@ -58,7 +71,10 @@ impl ScannerService {
 
 /// Check if a file extension indicates media content
 fn is_media_file(ext: &str) -> bool {
-    matches!(ext.to_lowercase().as_str(), "mkv" | "mp4" | "avi" | "mov" | "m4v" | "webm")
+    matches!(
+        ext.to_lowercase().as_str(),
+        "mkv" | "mp4" | "avi" | "mov" | "m4v" | "webm"
+    )
 }
 
 /// Compute a deterministic ID from a filename
@@ -72,7 +88,6 @@ fn compute_id(filename: &str) -> String {
 mod tests {
     use super::*;
     use std::fs;
-    use std::io::Write;
     use tempfile::tempdir;
 
     #[test]
@@ -89,7 +104,7 @@ mod tests {
         let id1 = compute_id("movie.mkv");
         let id2 = compute_id("movie.mkv");
         let id3 = compute_id("other.mkv");
-        
+
         assert_eq!(id1, id2);
         assert_ne!(id1, id3);
     }
@@ -98,15 +113,15 @@ mod tests {
     async fn test_scan_directory() {
         let dir = tempdir().unwrap();
         let path = dir.path();
-        
+
         // Create test files
         fs::write(path.join("test.mkv"), "dummy").unwrap();
         fs::write(path.join("test.mp4"), "dummy").unwrap();
         fs::write(path.join("readme.txt"), "dummy").unwrap();
-        
+
         let scanner = ScannerService::new();
         let records = scanner.scan_directory(path).await.unwrap();
-        
+
         assert_eq!(records.len(), 2);
         assert!(records.iter().any(|r| r.filename == "test.mkv"));
         assert!(records.iter().any(|r| r.filename == "test.mp4"));

@@ -37,15 +37,15 @@ pub async fn rip_command(command: RipCommand) -> Result<(), anyhow::Error> {
 /// List available MakeMKV drives
 async fn list_drives() -> Result<(), anyhow::Error> {
     info!("Listing MakeMKV drives");
-    
+
     let client = MakeMkvClient::new();
     let drives = client.detect_drives().await?;
-    
+
     if drives.is_empty() {
         println!("No drives found");
         return Ok(());
     }
-    
+
     println!("Available drives:");
     for drive in &drives {
         println!("  [{}] {} - {}", drive.index, drive.name, drive.state);
@@ -53,33 +53,33 @@ async fn list_drives() -> Result<(), anyhow::Error> {
             println!("      Disc: {}", name);
         }
     }
-    
+
     Ok(())
 }
 
 /// Start ripping on a drive
 async fn start_rip(index: usize) -> Result<(), anyhow::Error> {
     info!("Starting rip on drive: {}", index);
-    
+
     let client = MakeMkvClient::new();
-    let mut session = client.start_rip(index, ".").await?;
-    
+    let session = client.start_rip(index, ".").await?;
+
     println!("Ripping started on drive {}", index);
     println!("This may take several minutes...");
-    
+
     // Monitor rip progress
     loop {
         let progress = session.progress();
         println!("\rProgress: {:.1}%", progress * 100.0);
-        
+
         if session.is_complete() {
             break;
         }
-        
+
         // Simulate progress check (in real implementation, this would be async)
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
-    
+
     println!("\nRip complete");
     Ok(())
 }

@@ -3,6 +3,12 @@ use tracing::info;
 /// Job scheduler - manages background tasks and progress channels
 pub struct JobScheduler;
 
+impl Default for JobScheduler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Represents a running job
 pub struct Job {
     pub id: String,

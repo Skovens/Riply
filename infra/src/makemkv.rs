@@ -4,6 +4,12 @@ use tracing::info;
 /// MakeMKV client adapter - handles CLI interaction and drive management
 pub struct MakeMkvClient;
 
+impl Default for MakeMkvClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MakeMkvClient {
     /// Create a new MakeMKV client
     pub fn new() -> Self {
@@ -19,7 +25,11 @@ impl MakeMkvClient {
     }
 
     /// Start a rip session
-    pub async fn start_rip(&self, _drive_index: usize, _destination: &str) -> Result<RipSession, anyhow::Error> {
+    pub async fn start_rip(
+        &self,
+        _drive_index: usize,
+        _destination: &str,
+    ) -> Result<RipSession, anyhow::Error> {
         info!("Starting rip session");
         // TODO: Implement rip session using MakeMKV CLI
         Ok(RipSession)

@@ -7,11 +7,12 @@ description.workspace = true
 license.workspace = true
 
 [dependencies]
-core = { path = "../core" }
+riply_core = { path = "../core", package = "core" }
 app = { path = "../app" }
 infra = { path = "../infra" }
 axum = { version = "0.7", features = ["macros"] }
 tokio = { workspace = true }
+tokio-stream = { version = "0.1", features = ["sync"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }

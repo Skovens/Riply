@@ -1,15 +1,14 @@
 use axum::{
+    response::sse::{Event, Sse},
     routing::{get, post},
     Router,
-    response::sse::{Event, Sse},
 };
-use tokio_stream::wrappers::ReceiverStream;
 use tracing::info;
 
 /// Create the API router with all endpoints
 pub fn create_router() -> Router {
     info!("Creating API router");
-    
+
     Router::new()
         // Health check
         .route("/health", get(health_check))
@@ -104,19 +103,21 @@ async fn cancel_rip(axum::extract::Path(index): axum::extract::Path<usize>) -> S
 }
 
 /// SSE endpoint for real-time updates
-async fn sse_endpoint() -> Sse<ReceiverStream<Event>> {
-    use axum::response::sse::Event;
+async fn sse_endpoint(
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>> {
     use tokio::sync::mpsc;
-    
+    use tokio_stream::wrappers::ReceiverStream;
+    use tokio_stream::StreamExt;
+
     info!("SSE endpoint connected");
-    
+
     let (tx, rx) = mpsc::channel(32);
-    
+
     // Send initial event
     tokio::spawn(async move {
         let _ = tx.send(Event::default().event("connected")).await;
     });
-    
-    Sse::new(ReceiverStream::new(rx))
-        .keep_alive(axum::response::sse::KeepAlive::new())
+
+    let stream = ReceiverStream::new(rx).map(Ok);
+    Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::new())
 }

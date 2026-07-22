@@ -11,7 +11,7 @@ name = "riply"
 path = "src/main.rs"
 
 [dependencies]
-core = { path = "../core" }
+riply_core = { path = "../core", package = "core" }
 app = { path = "../app" }
 infra = { path = "../infra" }
 clap = { workspace = true }

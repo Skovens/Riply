@@ -1,10 +1,15 @@
-use crate::core;
 use std::fs;
 use std::path::Path;
 use tracing::{info, warn};
 
 /// Mover service - orchestrates file moving operations
 pub struct MoverService;
+
+impl Default for MoverService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl MoverService {
     /// Create a new mover service
@@ -16,37 +21,43 @@ impl MoverService {
     /// Move a confirmed file to its organized location
     pub async fn move_file(
         &self,
-        file: &core::FileRecord,
+        file: &riply_core::FileRecord,
         movies_dir: &Path,
         tv_dir: &Path,
-    ) -> Result<core::FileRecord, anyhow::Error> {
+    ) -> Result<riply_core::FileRecord, anyhow::Error> {
         info!("Moving file: {}", file.filename);
-        
+
         if !file.is_ready_to_move() {
-            return Err(anyhow::anyhow!("File is not ready to move. Status: {:?}", file.status));
+            return Err(anyhow::anyhow!(
+                "File is not ready to move. Status: {:?}",
+                file.status
+            ));
         }
-        
+
         // Determine destination path
         let dest_path = self.calculate_destination(file, movies_dir, tv_dir)?;
-        
+
         // Create destination directory if it doesn't exist
         if let Some(parent) = dest_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        
+
         // Check if destination already exists
         if dest_path.exists() {
             warn!("Destination already exists: {:?}", dest_path);
-            return Err(anyhow::anyhow!("Destination already exists: {:?}", dest_path));
+            return Err(anyhow::anyhow!(
+                "Destination already exists: {:?}",
+                dest_path
+            ));
         }
-        
+
         // Move the file
         fs::rename(&file.path, &dest_path)?;
-        
+
         // Update the record
         let mut record = file.clone();
-        record.update_status(core::PipelineStatus::Moved);
-        
+        record.update_status(riply_core::PipelineStatus::Moved);
+
         info!("Successfully moved {} to {:?}", file.filename, dest_path);
         Ok(record)
     }
@@ -54,54 +65,56 @@ impl MoverService {
     /// Calculate the destination path for a file
     fn calculate_destination(
         &self,
-        file: &core::FileRecord,
+        file: &riply_core::FileRecord,
         movies_dir: &Path,
         tv_dir: &Path,
     ) -> Result<std::path::PathBuf, anyhow::Error> {
-        let title = file.canonical_title
+        let title = file
+            .canonical_title
             .clone()
             .or_else(|| file.suggested_title.clone())
             .ok_or_else(|| anyhow::anyhow!("No title available for file: {}", file.filename))?;
-        
+
         let year = file.canonical_year.or(file.suggested_year);
-        
+
         let mut dest_path = if file.media_type.is_tv() {
-            let series_name = file.series_name
-                .clone()
-                .unwrap_or_else(|| title.clone());
-            
-            let season = file.season_number
-                .unwrap_or(1);
-            
+            let series_name = file.series_name.clone().unwrap_or_else(|| title.clone());
+
+            let season = file.season_number.unwrap_or(1);
+
             // TV Show directory: tv_dir/Series Name/Season XX/
             let season_dir = format!("Season {:02}", season);
             tv_dir.join(&series_name).join(season_dir)
         } else {
-            // Movie directory: movies_dir/
-            movies_dir.to_path_buf()
+            // Movie directory: movies_dir/Title/
+            movies_dir.join(&title)
         };
-        
+
         // Add year to directory name if available
         if let Some(year) = year {
             let parent = dest_path.parent().unwrap_or(&dest_path).to_path_buf();
-            let base = dest_path.file_name().unwrap_or_default().to_string_lossy().to_string();
-            
+            let base = dest_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+
             // Check if directory already has year in name
             if !base.contains(&year.to_string()) {
                 dest_path = parent.join(format!("{} ({})", base, year));
             }
         }
-        
+
         // Add filename
         dest_path = dest_path.join(&file.filename);
-        
+
         Ok(dest_path)
     }
 
     /// Preview where files would be moved without actually moving them
     pub async fn preview_move(
         &self,
-        file: &core::FileRecord,
+        file: &riply_core::FileRecord,
         movies_dir: &Path,
         tv_dir: &Path,
     ) -> Result<std::path::PathBuf, anyhow::Error> {
@@ -112,17 +125,17 @@ impl MoverService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{PipelineStatus, MediaType};
-    use tempfile::tempdir;
+    use riply_core::{MediaType, PipelineStatus};
     use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn test_calculate_destination_movie() {
         let dir = tempdir().unwrap();
         let movies_dir = dir.path().join("movies");
         let tv_dir = dir.path().join("tv");
-        
-        let mut file = core::FileRecord::new(
+
+        let mut file = riply_core::FileRecord::new(
             "test".to_string(),
             std::path::PathBuf::from("/test/movie.mkv"),
             "movie.mkv".to_string(),
@@ -131,10 +144,12 @@ mod tests {
         file.canonical_title = Some("Test Movie".to_string());
         file.canonical_year = Some(2023);
         file.status = PipelineStatus::Confirmed;
-        
+
         let mover = MoverService::new();
-        let dest = mover.calculate_destination(&file, &movies_dir, &tv_dir).unwrap();
-        
+        let dest = mover
+            .calculate_destination(&file, &movies_dir, &tv_dir)
+            .unwrap();
+
         assert_eq!(dest, movies_dir.join("Test Movie (2023)").join("movie.mkv"));
     }
 
@@ -143,8 +158,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let movies_dir = dir.path().join("movies");
         let tv_dir = dir.path().join("tv");
-        
-        let mut file = core::FileRecord::new(
+
+        let mut file = riply_core::FileRecord::new(
             "test".to_string(),
             std::path::PathBuf::from("/test/show.s01e01.mkv"),
             "show.s01e01.mkv".to_string(),
@@ -156,11 +171,19 @@ mod tests {
         file.season_number = Some(1);
         file.episode_number = Some(1);
         file.status = PipelineStatus::Confirmed;
-        
+
         let mover = MoverService::new();
-        let dest = mover.calculate_destination(&file, &movies_dir, &tv_dir).unwrap();
-        
-        assert_eq!(dest, tv_dir.join("Test Show").join("Season 01").join("show.s01e01.mkv"));
+        let dest = mover
+            .calculate_destination(&file, &movies_dir, &tv_dir)
+            .unwrap();
+
+        assert_eq!(
+            dest,
+            tv_dir
+                .join("Test Show")
+                .join("Season 01")
+                .join("show.s01e01.mkv")
+        );
     }
 
     #[tokio::test]
@@ -168,12 +191,12 @@ mod tests {
         let dir = tempdir().unwrap();
         let movies_dir = dir.path().join("movies");
         let tv_dir = dir.path().join("tv");
-        
+
         // Create source file
         let source_path = dir.path().join("test.mkv");
         fs::write(&source_path, "test content").unwrap();
-        
-        let mut file = core::FileRecord::new(
+
+        let mut file = riply_core::FileRecord::new(
             "test".to_string(),
             source_path.clone(),
             "test.mkv".to_string(),
@@ -182,13 +205,16 @@ mod tests {
         file.canonical_title = Some("Test Movie".to_string());
         file.canonical_year = Some(2023);
         file.status = PipelineStatus::Confirmed;
-        
+
         let mover = MoverService::new();
         let result = mover.move_file(&file, &movies_dir, &tv_dir).await.unwrap();
-        
+
         // Verify file was moved
         assert!(!source_path.exists());
-        assert!(movies_dir.join("Test Movie (2023)").join("test.mkv").exists());
+        assert!(movies_dir
+            .join("Test Movie (2023)")
+            .join("test.mkv")
+            .exists());
         assert_eq!(result.status, PipelineStatus::Moved);
     }
 }

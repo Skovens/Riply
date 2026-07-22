@@ -1,5 +1,8 @@
 use clap::{Parser, Subcommand};
-use commands::{analyze_files, move_files, review_files, rip_command, scan_directory, show_status, RipCommand};
+use commands::{
+    analyze_files, move_files, review_files, rip_command as do_rip, scan_directory, show_status,
+    RipCommand,
+};
 use infra::{Config, Database};
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -50,34 +53,17 @@ enum Command {
     Status,
 }
 
-#[derive(Subcommand, Debug)]
-enum RipCommand {
-    /// List available drives
-    List,
-    /// Start ripping on a drive
-    Start {
-        /// Drive index to rip
-        index: usize,
-    },
-    /// Cancel ripping on a drive
-    Cancel {
-        /// Drive index to cancel
-        index: usize,
-    },
-    /// Eject disc from a drive
-    Eject {
-        /// Drive index to eject
-        index: usize,
-    },
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     // Initialize logging
     let subscriber = FmtSubscriber::builder()
-        .with_max_level(if cli.verbose { Level::DEBUG } else { Level::INFO })
+        .with_max_level(if cli.verbose {
+            Level::DEBUG
+        } else {
+            Level::INFO
+        })
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
 
@@ -114,7 +100,7 @@ async fn main() -> anyhow::Result<()> {
             move_files(&db, &config).await?;
         }
         Command::Rip { rip_command } => {
-            rip_command(rip_command).await?;
+            do_rip(rip_command).await?;
         }
         Command::Status => {
             show_status(&db).await?;

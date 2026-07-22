@@ -33,10 +33,10 @@ impl Config {
     /// Load configuration from a TOML file
     pub fn load(path: &str) -> Result<Self, anyhow::Error> {
         info!("Loading configuration from: {}", path);
-        
+
         let content = std::fs::read_to_string(path)?;
         let config: Config = toml::from_str(&content)?;
-        
+
         info!("Configuration loaded successfully");
         Ok(config)
     }
@@ -44,10 +44,10 @@ impl Config {
     /// Save configuration to a TOML file
     pub fn save(&self, path: &str) -> Result<(), anyhow::Error> {
         info!("Saving configuration to: {}", path);
-        
+
         let content = toml::to_string_pretty(self)?;
         std::fs::write(path, content)?;
-        
+
         info!("Configuration saved successfully");
         Ok(())
     }
@@ -92,7 +92,7 @@ mod tests {
     fn test_save_and_load_config() {
         let dir = tempdir().unwrap();
         let config_path = dir.path().join("config.toml");
-        
+
         let config = Config {
             database_path: "test.db".to_string(),
             scan_directory: Some("/test".to_string()),
@@ -100,13 +100,13 @@ mod tests {
             tv_directory: "tv".to_string(),
             verbose: true,
         };
-        
+
         // Save config
         config.save(config_path.to_str().unwrap()).unwrap();
-        
+
         // Load config
         let loaded = Config::load(config_path.to_str().unwrap()).unwrap();
-        
+
         assert_eq!(loaded.database_path, "test.db");
         assert_eq!(loaded.scan_directory, Some("/test".to_string()));
         assert_eq!(loaded.movies_directory, "movies");
@@ -118,12 +118,12 @@ mod tests {
     fn test_create_default_config() {
         let dir = tempdir().unwrap();
         let config_path = dir.path().join("config.toml");
-        
+
         Config::create_default(config_path.to_str().unwrap()).unwrap();
-        
+
         // Verify file was created
         assert!(config_path.exists());
-        
+
         // Verify we can load it
         let config = Config::load(config_path.to_str().unwrap()).unwrap();
         assert_eq!(config.database_path, "riply.db");

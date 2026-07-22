@@ -4,10 +4,3 @@
 # Allow certain patterns that are sometimes necessary
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
-
-# Disallow unnecessary clones
-type-complexity = "warn"
-too-many-lines = "warn"
-
-# Enable all lints by default
-all = true

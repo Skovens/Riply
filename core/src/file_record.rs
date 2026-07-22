@@ -16,9 +16,9 @@ pub struct FileRecord {
     /// File name (without path).
     pub filename: String,
     /// File size in bytes.
-    pub size: Option<u64>,
+    pub size: Option<i64>,
     /// Duration in seconds (from ffprobe).
-    pub duration: Option<u64>,
+    pub duration: Option<i64>,
     /// File hash for identification.
     pub hash: String,
     /// Current pipeline status.
@@ -64,9 +64,9 @@ pub struct FileRecord {
 impl FileRecord {
     /// Create a new FileRecord for a scanned file.
     pub fn new(id: String, path: PathBuf, filename: String, hash: String) -> Self {
-        use chrono::{DateTime, Utc};
+        use chrono::Utc;
         let now = Utc::now().to_rfc3339();
-        
+
         FileRecord {
             id,
             path,
@@ -91,7 +91,7 @@ impl FileRecord {
             subtitle_text: None,
             duplicate_path: None,
             reviewed: false,
-            created_at: now,
+            created_at: now.clone(),
             updated_at: now,
         }
     }
