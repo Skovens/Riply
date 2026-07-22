@@ -277,6 +277,50 @@ impl Database {
             _ => riply_core::MediaType::default(),
         }
     }
+
+    /// Get a single file record by ID
+    pub async fn get_file_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<riply_core::FileRecord>, anyhow::Error> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+                id, path, filename, size, duration, hash, status,
+                suggested_title, suggested_year, confidence,
+                canonical_title, canonical_year, tmdb_id,
+                content_type, media_type, series_name,
+                season_number, episode_number, episode_title,
+                source, subtitle_text, duplicate_path,
+                reviewed, created_at, updated_at
+            FROM files
+            WHERE id = ?
+            "#,
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|r| self.row_to_file_record(&r)).transpose()
+    }
+
+    /// Delete a file record by ID
+    pub async fn delete_file(&self, id: &str) -> Result<(), anyhow::Error> {
+        sqlx::query("DELETE FROM files WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Count files by status
+    pub async fn count_files_by_status(&self, status: &str) -> Result<i64, anyhow::Error> {
+        let row = sqlx::query("SELECT COUNT(*) as count FROM files WHERE status = ?")
+            .bind(status)
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(row.try_get("count")?)
+    }
 }
 
 #[cfg(test)]

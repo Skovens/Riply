@@ -13,6 +13,7 @@ infra = { path = "../infra" }
 axum = { version = "0.7", features = ["macros"] }
 tokio = { workspace = true }
 tokio-stream = { version = "0.1", features = ["sync"] }
+async-stream = "0.3"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }

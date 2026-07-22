@@ -1,48 +1,57 @@
 use axum::response::sse::Event;
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
+use tokio::sync::broadcast;
 use tracing::info;
 
-/// SSE manager for broadcasting progress updates
+/// SSE manager for broadcasting progress updates to all connected clients
+#[derive(Clone)]
 pub struct SseManager {
-    tx: mpsc::Sender<Event>,
+    tx: broadcast::Sender<String>,
 }
 
 impl SseManager {
-    /// Create a new SSE manager
-    pub fn new() -> (Self, ReceiverStream<Event>) {
-        info!("Creating SSE manager");
-        let (tx, rx) = mpsc::channel(32);
-        (SseManager { tx }, ReceiverStream::new(rx))
+    /// Create a new SSE manager with a broadcast channel
+    pub fn new(capacity: usize) -> Self {
+        info!("Creating SSE manager with capacity {}", capacity);
+        let (tx, _) = broadcast::channel(capacity);
+        SseManager { tx }
     }
 
-    /// Send a progress update
-    pub async fn send_progress(&self, message: &str) -> Result<(), mpsc::error::SendError<Event>> {
-        info!("Sending SSE progress: {}", message);
-        self.tx.send(Event::default().data(message)).await
+    /// Subscribe to SSE events (returns a receiver for new connections)
+    pub fn subscribe(&self) -> broadcast::Receiver<String> {
+        self.tx.subscribe()
     }
 
-    /// Send a status update
-    pub async fn send_status(&self, status: &str) -> Result<(), mpsc::error::SendError<Event>> {
-        info!("Sending SSE status: {}", status);
-        self.tx
-            .send(Event::default().event("status").data(status))
-            .await
+    /// Broadcast a progress update
+    pub fn send_progress(&self, message: &str) {
+        let _ = self.tx.send(format!("data:{}", message));
     }
 
-    /// Send a log message
-    pub async fn send_log(
-        &self,
-        level: &str,
-        message: &str,
-    ) -> Result<(), mpsc::error::SendError<Event>> {
-        info!("Sending SSE log: [{}] {}", level, message);
-        self.tx
-            .send(
+    /// Broadcast a status update event
+    pub fn send_status(&self, status: &str) {
+        let _ = self.tx.send(format!("event:status\ndata:{}", status));
+    }
+
+    /// Broadcast a log message
+    pub fn send_log(&self, level: &str, message: &str) {
+        let _ = self
+            .tx
+            .send(format!("event:log\ndata:{}:{}", level, message));
+    }
+
+    /// Convert a raw broadcast message into an SSE Event
+    pub fn message_to_event(msg: &str) -> Event {
+        if let Some((header, body)) = msg.split_once('\n') {
+            if let Some(event_name) = header.strip_prefix("event:") {
                 Event::default()
-                    .event("log")
-                    .data(format!("{}:{}", level, message)),
-            )
-            .await
+                    .event(event_name)
+                    .data(body.strip_prefix("data:").unwrap_or(body))
+            } else {
+                Event::default().data(msg)
+            }
+        } else if let Some(body) = msg.strip_prefix("data:") {
+            Event::default().data(body)
+        } else {
+            Event::default().data(msg)
+        }
     }
 }
