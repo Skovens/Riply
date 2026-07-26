@@ -10,6 +10,14 @@ pub struct MetadataMatch {
     pub year: Option<u32>,
     pub tmdb_id: Option<i32>,
     pub is_tv: bool,
+    /// Series name (for TV shows, may differ from search query)
+    pub series_name: Option<String>,
+    /// Season number (if known from filename or API)
+    pub season_number: Option<u32>,
+    /// Episode number (if known from filename or API)
+    pub episode_number: Option<u32>,
+    /// Episode title (from TMDb episode details)
+    pub episode_title: Option<String>,
 }
 
 /// Port for searching external metadata APIs (TMDb, OMDb, etc.)

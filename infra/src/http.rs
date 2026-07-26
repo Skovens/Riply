@@ -44,6 +44,21 @@ struct OmdbResponse {
     response: Option<String>,
 }
 
+/// TMDb episode detail result
+#[derive(Debug, serde::Deserialize)]
+pub struct TmdbEpisodeDetail {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub overview: Option<String>,
+    #[serde(default)]
+    pub season_number: Option<u32>,
+    #[serde(default)]
+    pub episode_number: Option<u32>,
+    #[serde(default)]
+    pub air_date: Option<String>,
+}
+
 impl HttpClient {
     pub fn new(tmdb_api_key: Option<String>, omdb_api_key: Option<String>) -> Self {
         info!("Initializing HTTP client");
@@ -122,6 +137,10 @@ impl HttpClient {
                     .and_then(|d| d.split('-').next()?.parse().ok()),
                 tmdb_id: Some(r.id),
                 is_tv: false,
+                series_name: None,
+                season_number: None,
+                episode_number: None,
+                episode_title: None,
             })
             .collect();
 
@@ -159,6 +178,10 @@ impl HttpClient {
                     .and_then(|d| d.split('-').next()?.parse().ok()),
                 tmdb_id: Some(r.id),
                 is_tv: true,
+                series_name: None,
+                season_number: None,
+                episode_number: None,
+                episode_title: None,
             })
             .collect();
 
@@ -199,10 +222,89 @@ impl HttpClient {
                 year,
                 tmdb_id: None,
                 is_tv: false,
+                series_name: None,
+                season_number: None,
+                episode_number: None,
+                episode_title: None,
             }]);
         }
 
         Ok(vec![])
+    }
+
+    /// Search OMDb for TV series
+    pub async fn search_omdb_tv(
+        &self,
+        query: &str,
+        year: Option<u32>,
+    ) -> Result<Vec<MetadataMatch>, anyhow::Error> {
+        let api_key = match &self.omdb_api_key {
+            Some(key) => key.clone(),
+            None => return Ok(vec![]),
+        };
+
+        let mut params = HashMap::new();
+        params.insert("apikey".to_string(), api_key);
+        params.insert("t".to_string(), query.to_string());
+        params.insert("type".to_string(), "series".to_string());
+        if let Some(y) = year {
+            params.insert("y".to_string(), y.to_string());
+        }
+
+        let url = format!("{}/", self.omdb_base_url);
+        let resp: OmdbResponse = self
+            .client
+            .get(&url)
+            .query(&params)
+            .send()
+            .await?
+            .json()
+            .await?;
+
+        if resp.response.as_deref() == Some("True") {
+            let year = resp.year.as_ref().and_then(|y| y.trim().parse().ok());
+            return Ok(vec![MetadataMatch {
+                title: resp.title.unwrap_or_default(),
+                year,
+                tmdb_id: None,
+                is_tv: true,
+                series_name: None,
+                season_number: None,
+                episode_number: None,
+                episode_title: None,
+            }]);
+        }
+
+        Ok(vec![])
+    }
+
+    /// Fetch episode details from TMDb for a specific TV show season/episode.
+    /// Requires the TMDb show ID, season number, and episode number.
+    pub async fn fetch_tmdb_episode(
+        &self,
+        tmdb_id: i32,
+        season: u32,
+        episode: u32,
+    ) -> Result<Option<TmdbEpisodeDetail>, anyhow::Error> {
+        let api_key = match &self.tmdb_api_key {
+            Some(key) => key.clone(),
+            None => return Ok(None),
+        };
+
+        let url = format!(
+            "{}/tv/{}/season/{}/episode/{}",
+            self.tmdb_base_url, tmdb_id, season, episode
+        );
+        let params = HashMap::from([("api_key".to_string(), api_key)]);
+
+        let resp = self.client.get(&url).query(&params).send().await?;
+
+        if !resp.status().is_success() {
+            return Ok(None);
+        }
+
+        let detail: TmdbEpisodeDetail = resp.json().await?;
+        Ok(Some(detail))
     }
 }
 
@@ -246,7 +348,13 @@ impl MetadataSearcher for HttpClient {
         let media_type = media_type.clone();
         Box::pin(async move {
             let mut results = match media_type {
-                MediaType::Tv => self.search_tmdb_tv(&query).await?,
+                MediaType::Tv => {
+                    let mut tv = self.search_tmdb_tv(&query).await?;
+                    if tv.is_empty() {
+                        tv = self.search_omdb_tv(&query, year).await?;
+                    }
+                    tv
+                }
                 MediaType::Movie => {
                     let mut movies = self.search_tmdb_movies(&query, year).await?;
                     if movies.is_empty() {

@@ -1,155 +1,67 @@
 # Plan: Wire Scan/Analyze/Move Pipeline to Web UI
 
-## Overview
+## Status: COMPLETE
 
-The web dashboard has header buttons (Scan, Analyze, Move) that are dead. The
-`JobScheduler` is built but not wired. Goal: make the web UI fully functional
-for the core pipeline.
-
----
-
-## Phase 1: Backend — Add JobScheduler to AppState
-
-**File: `web/src/api.rs`**
-
-1. Add `scheduler: Arc<JobScheduler>` and `db: Arc<Database>` to `AppState`
-2. Add `frontend: Option<Arc<Frontend>>` (already exists)
-3. Update `create_router` to accept `AppState` directly (already does)
+All phases implemented and verified. The web UI is fully functional for the
+core pipeline. See commit history for details.
 
 ---
 
-## Phase 2: Backend — Pipeline API Endpoints
+## What Was Built
 
-**File: `web/src/api.rs`**
+### Backend
+- `JobScheduler` wired into `AppState` for scan/analyze/move/rip jobs
+- `POST /api/scan`, `POST /api/analyze`, `POST /api/move` — background jobs
+- `GET /api/jobs`, `GET /api/jobs/:id`, `POST /api/jobs/:id/cancel` — job management
+- `POST /api/review/:id/accept`, `POST /api/review/:id/reject` — pipeline state enforcement
+- Config persistence to disk via `PUT /api/config`
+- `GET /api/drives` — returns error status instead of swallowing
+- `GET /api/move/status` — confirmed/moved counts for dashboard
+- SSE events standardized: `event:status`, `event:progress`, `event:log`
 
-### `POST /api/scan`
-- Body: `{ "directory": "/path/to/scan" }`
-- Validates directory exists
-- Calls `JobScheduler::start_scan_job` with a closure that:
-  - Uses `ScannerService::scan_directory` to scan
-  - Saves each record to DB via `Database::save_file`
-  - Reports progress via `ProgressHandle`
-  - Checks `CancellationToken` periodically
-- Returns `{ "job_id": "job_1", "status": "Queued" }`
+### Frontend
+- Jobs component with progress bars, cancel buttons, auto-refresh
+- Files component with pagination and status filter
+- Review component with accept/reject queue
+- Ripper component with drive list and rip/cancel
+- Dashboard with 5 stat cards (Scanned, Matched, Review, Confirmed, Moved)
+- Header buttons wired to trigger pipeline actions
+- Hash-based routing: `#/`, `#/files`, `#/review`, `#/ripper`, `#/jobs`
+- Shared `utils.js` with `escapeHtml`, `formatSize`, `statusColor`
 
-### `POST /api/analyze`
-- No body needed (analyzes all `Scanned` status files from DB)
-- Calls `JobScheduler::start_analyze_job` with a closure that:
-  - Loads files with status "Scanned" from DB
-  - For each: runs `AnalyzerService::analyze_file`
-  - Saves updated records to DB
-  - Reports progress
-- Returns `{ "job_id": "job_2", "status": "Queued" }`
-
-### `POST /api/move`
-- Body: `{ "movies_dir": "/path", "tv_dir": "/path" }` (optional, falls back to config)
-- Calls `JobScheduler::start_move_job` with a closure that:
-  - Loads files with status "Confirmed" from DB
-  - For each: runs `MoverService::move_file`
-  - Saves updated records to DB
-  - Reports progress
-- Returns `{ "job_id": "job_3", "status": "Queued" }`
-
-### `GET /api/jobs`
-- Returns `Vec<JobInfo>` from scheduler
-
-### `GET /api/jobs/:id`
-- Returns `JobInfo` for specific job
-
-### `POST /api/jobs/:id/cancel`
-- Calls `JobScheduler::cancel_job`
-- Returns `{ "ok": true }`
+### Correctness Fixes
+- `start_move` converted to background job (was blocking HTTP)
+- `start_rip` accepts destination from request body
+- Division-by-zero in rip progress fixed
+- Rescan preserves review decisions (INSERT OR IGNORE + UPDATE)
+- `hash_file` uses `spawn_blocking` (was blocking tokio runtime)
+- CLI `riply status` uses single GROUP BY query (was 12 redundant queries)
+- API keys configurable via `PUT /api/config`
+- OMDb hardcoded `type=movie` removed
 
 ---
 
-## Phase 3: Frontend — API Client Methods
-
-**File: `web/static/js/api.js`**
-
-Add methods:
-- `scanDirectory(directory)` — POST /api/scan
-- `analyzeFiles()` — POST /api/analyze
-- `moveFiles(moviesDir, tvDir)` — POST /api/move
-- `getJobs()` — GET /api/jobs
-- `getJob(id)` — GET /api/jobs/:id
-- `cancelJob(id)` — POST /api/jobs/:id/cancel
-
----
-
-## Phase 4: Frontend — Jobs Component
-
-**File: `web/static/js/components/jobs.js`**
-
-New component showing:
-- Active jobs with progress bars
-- Completed/failed/cancelled jobs
-- Cancel button for running jobs
-- Auto-refreshes via SSE or polling
-
----
-
-## Phase 5: Frontend — Wire Header Buttons
-
-**File: `web/static/js/app.js`**
-
-- Scan button → prompts for directory (default: config `scan_directory`)
-- Analyze button → calls analyze API
-- Move button → confirms, then calls move API
-- All show toast notifications on success/failure
-- Navigate to Jobs view after triggering
-
----
-
-## Phase 6: Frontend — Navigation
-
-**File: `web/static/js/app.js`**
-
-Hash-based routing:
-- `#/` → Dashboard
-- `#/files` → Files list
-- `#/review` → Review queue
-- `#/ripper` → Drive/rip control
-- `#/jobs` → Job list
-
-Add nav links to sidebar/header.
-
----
-
-## Phase 7: Fix Ancillary Issues
-
-1. **Config persistence** — `PUT /api/config` should write to disk via `Config::save`
-2. **`riply status`** — Query actual backends instead of hardcoded zeros
-3. **SSE events** — Broadcast job started/completed/failed events
-
----
-
-## Files to Modify
+## Files Modified
 
 | File | Changes |
 |------|---------|
-| `web/src/api.rs` | Add scheduler+db to AppState, 6 new endpoints |
-| `web/static/js/api.js` | 6 new API methods |
-| `web/static/js/app.js` | Button handlers, navigation, routing |
-| `web/static/js/components/jobs.js` | New jobs list component |
-| `web/static/index.html` | Jobs nav link, jobs view container |
-| `web/static/css/components.css` | Jobs component styles |
-
-## Files to Read (reference)
-
-| File | Why |
-|------|-----|
-| `app/src/jobs.rs` | JobScheduler API |
-| `app/src/scanner.rs` | ScannerService::scan_directory |
-| `app/src/analyzer.rs` | AnalyzerService::analyze_file |
-| `app/src/mover.rs` | MoverService::move_file |
-| `infra/src/database.rs` | Database methods |
-| `infra/src/config.rs` | Config fields |
-
----
-
-## Verification
-
-1. `cargo fmt && cargo clippy --all && cargo build --all && cargo test --all`
-2. Manual test: start server, click Scan/Analyze/Move buttons, verify jobs appear
-3. Test cancellation via UI
-4. Verify SSE events fire for job state changes
+| `web/src/api.rs` | All API endpoints, AppState, static file embedding |
+| `web/src/sse.rs` | Standardized SSE event format |
+| `web/src/lib.rs` | Public exports |
+| `web/static/js/app.js` | Routing, header buttons, toast notifications |
+| `web/static/js/api.js` | API client methods |
+| `web/static/js/store.js` | State management |
+| `web/static/js/utils.js` | Shared helpers (NEW) |
+| `web/static/js/components/dashboard.js` | Dashboard with 5 stat cards |
+| `web/static/js/components/files.js` | Paginated file list |
+| `web/static/js/components/review.js` | Review queue |
+| `web/static/js/components/jobs.js` | Job list with progress |
+| `web/static/js/components/ripper.js` | Drive list, rip/cancel |
+| `web/static/css/layout.css` | Nav link styles, grid--5 |
+| `web/static/css/components.css` | Progress, job, drive styles |
+| `app/src/scanner.rs` | spawn_blocking for hash_file |
+| `app/src/jobs.rs` | JobScheduler (already existed) |
+| `cli/src/commands/status.rs` | GROUP BY query optimization |
+| `cli/src/main.rs` | Pass config_path to serve |
+| `infra/src/db.rs` | count_files_by_status_all, save_file preserves reviews |
+| `infra/src/http.rs` | OMDb type param removed |
