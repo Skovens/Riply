@@ -76,10 +76,7 @@ impl ScannerService {
     }
 
     /// Process a single file: hash it, read metadata, build a FileRecord.
-    fn process_file(
-        &self,
-        path: &Path,
-    ) -> Result<riply_core::FileRecord, anyhow::Error> {
+    fn process_file(&self, path: &Path) -> Result<riply_core::FileRecord, anyhow::Error> {
         let filename = path
             .file_name()
             .ok_or_else(|| anyhow::anyhow!("No filename for {:?}", path))?

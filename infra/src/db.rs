@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use sqlx::{Row, sqlite::SqlitePoolOptions};
+use sqlx::{sqlite::SqlitePoolOptions, Row};
 use tracing::info;
 
 /// Database adapter - handles SQLite connections and queries
@@ -18,15 +18,12 @@ impl Database {
             .max_connections(5)
             .after_connect(|conn, _meta| {
                 Box::pin(async move {
-                    sqlx::query("PRAGMA journal_mode=WAL")
-                        .execute(conn)
-                        .await?;
+                    sqlx::query("PRAGMA journal_mode=WAL").execute(conn).await?;
                     Ok(())
                 })
             })
             .connect_with(
-                sqlx::sqlite::SqliteConnectOptions::from_str(&url)?
-                    .create_if_missing(true),
+                sqlx::sqlite::SqliteConnectOptions::from_str(&url)?.create_if_missing(true),
             )
             .await?;
 

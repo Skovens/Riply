@@ -4,7 +4,7 @@ use tempfile::NamedTempFile;
 use tokio::sync::RwLock;
 
 use infra::{Config, Database};
-use web::{AppState, SseManager, create_router};
+use web::{create_router, AppState, SseManager};
 
 struct TestContext {
     addr: std::net::SocketAddr,
@@ -59,9 +59,7 @@ async fn get(ctx: &TestContext, uri: &str) -> (u16, Value) {
     let resp = reqwest::get(&url).await.unwrap();
     let status = resp.status().as_u16();
     let text = resp.text().await.unwrap();
-    let body = serde_json::from_str(&text).unwrap_or_else(|_| {
-        serde_json::json!({ "raw": text })
-    });
+    let body = serde_json::from_str(&text).unwrap_or_else(|_| serde_json::json!({ "raw": text }));
     (status, body)
 }
 
@@ -75,9 +73,7 @@ async fn post(ctx: &TestContext, uri: &str, body: Value) -> (u16, Value) {
         .unwrap();
     let status = resp.status().as_u16();
     let text = resp.text().await.unwrap();
-    let body = serde_json::from_str(&text).unwrap_or_else(|_| {
-        serde_json::json!({ "raw": text })
-    });
+    let body = serde_json::from_str(&text).unwrap_or_else(|_| serde_json::json!({ "raw": text }));
     (status, body)
 }
 
@@ -91,28 +87,25 @@ async fn put(ctx: &TestContext, uri: &str, body: Value) -> (u16, Value) {
         .unwrap();
     let status = resp.status().as_u16();
     let text = resp.text().await.unwrap();
-    let body = serde_json::from_str(&text).unwrap_or_else(|_| {
-        serde_json::json!({ "raw": text })
-    });
+    let body = serde_json::from_str(&text).unwrap_or_else(|_| serde_json::json!({ "raw": text }));
     (status, body)
 }
 
 async fn delete(ctx: &TestContext, uri: &str) -> (u16, Value) {
     let url = format!("http://{}{}", ctx.addr, uri);
-    let resp = reqwest::Client::new()
-        .delete(&url)
-        .send()
-        .await
-        .unwrap();
+    let resp = reqwest::Client::new().delete(&url).send().await.unwrap();
     let status = resp.status().as_u16();
     let text = resp.text().await.unwrap();
-    let body = serde_json::from_str(&text).unwrap_or_else(|_| {
-        serde_json::json!({ "raw": text })
-    });
+    let body = serde_json::from_str(&text).unwrap_or_else(|_| serde_json::json!({ "raw": text }));
     (status, body)
 }
 
-async fn seed_file(ctx: &TestContext, id: &str, filename: &str, status: riply_core::PipelineStatus) {
+async fn seed_file(
+    ctx: &TestContext,
+    id: &str,
+    filename: &str,
+    status: riply_core::PipelineStatus,
+) {
     let mut file = riply_core::FileRecord::new(
         id.to_string(),
         std::path::PathBuf::from(format!("/test/{}", filename)),
@@ -281,16 +274,24 @@ async fn test_reject_file() {
 #[tokio::test]
 async fn test_accept_file_not_found() {
     let ctx = setup().await;
-    let (status, _) =
-        post(&ctx, "/api/review/nonexistent/accept", serde_json::json!({})).await;
+    let (status, _) = post(
+        &ctx,
+        "/api/review/nonexistent/accept",
+        serde_json::json!({}),
+    )
+    .await;
     assert_eq!(status, 404);
 }
 
 #[tokio::test]
 async fn test_reject_file_not_found() {
     let ctx = setup().await;
-    let (status, _) =
-        post(&ctx, "/api/review/nonexistent/reject", serde_json::json!({})).await;
+    let (status, _) = post(
+        &ctx,
+        "/api/review/nonexistent/reject",
+        serde_json::json!({}),
+    )
+    .await;
     assert_eq!(status, 404);
 }
 
@@ -360,7 +361,10 @@ async fn test_start_rip_stub() {
     let ctx = setup().await;
     let (status, body) = post(&ctx, "/api/ripper/0/start", serde_json::json!({})).await;
     assert_eq!(status, 200);
-    assert!(body["data"].as_str().unwrap().contains("not yet implemented"));
+    assert!(body["data"]
+        .as_str()
+        .unwrap()
+        .contains("not yet implemented"));
 }
 
 #[tokio::test]
@@ -368,7 +372,10 @@ async fn test_cancel_rip_stub() {
     let ctx = setup().await;
     let (status, body) = post(&ctx, "/api/ripper/0/cancel", serde_json::json!({})).await;
     assert_eq!(status, 200);
-    assert!(body["data"].as_str().unwrap().contains("not yet implemented"));
+    assert!(body["data"]
+        .as_str()
+        .unwrap()
+        .contains("not yet implemented"));
 }
 
 // ===== Pagination =====
