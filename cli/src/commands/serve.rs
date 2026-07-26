@@ -18,10 +18,15 @@ pub async fn serve(
 
     info!("Starting web server on {}", addr);
 
+    let mkv_client = infra::MakeMkvClient::new(config.makemkvcon_path.as_deref())
+        .ok()
+        .map(Arc::new);
+
     let state = Arc::new(AppState {
         db: Arc::new(db),
         config: Arc::new(RwLock::new(config)),
         sse: SseManager::new(256),
+        mkv_client,
     });
 
     let router = web::create_router(state);

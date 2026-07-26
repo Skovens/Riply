@@ -19,6 +19,9 @@ pub struct Config {
     pub tmdb_api_key: Option<String>,
     /// OMDb API key (optional, fallback metadata source)
     pub omdb_api_key: Option<String>,
+    /// Path to makemkvcon binary (auto-detected if not set)
+    #[serde(default)]
+    pub makemkvcon_path: Option<String>,
     /// Web server bind address
     #[serde(default = "default_host")]
     pub host: String,
@@ -45,6 +48,7 @@ impl Default for Config {
             verbose: false,
             tmdb_api_key: None,
             omdb_api_key: None,
+            makemkvcon_path: None,
             host: default_host(),
             port: default_port(),
         }
@@ -125,6 +129,7 @@ mod tests {
             verbose: true,
             tmdb_api_key: None,
             omdb_api_key: None,
+            makemkvcon_path: None,
             host: "127.0.0.1".to_string(),
             port: 8080,
         };

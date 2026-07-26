@@ -23,6 +23,7 @@ async fn setup() -> TestContext {
         db: Arc::new(db),
         config: Arc::new(RwLock::new(Config::default())),
         sse: SseManager::new(16),
+        mkv_client: None,
     });
 
     let router = create_router(state.clone());
@@ -357,14 +358,11 @@ async fn test_list_drives() {
 }
 
 #[tokio::test]
-async fn test_start_rip_stub() {
+async fn test_start_rip_no_makemkv() {
     let ctx = setup().await;
-    let (status, body) = post(&ctx, "/api/ripper/0/start", serde_json::json!({})).await;
-    assert_eq!(status, 200);
-    assert!(body["data"]
-        .as_str()
-        .unwrap()
-        .contains("not yet implemented"));
+    let (status, _body) = post(&ctx, "/api/ripper/0/start", serde_json::json!({})).await;
+    // Returns 503 when MakeMKV is not installed (mkv_client is None in test)
+    assert_eq!(status, 503);
 }
 
 #[tokio::test]

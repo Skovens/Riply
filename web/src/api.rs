@@ -19,6 +19,7 @@ pub struct AppState {
     pub db: Arc<Database>,
     pub config: Arc<RwLock<Config>>,
     pub sse: SseManager,
+    pub mkv_client: Option<Arc<infra::MakeMkvClient>>,
 }
 
 /// Create the API router with all endpoints
@@ -397,30 +398,95 @@ async fn get_move_status(
     })))
 }
 
-// --- Ripper (stub until MakeMKV integration is real) ---
+// --- Ripper ---
 
-#[derive(Serialize)]
-pub struct DriveInfo {
-    pub index: usize,
-    pub name: String,
-    pub status: String,
+async fn list_drives(
+    State(state): State<Arc<AppState>>,
+) -> Json<ApiResponse<Vec<infra::DriveInfo>>> {
+    let client = match &state.mkv_client {
+        Some(c) => c,
+        None => return Json(ApiResponse::ok(vec![])),
+    };
+
+    match client.detect_drives().await {
+        Ok(drives) => Json(ApiResponse::ok(drives)),
+        Err(e) => {
+            info!("Failed to detect drives: {}", e);
+            Json(ApiResponse::ok(vec![]))
+        }
+    }
 }
 
-async fn list_drives() -> Json<ApiResponse<Vec<DriveInfo>>> {
-    info!("Listing drives (stub)");
-    Json(ApiResponse::ok(vec![]))
-}
+async fn start_rip(
+    State(state): State<Arc<AppState>>,
+    Path(index): Path<usize>,
+) -> Result<Json<ApiResponse<String>>, (StatusCode, String)> {
+    let client = state.mkv_client.as_ref().ok_or((
+        StatusCode::SERVICE_UNAVAILABLE,
+        "MakeMKV is not installed".to_string(),
+    ))?;
 
-async fn start_rip(Path(index): Path<usize>) -> Json<ApiResponse<String>> {
-    info!("Starting rip on drive {} (stub)", index);
-    Json(ApiResponse::ok(format!(
-        "Drive {} rip not yet implemented",
+    let dest = {
+        let config = state.config.read().await;
+        config
+            .scan_directory
+            .clone()
+            .unwrap_or_else(|| ".".to_string())
+    };
+
+    let mut handle = client
+        .start_rip(index, &dest)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Spawn a task that runs the rip and broadcasts progress via SSE
+    let sse = state.sse.clone();
+    tokio::spawn(async move {
+        sse.send_status(&format!("rip:starting:{}", index));
+
+        while let Some(event) = handle.next_event().await {
+            match event {
+                infra::RipEvent::Progress {
+                    current,
+                    total,
+                    max,
+                } => {
+                    let pct = if max > 0 {
+                        (current as f64 / total as f64 * 100.0) as u32
+                    } else {
+                        0
+                    };
+                    sse.send_status(&format!("rip:progress:{}:{}", index, pct));
+                }
+                infra::RipEvent::Complete => {
+                    sse.send_status(&format!("rip:complete:{}", index));
+                    break;
+                }
+                infra::RipEvent::Error(e) => {
+                    sse.send_status(&format!("rip:error:{}:{}", index, e));
+                    break;
+                }
+                infra::RipEvent::Message(msg) => {
+                    sse.send_status(&format!("rip:message:{}:{}", index, msg));
+                }
+            }
+        }
+    });
+
+    Ok(Json(ApiResponse::ok(format!(
+        "Rip started on drive {}",
         index
-    )))
+    ))))
 }
 
-async fn cancel_rip(Path(index): Path<usize>) -> Json<ApiResponse<String>> {
-    info!("Cancelling rip on drive {} (stub)", index);
+async fn cancel_rip(
+    State(_state): State<Arc<AppState>>,
+    Path(index): Path<usize>,
+) -> Json<ApiResponse<String>> {
+    // Cancel is handled by dropping the RipHandle.
+    // For web-initiated rips, the spawned task holds the handle.
+    // TODO: store active RipHandles for external cancellation.
+    info!("Cancel requested for drive {} (not yet implemented)", index);
     Json(ApiResponse::ok(format!(
         "Drive {} cancel not yet implemented",
         index
