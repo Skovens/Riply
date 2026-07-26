@@ -142,7 +142,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
 fn css_response(content: &str, content_type: &str) -> axum::response::Response {
     axum::response::Response::builder()
         .header("Content-Type", content_type)
-        .header("Cache-Control", "public, max-age=3600")
+        .header("Cache-Control", "no-cache")
         .body(axum::body::Body::from(content.to_string()))
         .unwrap()
 }
@@ -150,7 +150,7 @@ fn css_response(content: &str, content_type: &str) -> axum::response::Response {
 fn js_response(content: &str) -> axum::response::Response {
     axum::response::Response::builder()
         .header("Content-Type", "application/javascript")
-        .header("Cache-Control", "public, max-age=3600")
+        .header("Cache-Control", "no-cache")
         .body(axum::body::Body::from(content.to_string()))
         .unwrap()
 }

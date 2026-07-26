@@ -164,6 +164,16 @@
   font-weight: 600;
 }
 
+/* ── Page ─────────────────────────────────────────────── */
+.page__header {
+  margin-bottom: var(--space-6);
+}
+
+.page__title {
+  font-size: var(--text-xl);
+  font-weight: 600;
+}
+
 /* ── Footer ─────────────────────────────────────────────── */
 .footer {
   padding: var(--space-4) var(--space-6);
