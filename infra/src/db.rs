@@ -1,9 +1,11 @@
-use sqlx::{Row, SqlitePool};
+use std::str::FromStr;
+
+use sqlx::{Row, sqlite::SqlitePoolOptions};
 use tracing::info;
 
 /// Database adapter - handles SQLite connections and queries
 pub struct Database {
-    pool: SqlitePool,
+    pool: sqlx::SqlitePool,
 }
 
 impl Database {
@@ -11,7 +13,22 @@ impl Database {
     pub async fn new(path: &str) -> Result<Self, anyhow::Error> {
         info!("Initializing database at: {}", path);
 
-        let pool = SqlitePool::connect(path).await?;
+        let url = format!("sqlite:{}", path);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(5)
+            .after_connect(|conn, _meta| {
+                Box::pin(async move {
+                    sqlx::query("PRAGMA journal_mode=WAL")
+                        .execute(conn)
+                        .await?;
+                    Ok(())
+                })
+            })
+            .connect_with(
+                sqlx::sqlite::SqliteConnectOptions::from_str(&url)?
+                    .create_if_missing(true),
+            )
+            .await?;
 
         // Verify connection
         sqlx::query("SELECT 1").execute(&pool).await?;

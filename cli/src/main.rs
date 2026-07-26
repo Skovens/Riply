@@ -49,6 +49,15 @@ enum Command {
         #[command(subcommand)]
         rip_command: RipCommand,
     },
+    /// Start the web API server
+    Serve {
+        /// Bind address (overrides config)
+        #[arg(long)]
+        host: Option<String>,
+        /// Bind port (overrides config)
+        #[arg(short, long)]
+        port: Option<u16>,
+    },
     /// Show current pipeline status
     Status,
 }
@@ -101,6 +110,9 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Rip { rip_command } => {
             do_rip(rip_command).await?;
+        }
+        Command::Serve { host, port } => {
+            commands::serve(db, config, host, port).await?;
         }
         Command::Status => {
             show_status(&db).await?;

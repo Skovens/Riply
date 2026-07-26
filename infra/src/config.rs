@@ -15,6 +15,20 @@ pub struct Config {
     pub tv_directory: String,
     /// Enable verbose logging
     pub verbose: bool,
+    /// Web server bind address
+    #[serde(default = "default_host")]
+    pub host: String,
+    /// Web server bind port
+    #[serde(default = "default_port")]
+    pub port: u16,
+}
+
+fn default_host() -> String {
+    "0.0.0.0".to_string()
+}
+
+fn default_port() -> u16 {
+    3000
 }
 
 impl Default for Config {
@@ -25,6 +39,8 @@ impl Default for Config {
             movies_directory: "movies".to_string(),
             tv_directory: "tv".to_string(),
             verbose: false,
+            host: default_host(),
+            port: default_port(),
         }
     }
 }
@@ -86,6 +102,8 @@ mod tests {
         assert_eq!(config.movies_directory, "movies");
         assert_eq!(config.tv_directory, "tv");
         assert!(!config.verbose);
+        assert_eq!(config.host, "0.0.0.0");
+        assert_eq!(config.port, 3000);
     }
 
     #[test]
@@ -99,6 +117,8 @@ mod tests {
             movies_directory: "movies".to_string(),
             tv_directory: "tv".to_string(),
             verbose: true,
+            host: "127.0.0.1".to_string(),
+            port: 8080,
         };
 
         // Save config
@@ -112,6 +132,8 @@ mod tests {
         assert_eq!(loaded.movies_directory, "movies");
         assert_eq!(loaded.tv_directory, "tv");
         assert!(loaded.verbose);
+        assert_eq!(loaded.host, "127.0.0.1");
+        assert_eq!(loaded.port, 8080);
     }
 
     #[test]

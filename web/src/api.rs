@@ -441,6 +441,8 @@ pub struct ConfigUpdateBody {
     pub movies_directory: Option<String>,
     pub tv_directory: Option<String>,
     pub verbose: Option<bool>,
+    pub host: Option<String>,
+    pub port: Option<u16>,
 }
 
 async fn update_config(
@@ -463,6 +465,12 @@ async fn update_config(
     }
     if let Some(v) = body.verbose {
         config.verbose = v;
+    }
+    if let Some(v) = body.host {
+        config.host = v;
+    }
+    if let Some(v) = body.port {
+        config.port = v;
     }
 
     let updated = config.clone();
