@@ -4,7 +4,7 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::sse::{Event, Sse},
-    routing::{delete, get, post, put},
+    routing::{get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -28,19 +28,19 @@ pub fn create_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/health", get(health_check))
         .route("/api/files", get(list_files))
-        .route("/api/files/{id}", get(get_file))
-        .route("/api/files/{id}", post(update_file))
-        .route("/api/files/{id}", delete(delete_file))
+        .route(
+            "/api/files/:id",
+            get(get_file).post(update_file).delete(delete_file),
+        )
         .route("/api/review", get(get_review_queue))
-        .route("/api/review/{id}/accept", post(accept_file))
-        .route("/api/review/{id}/reject", post(reject_file))
+        .route("/api/review/:id/accept", post(accept_file))
+        .route("/api/review/:id/reject", post(reject_file))
         .route("/api/move", post(start_move))
         .route("/api/move/status", get(get_move_status))
         .route("/api/ripper/drives", get(list_drives))
-        .route("/api/ripper/{index}/start", post(start_rip))
-        .route("/api/ripper/{index}/cancel", post(cancel_rip))
-        .route("/api/config", get(get_config))
-        .route("/api/config", put(update_config))
+        .route("/api/ripper/:index/start", post(start_rip))
+        .route("/api/ripper/:index/cancel", post(cancel_rip))
+        .route("/api/config", get(get_config).put(update_config))
         .route("/api/sse", get(sse_endpoint))
         .with_state(state)
 }

@@ -2,6 +2,14 @@
 /target/
 Cargo.lock
 
+# Local cargo config (mold linker, sccache)
+.cargo/
+
+# SQLite
+*.db
+*.db-shm
+*.db-wal
+
 # IDE
 .idea/
 .vscode/
