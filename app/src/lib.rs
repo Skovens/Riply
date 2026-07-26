@@ -5,6 +5,6 @@ pub mod mover;
 pub mod scanner;
 
 pub use analyzer::AnalyzerService;
-pub use jobs::JobScheduler;
+pub use jobs::{CancellationToken, JobInfo, JobKind, JobProgress, JobScheduler, JobStatus, ProgressHandle};
 pub use mover::MoverService;
 pub use scanner::ScannerService;

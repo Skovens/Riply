@@ -6,7 +6,7 @@ mod route_tests {
 
     #[tokio::test]
     async fn test_matchit_param_routing() {
-        let mut router = axum::Router::new()
+        let router = axum::Router::new()
             .route("/health", axum::routing::get(|| async { "ok" }))
             .route("/api/files/{id}", axum::routing::get(|| async { "found" }));
 
@@ -56,7 +56,7 @@ mod route_tests {
         }
 
         let state = MyState(Arc::new(tokio::sync::RwLock::new("hello".to_string())));
-        let mut router = axum::Router::new()
+        let router = axum::Router::new()
             .route("/api/files/{id}", axum::routing::get(handler))
             .with_state(state);
 
@@ -78,9 +78,7 @@ mod route_tests {
 
     #[tokio::test]
     async fn test_matchit_param_axum_serve() {
-        use std::sync::Arc;
-
-        let mut router = axum::Router::new()
+        let router = axum::Router::new()
             .route("/health", axum::routing::get(|| async { "ok" }))
             .route("/api/files/{id}", axum::routing::get(|| async { "found" }));
 
