@@ -10,6 +10,7 @@ use axum::{
 use riply_core::{DriveInfo, RipBackend, RipEvent};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
+use tower_http::services::ServeDir;
 use tracing::info;
 
 use crate::sse::SseManager;
@@ -23,11 +24,12 @@ pub struct AppState {
     pub backend: Option<Arc<dyn RipBackend>>,
 }
 
-/// Create the API router with all endpoints
+/// Create the API router with all endpoints and static file serving
 pub fn create_router(state: Arc<AppState>) -> Router {
     info!("Creating API router");
 
     Router::new()
+        // API routes
         .route("/health", get(health_check))
         .route("/api/files", get(list_files))
         .route(
@@ -44,7 +46,21 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/ripper/:index/cancel", post(cancel_rip))
         .route("/api/config", get(get_config).put(update_config))
         .route("/api/sse", get(sse_endpoint))
+        // Static files (CSS, JS, images)
+        .nest_service("/static", ServeDir::new("static"))
+        // Fallback: serve index.html for SPA-like behavior
+        .fallback(get(index_handler))
         .with_state(state)
+}
+
+/// Serve the main HTML page
+async fn index_handler() -> impl axum::response::IntoResponse {
+    match tokio::fs::read_to_string("static/index.html").await {
+        Ok(html) => axum::response::Html(html),
+        Err(_) => axum::response::Html(
+            "<h1>Riply</h1><p>static/index.html not found</p>".to_string(),
+        ),
+    }
 }
 
 // --- Pagination ---

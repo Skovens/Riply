@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Riply</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="header__inner">
+        <div class="header__brand">
+          <div class="header__logo">R</div>
+          <h1 class="header__title">Riply</h1>
+        </div>
+        <nav class="header__nav">
+          <button class="btn btn--secondary btn--sm" id="btn-scan">
+            Scan
+          </button>
+          <button class="btn btn--secondary btn--sm" id="btn-analyze">
+            Analyze
+          </button>
+          <button class="btn btn--primary btn--sm" id="btn-move">
+            Move
+          </button>
+        </nav>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main" id="main-content">
+      <div class="empty" style="padding-top: 100px;">
+        <div class="spinner" style="margin: 0 auto var(--space-4);"></div>
+        <div class="empty__title">Loading...</div>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+      Riply &mdash; Media Management
+    </footer>
+  </div>
+
+  <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>
