@@ -9,6 +9,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use tower_http::services::{ServeDir, ServeFile};
 use riply_core::{DriveInfo, RipBackend, RipEvent};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -18,24 +19,21 @@ use crate::sse::SseManager;
 use app::JobScheduler;
 use infra::{Config, Database};
 
-/// Embedded static files (compiled into the binary)
-const INDEX_HTML: &str = include_str!("../static/index.html");
-const CSS_STYLE: &str = include_str!("../static/css/style.css");
-const CSS_VARIABLES: &str = include_str!("../static/css/variables.css");
-const CSS_BASE: &str = include_str!("../static/css/base.css");
-const CSS_LAYOUT: &str = include_str!("../static/css/layout.css");
-const CSS_COMPONENTS: &str = include_str!("../static/css/components.css");
-const CSS_UTILITIES: &str = include_str!("../static/css/utilities.css");
-const JS_API: &str = include_str!("../static/js/api.js");
-const JS_APP: &str = include_str!("../static/js/app.js");
-const JS_STORE: &str = include_str!("../static/js/store.js");
-const JS_UTILS: &str = include_str!("../static/js/utils.js");
-const JS_COMPONENTS_DASHBOARD: &str = include_str!("../static/js/components/dashboard.js");
-const JS_COMPONENTS_JOBS: &str = include_str!("../static/js/components/jobs.js");
-const JS_COMPONENTS_FILES: &str = include_str!("../static/js/components/files.js");
-const JS_COMPONENTS_REVIEW: &str = include_str!("../static/js/components/review.js");
-const JS_COMPONENTS_RIPPER: &str = include_str!("../static/js/components/ripper.js");
-const JS_COMPONENTS_SETTINGS: &str = include_str!("../static/js/components/settings.js");
+/// Path to SvelteKit build directory (relative to binary, or absolute)
+fn svelte_build_dir() -> std::path::PathBuf {
+    // Try relative to the workspace root first (development)
+    // Then try relative to the binary (production)
+    let candidates = [
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("svelte/build"),
+        std::path::PathBuf::from("web/svelte/build"),
+    ];
+    for p in &candidates {
+        if p.exists() {
+            return p.clone();
+        }
+    }
+    candidates[0].clone()
+}
 
 /// Shared application state
 pub struct AppState {
@@ -52,6 +50,14 @@ pub struct AppState {
 /// Create the API router with all endpoints and static file serving
 pub fn create_router(state: Arc<AppState>) -> Router {
     info!("Creating API router");
+
+    let build_dir = svelte_build_dir();
+    info!("Serving SvelteKit from: {:?}", build_dir);
+
+    let spa_fallback = ServeFile::new(build_dir.join("index.html"));
+
+    let static_service = ServeDir::new(&build_dir)
+        .not_found_service(spa_fallback);
 
     Router::new()
         // API routes
@@ -76,88 +82,9 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/ripper/:index/cancel", post(cancel_rip))
         .route("/api/config", get(get_config).put(update_config))
         .route("/api/sse", get(sse_endpoint))
-        // Static file routes (embedded in binary)
-        .route("/", get(index_handler))
-        .route(
-            "/static/css/style.css",
-            get(|| async { css_response(CSS_STYLE, "text/css") }),
-        )
-        .route(
-            "/static/css/variables.css",
-            get(|| async { css_response(CSS_VARIABLES, "text/css") }),
-        )
-        .route(
-            "/static/css/base.css",
-            get(|| async { css_response(CSS_BASE, "text/css") }),
-        )
-        .route(
-            "/static/css/layout.css",
-            get(|| async { css_response(CSS_LAYOUT, "text/css") }),
-        )
-        .route(
-            "/static/css/components.css",
-            get(|| async { css_response(CSS_COMPONENTS, "text/css") }),
-        )
-        .route(
-            "/static/css/utilities.css",
-            get(|| async { css_response(CSS_UTILITIES, "text/css") }),
-        )
-        .route("/static/js/api.js", get(|| async { js_response(JS_API) }))
-        .route("/static/js/app.js", get(|| async { js_response(JS_APP) }))
-        .route(
-            "/static/js/store.js",
-            get(|| async { js_response(JS_STORE) }),
-        )
-        .route(
-            "/static/js/utils.js",
-            get(|| async { js_response(JS_UTILS) }),
-        )
-        .route(
-            "/static/js/components/dashboard.js",
-            get(|| async { js_response(JS_COMPONENTS_DASHBOARD) }),
-        )
-        .route(
-            "/static/js/components/jobs.js",
-            get(|| async { js_response(JS_COMPONENTS_JOBS) }),
-        )
-        .route(
-            "/static/js/components/files.js",
-            get(|| async { js_response(JS_COMPONENTS_FILES) }),
-        )
-        .route(
-            "/static/js/components/review.js",
-            get(|| async { js_response(JS_COMPONENTS_REVIEW) }),
-        )
-        .route(
-            "/static/js/components/ripper.js",
-            get(|| async { js_response(JS_COMPONENTS_RIPPER) }),
-        )
-        .route(
-            "/static/js/components/settings.js",
-            get(|| async { js_response(JS_COMPONENTS_SETTINGS) }),
-        )
+        // Serve SvelteKit build output, with SPA fallback for client-side routing
+        .fallback_service(static_service)
         .with_state(state)
-}
-
-fn css_response(content: &str, content_type: &str) -> axum::response::Response {
-    axum::response::Response::builder()
-        .header("Content-Type", content_type)
-        .header("Cache-Control", "no-cache")
-        .body(axum::body::Body::from(content.to_string()))
-        .unwrap()
-}
-
-fn js_response(content: &str) -> axum::response::Response {
-    axum::response::Response::builder()
-        .header("Content-Type", "application/javascript")
-        .header("Cache-Control", "no-cache")
-        .body(axum::body::Body::from(content.to_string()))
-        .unwrap()
-}
-
-/// Serve the main HTML page
-async fn index_handler() -> axum::response::Html<&'static str> {
-    axum::response::Html(INDEX_HTML)
 }
 
 // --- Pagination ---

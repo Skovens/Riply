@@ -33,3 +33,8 @@ Thumbs.db
 
 # User config
 config.toml
+
+# SvelteKit
+web/svelte/build/
+web/svelte/.svelte-kit/
+web/svelte/node_modules/
