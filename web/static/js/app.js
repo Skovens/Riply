@@ -7,6 +7,7 @@
 
 import { healthCheck, scan, analyze, move, review, connectSSE } from './api.js';
 import { store } from './store.js';
+import { escapeHtml } from './utils.js';
 import { renderDashboard } from './components/dashboard.js';
 import { renderJobs, stopJobsPolling } from './components/jobs.js';
 import { renderFiles } from './components/files.js';
@@ -223,12 +224,3 @@ document.addEventListener('DOMContentLoaded', () => {
   const app = new RiplyApp();
   app.init();
 });
-
-// ── Helpers ──────────────────────────────────────────────────
-
-function escapeHtml(str) {
-  if (!str) return '';
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
-}

@@ -45,56 +45,89 @@ impl Database {
         Ok(())
     }
 
-    /// Save a file record
+    /// Save a file record.
+    /// If a file with the same ID already exists, updates only scan-related
+    /// fields (path, filename, size, hash) while preserving pipeline status,
+    /// canonical titles, and review decisions.
     pub async fn save_file(&self, file: &riply_core::FileRecord) -> Result<(), anyhow::Error> {
         info!("Saving file record: {}", file.filename);
 
-        sqlx::query(
-            r#"
-            INSERT OR REPLACE INTO files (
-                id, path, filename, size, duration, hash, status,
-                suggested_title, suggested_year, confidence,
-                canonical_title, canonical_year, tmdb_id,
-                content_type, media_type, series_name,
-                season_number, episode_number, episode_title,
-                source, subtitle_text, duplicate_path,
-                reviewed, created_at, updated_at
-            ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        // Check if file already exists
+        let existing = sqlx::query_scalar::<_, String>("SELECT id FROM files WHERE id = ?")
+            .bind(&file.id)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        if existing.is_some() {
+            // Update only scan-related fields, preserve pipeline state
+            sqlx::query(
+                r#"
+                UPDATE files SET
+                    path = ?,
+                    filename = ?,
+                    size = ?,
+                    hash = ?,
+                    updated_at = ?
+                WHERE id = ?
+                "#,
             )
-            "#,
-        )
-        .bind(&file.id)
-        .bind(file.path.to_string_lossy().to_string())
-        .bind(&file.filename)
-        .bind(file.size)
-        .bind(file.duration)
-        .bind(&file.hash)
-        .bind(file.status.to_string())
-        .bind(&file.suggested_title)
-        .bind(file.suggested_year)
-        .bind(file.confidence)
-        .bind(&file.canonical_title)
-        .bind(file.canonical_year)
-        .bind(file.tmdb_id)
-        .bind(&file.content_type)
-        .bind(file.media_type.to_string())
-        .bind(&file.series_name)
-        .bind(file.season_number)
-        .bind(file.episode_number)
-        .bind(&file.episode_title)
-        .bind(&file.source)
-        .bind(&file.subtitle_text)
-        .bind(
-            file.duplicate_path
-                .as_ref()
-                .map(|p| p.to_string_lossy().to_string()),
-        )
-        .bind(file.reviewed)
-        .bind(&file.created_at)
-        .bind(&file.updated_at)
-        .execute(&self.pool)
-        .await?;
+            .bind(file.path.to_string_lossy().to_string())
+            .bind(&file.filename)
+            .bind(file.size)
+            .bind(&file.hash)
+            .bind(&file.updated_at)
+            .bind(&file.id)
+            .execute(&self.pool)
+            .await?;
+        } else {
+            // Insert new record
+            sqlx::query(
+                r#"
+                INSERT INTO files (
+                    id, path, filename, size, duration, hash, status,
+                    suggested_title, suggested_year, confidence,
+                    canonical_title, canonical_year, tmdb_id,
+                    content_type, media_type, series_name,
+                    season_number, episode_number, episode_title,
+                    source, subtitle_text, duplicate_path,
+                    reviewed, created_at, updated_at
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                )
+                "#,
+            )
+            .bind(&file.id)
+            .bind(file.path.to_string_lossy().to_string())
+            .bind(&file.filename)
+            .bind(file.size)
+            .bind(file.duration)
+            .bind(&file.hash)
+            .bind(file.status.to_string())
+            .bind(&file.suggested_title)
+            .bind(file.suggested_year)
+            .bind(file.confidence)
+            .bind(&file.canonical_title)
+            .bind(file.canonical_year)
+            .bind(file.tmdb_id)
+            .bind(&file.content_type)
+            .bind(file.media_type.to_string())
+            .bind(&file.series_name)
+            .bind(file.season_number)
+            .bind(file.episode_number)
+            .bind(&file.episode_title)
+            .bind(&file.source)
+            .bind(&file.subtitle_text)
+            .bind(
+                file.duplicate_path
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().to_string()),
+            )
+            .bind(file.reviewed)
+            .bind(&file.created_at)
+            .bind(&file.updated_at)
+            .execute(&self.pool)
+            .await?;
+        }
 
         Ok(())
     }
@@ -334,6 +367,24 @@ impl Database {
             .fetch_one(&self.pool)
             .await?;
         Ok(row.try_get("count")?)
+    }
+
+    /// Count files grouped by all statuses in a single query.
+    /// Returns a map of status name -> count.
+    pub async fn count_files_by_status_all(
+        &self,
+    ) -> Result<std::collections::HashMap<String, i64>, anyhow::Error> {
+        let rows = sqlx::query("SELECT status, COUNT(*) as count FROM files GROUP BY status")
+            .fetch_all(&self.pool)
+            .await?;
+
+        let mut counts = std::collections::HashMap::new();
+        for row in rows {
+            let status: String = row.try_get("status")?;
+            let count: i64 = row.try_get("count")?;
+            counts.insert(status, count);
+        }
+        Ok(counts)
     }
 }
 

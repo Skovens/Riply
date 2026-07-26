@@ -181,7 +181,6 @@ impl HttpClient {
         if let Some(y) = year {
             params.insert("y".to_string(), y.to_string());
         }
-        params.insert("type".to_string(), "movie".to_string());
 
         let url = format!("{}/", self.omdb_base_url);
         let resp: OmdbResponse = self

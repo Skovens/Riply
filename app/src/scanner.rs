@@ -99,8 +99,12 @@ impl ScannerService {
     }
 
     /// Hash file contents with SHA-256.
+    /// Uses spawn_blocking to avoid blocking the tokio runtime on large files.
     pub async fn hash_file_async(path: &Path) -> Result<String, anyhow::Error> {
-        hash_file(path)
+        let path = path.to_path_buf();
+        tokio::task::spawn_blocking(move || hash_file(&path))
+            .await
+            .map_err(|e| anyhow::anyhow!("Task join error: {}", e))?
     }
 }
 

@@ -29,6 +29,7 @@ const CSS_UTILITIES: &str = include_str!("../static/css/utilities.css");
 const JS_API: &str = include_str!("../static/js/api.js");
 const JS_APP: &str = include_str!("../static/js/app.js");
 const JS_STORE: &str = include_str!("../static/js/store.js");
+const JS_UTILS: &str = include_str!("../static/js/utils.js");
 const JS_COMPONENTS_DASHBOARD: &str = include_str!("../static/js/components/dashboard.js");
 const JS_COMPONENTS_JOBS: &str = include_str!("../static/js/components/jobs.js");
 const JS_COMPONENTS_FILES: &str = include_str!("../static/js/components/files.js");
@@ -105,6 +106,10 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route(
             "/static/js/store.js",
             get(|| async { js_response(JS_STORE) }),
+        )
+        .route(
+            "/static/js/utils.js",
+            get(|| async { js_response(JS_UTILS) }),
         )
         .route(
             "/static/js/components/dashboard.js",
@@ -348,6 +353,21 @@ async fn accept_file(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, format!("File not found: {}", id)))?;
 
+    // Validate pipeline transition: only Matched or NeedsReview can be accepted
+    let valid = matches!(
+        file.status,
+        riply_core::PipelineStatus::Matched | riply_core::PipelineStatus::NeedsReview
+    );
+    if !valid {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Cannot accept file in '{}' status (must be Matched or NeedsReview)",
+                file.status
+            ),
+        ));
+    }
+
     file.update_status(riply_core::PipelineStatus::Confirmed);
 
     state
@@ -372,6 +392,17 @@ async fn reject_file(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, format!("File not found: {}", id)))?;
 
+    // Validate pipeline transition: only NeedsReview can be rejected
+    if file.status != riply_core::PipelineStatus::NeedsReview {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Cannot reject file in '{}' status (must be NeedsReview)",
+                file.status
+            ),
+        ));
+    }
+
     file.update_status(riply_core::PipelineStatus::Failed);
 
     state
@@ -393,23 +424,10 @@ pub struct StartMoveBody {
     pub tv_dir: Option<String>,
 }
 
-#[derive(Serialize)]
-pub struct MoveResult {
-    pub moved: Vec<String>,
-    pub errors: Vec<MoveError>,
-}
-
-#[derive(Serialize)]
-pub struct MoveError {
-    pub id: String,
-    pub filename: String,
-    pub error: String,
-}
-
 async fn start_move(
     State(state): State<Arc<AppState>>,
     Json(body): Json<StartMoveBody>,
-) -> Result<Json<ApiResponse<MoveResult>>, (StatusCode, String)> {
+) -> Result<Json<ApiResponse<JobStartedResponse>>, (StatusCode, String)> {
     let (movies_dir, tv_dir) = {
         let config = state.config.read().await;
         let m = body
@@ -423,56 +441,75 @@ async fn start_move(
         (m, t)
     };
 
-    let movies_path = std::path::PathBuf::from(&movies_dir);
-    let tv_path = std::path::PathBuf::from(&tv_dir);
+    let db = state.db.clone();
+    let sse = state.sse.clone();
+    let m = movies_dir.clone();
+    let t = tv_dir.clone();
 
-    let files = state
-        .db
-        .get_files_by_status("Confirmed")
+    let job_id = state
+        .scheduler
+        .start_move_job(&movies_dir, &tv_dir, move |cancel, progress| {
+            let db = db.clone();
+            let sse = sse.clone();
+            let movies_path = std::path::PathBuf::from(&m);
+            let tv_path = std::path::PathBuf::from(&t);
+            async move {
+                let files = db.get_files_by_status("Confirmed").await?;
+                if files.is_empty() {
+                    sse.send_status("move:complete:moved=0,errors=0");
+                    return Ok(());
+                }
+
+                progress.set_total(files.len());
+                sse.send_status(&format!("move:starting:{}", files.len()));
+
+                let mover = app::MoverService::new();
+                let mut moved = 0;
+                let mut errors = 0;
+
+                for (i, file) in files.iter().enumerate() {
+                    if cancel.is_cancelled() {
+                        sse.send_status("move:cancelled");
+                        return Ok(());
+                    }
+                    match mover.move_file(file, &movies_path, &tv_path).await {
+                        Ok(updated) => {
+                            if let Err(e) = db.update_file(&updated).await {
+                                sse.send_log(
+                                    "warn",
+                                    &format!("Failed to update {}: {}", file.filename, e),
+                                );
+                                errors += 1;
+                            } else {
+                                moved += 1;
+                            }
+                        }
+                        Err(e) => {
+                            sse.send_log(
+                                "warn",
+                                &format!("Failed to move {}: {}", file.filename, e),
+                            );
+                            errors += 1;
+                        }
+                    }
+                    progress.increment();
+                    if (i + 1) % 10 == 0 || i + 1 == files.len() {
+                        sse.send_status(&format!("move:progress:{}:{}", i + 1, files.len()));
+                    }
+                }
+
+                sse.send_status(&format!("move:complete:moved={},errors={}", moved, errors));
+                info!("Move complete: {} moved, {} errors", moved, errors);
+                Ok(())
+            }
+        })
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    state
-        .sse
-        .send_status(&format!("move:starting:{}", files.len()));
-
-    let mover = app::MoverService::new();
-    let mut moved = Vec::new();
-    let mut errors = Vec::new();
-
-    for file in &files {
-        let id = file.id.clone();
-        let filename = file.filename.clone();
-
-        match mover.move_file(file, &movies_path, &tv_path).await {
-            Ok(updated) => {
-                if let Err(e) = state.db.update_file(&updated).await {
-                    errors.push(MoveError {
-                        id,
-                        filename,
-                        error: e.to_string(),
-                    });
-                } else {
-                    moved.push(id);
-                }
-            }
-            Err(e) => {
-                errors.push(MoveError {
-                    id,
-                    filename,
-                    error: e.to_string(),
-                });
-            }
-        }
-    }
-
-    state.sse.send_status(&format!(
-        "move:complete:moved={},errors={}",
-        moved.len(),
-        errors.len()
-    ));
-
-    Ok(Json(ApiResponse::ok(MoveResult { moved, errors })))
+    Ok(Json(ApiResponse::ok(JobStartedResponse {
+        job_id,
+        status: "Queued".to_string(),
+    })))
 }
 
 #[derive(Serialize)]
@@ -722,36 +759,50 @@ async fn cancel_job(
 
 // --- Ripper ---
 
-async fn list_drives(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Vec<DriveInfo>>> {
+async fn list_drives(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ApiResponse<Vec<DriveInfo>>>, (StatusCode, String)> {
     let backend = match &state.backend {
         Some(b) => b,
-        None => return Json(ApiResponse::ok(vec![])),
+        None => return Ok(Json(ApiResponse::ok(vec![]))),
     };
 
     match backend.detect_drives() {
-        Ok(drives) => Json(ApiResponse::ok(drives)),
+        Ok(drives) => Ok(Json(ApiResponse::ok(drives))),
         Err(e) => {
             info!("Failed to detect drives: {}", e);
-            Json(ApiResponse::ok(vec![]))
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to detect drives: {}", e),
+            ))
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StartRipBody {
+    pub destination: Option<String>,
 }
 
 async fn start_rip(
     State(state): State<Arc<AppState>>,
     Path(index): Path<usize>,
+    Json(body): Json<StartRipBody>,
 ) -> Result<Json<ApiResponse<String>>, (StatusCode, String)> {
     let backend = state.backend.as_ref().ok_or((
         StatusCode::SERVICE_UNAVAILABLE,
         "No ripping backend available. Install makemkvcon or Flatpak package.".to_string(),
     ))?;
 
-    let dest = {
-        let config = state.config.read().await;
-        config
-            .scan_directory
-            .clone()
-            .unwrap_or_else(|| ".".to_string())
+    let dest = match body.destination {
+        Some(d) => d,
+        None => {
+            let config = state.config.read().await;
+            config
+                .scan_directory
+                .clone()
+                .unwrap_or_else(|| ".".to_string())
+        }
     };
 
     let mut handle = backend
@@ -770,7 +821,7 @@ async fn start_rip(
                     total,
                     max,
                 } => {
-                    let pct = if max > 0 {
+                    let pct = if total > 0 && max > 0 {
                         (current as f64 / total as f64 * 100.0) as u32
                     } else {
                         0
@@ -833,6 +884,8 @@ pub struct ConfigUpdateBody {
     pub verbose: Option<bool>,
     pub host: Option<String>,
     pub port: Option<u16>,
+    pub tmdb_api_key: Option<String>,
+    pub omdb_api_key: Option<String>,
 }
 
 async fn update_config(
@@ -861,6 +914,12 @@ async fn update_config(
     }
     if let Some(v) = body.port {
         config.port = v;
+    }
+    if let Some(v) = body.tmdb_api_key {
+        config.tmdb_api_key = Some(v);
+    }
+    if let Some(v) = body.omdb_api_key {
+        config.omdb_api_key = Some(v);
     }
 
     let updated = config.clone();

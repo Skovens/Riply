@@ -6,6 +6,7 @@
 
 import { files, review, move, ripper } from '../api.js';
 import { store } from '../store.js';
+import { escapeHtml, statusColor } from '../utils.js';
 
 /**
  * Render the dashboard
@@ -16,10 +17,14 @@ export function renderDashboard(container) {
       <div class="section__header">
         <h2 class="section__title">Overview</h2>
       </div>
-      <div class="grid grid--4" id="stats-grid">
+      <div class="grid grid--5" id="stats-grid">
         <div class="card stat">
           <div class="stat__value" id="stat-scanned">-</div>
           <div class="stat__label">Scanned</div>
+        </div>
+        <div class="card stat stat--accent">
+          <div class="stat__value" id="stat-matched">-</div>
+          <div class="stat__label">Matched</div>
         </div>
         <div class="card stat stat--warning">
           <div class="stat__value" id="stat-review">-</div>
@@ -91,13 +96,15 @@ export function renderDashboard(container) {
 
 async function loadStats() {
   try {
-    const [scanned, reviewRes, moveRes] = await Promise.all([
+    const [scanned, matched, reviewRes, moveRes] = await Promise.all([
       files.list({ status: 'Scanned', per_page: 1 }),
+      files.list({ status: 'Matched', per_page: 1 }),
       review.list(),
       move.status(),
     ]);
 
     document.getElementById('stat-scanned').textContent = scanned.total || 0;
+    document.getElementById('stat-matched').textContent = matched.total || 0;
     document.getElementById('stat-review').textContent = reviewRes.data?.length || 0;
     document.getElementById('stat-confirmed').textContent = moveRes.data?.confirmed_count || 0;
     document.getElementById('stat-moved').textContent = moveRes.data?.moved_count || 0;
@@ -251,24 +258,4 @@ async function loadReviewQueue() {
       </div>
     `;
   }
-}
-
-// ── Helpers ──────────────────────────────────────────────────
-
-function escapeHtml(str) {
-  if (!str) return '';
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
-}
-
-function statusColor(status) {
-  const colors = {
-    'Scanned': 'default',
-    'Needs Review': 'warning',
-    'Confirmed': 'success',
-    'Moved': 'accent',
-    'Failed': 'error',
-  };
-  return colors[status] || 'default';
 }

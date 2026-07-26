@@ -2,7 +2,10 @@ use axum::response::sse::Event;
 use tokio::sync::broadcast;
 use tracing::info;
 
-/// SSE manager for broadcasting progress updates to all connected clients
+/// SSE manager for broadcasting progress updates to all connected clients.
+///
+/// All messages use a consistent format: `"event:{name}\ndata:{payload}"`
+/// for easy parsing on the client side.
 #[derive(Clone)]
 pub struct SseManager {
     tx: broadcast::Sender<String>,
@@ -21,24 +24,26 @@ impl SseManager {
         self.tx.subscribe()
     }
 
-    /// Broadcast a progress update
-    pub fn send_progress(&self, message: &str) {
-        let _ = self.tx.send(format!("data:{}", message));
-    }
-
-    /// Broadcast a status update event
+    /// Broadcast a status update event (e.g. "scan:progress:5:10")
     pub fn send_status(&self, status: &str) {
         let _ = self.tx.send(format!("event:status\ndata:{}", status));
     }
 
-    /// Broadcast a log message
+    /// Broadcast a progress update (alias for send_status with "progress" prefix)
+    pub fn send_progress(&self, message: &str) {
+        let _ = self.tx.send(format!("event:progress\ndata:{}", message));
+    }
+
+    /// Broadcast a log message (e.g. "warn:Failed to save file")
     pub fn send_log(&self, level: &str, message: &str) {
         let _ = self
             .tx
             .send(format!("event:log\ndata:{}:{}", level, message));
     }
 
-    /// Convert a raw broadcast message into an SSE Event
+    /// Convert a raw broadcast message into an SSE Event.
+    ///
+    /// Expected format: `"event:{name}\ndata:{payload}"` or `"data:{payload}"`
     pub fn message_to_event(msg: &str) -> Event {
         if let Some((header, body)) = msg.split_once('\n') {
             if let Some(event_name) = header.strip_prefix("event:") {
