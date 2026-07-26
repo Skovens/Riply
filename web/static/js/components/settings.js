@@ -1,4 +1,4 @@
-import { api } from '../api.js';
+import { config } from '../api.js';
 import { store } from '../store.js';
 import { escapeHtml } from '../utils.js';
 
@@ -26,7 +26,7 @@ export function renderSettings(container) {
 async function loadConfig() {
   const el = document.getElementById('settings-content');
   try {
-    const res = await api.config.get();
+    const res = await config.get();
     currentConfig = res.data;
     store.set('config', currentConfig);
     renderForm(currentConfig);
@@ -127,7 +127,7 @@ async function handleSubmit(e) {
   }
 
   try {
-    const res = await api.config.update(payload);
+    const res = await config.update(payload);
     currentConfig = res.data;
     store.set('config', currentConfig);
     dirty = {};
