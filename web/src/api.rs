@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -30,6 +31,9 @@ const JS_APP: &str = include_str!("../static/js/app.js");
 const JS_STORE: &str = include_str!("../static/js/store.js");
 const JS_COMPONENTS_DASHBOARD: &str = include_str!("../static/js/components/dashboard.js");
 const JS_COMPONENTS_JOBS: &str = include_str!("../static/js/components/jobs.js");
+const JS_COMPONENTS_FILES: &str = include_str!("../static/js/components/files.js");
+const JS_COMPONENTS_REVIEW: &str = include_str!("../static/js/components/review.js");
+const JS_COMPONENTS_RIPPER: &str = include_str!("../static/js/components/ripper.js");
 
 /// Shared application state
 pub struct AppState {
@@ -39,6 +43,8 @@ pub struct AppState {
     pub sse: SseManager,
     pub backend: Option<Arc<dyn RipBackend>>,
     pub scheduler: JobScheduler,
+    /// Active rip tasks keyed by drive index. Used for cancellation.
+    pub active_rips: RwLock<HashMap<usize, tokio::task::JoinHandle<()>>>,
 }
 
 /// Create the API router with all endpoints and static file serving
@@ -107,6 +113,18 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route(
             "/static/js/components/jobs.js",
             get(|| async { js_response(JS_COMPONENTS_JOBS) }),
+        )
+        .route(
+            "/static/js/components/files.js",
+            get(|| async { js_response(JS_COMPONENTS_FILES) }),
+        )
+        .route(
+            "/static/js/components/review.js",
+            get(|| async { js_response(JS_COMPONENTS_REVIEW) }),
+        )
+        .route(
+            "/static/js/components/ripper.js",
+            get(|| async { js_response(JS_COMPONENTS_RIPPER) }),
         )
         .with_state(state)
 }
@@ -742,7 +760,7 @@ async fn start_rip(
 
     // Spawn a task that runs the rip and broadcasts progress via SSE
     let sse = state.sse.clone();
-    tokio::spawn(async move {
+    let rip_handle = tokio::spawn(async move {
         sse.send_status(&format!("rip:starting:{}", index));
 
         while let Some(event) = handle.next_event().await {
@@ -774,6 +792,9 @@ async fn start_rip(
         }
     });
 
+    // Store the handle so cancel_rip can abort it
+    state.active_rips.write().await.insert(index, rip_handle);
+
     Ok(Json(ApiResponse::ok(format!(
         "Rip started on drive {}",
         index
@@ -781,17 +802,19 @@ async fn start_rip(
 }
 
 async fn cancel_rip(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Path(index): Path<usize>,
 ) -> Json<ApiResponse<String>> {
-    // Cancel is handled by dropping the RipHandle.
-    // For web-initiated rips, the spawned task holds the handle.
-    // TODO: store active RipHandles for external cancellation.
-    info!("Cancel requested for drive {} (not yet implemented)", index);
-    Json(ApiResponse::ok(format!(
-        "Drive {} cancel not yet implemented",
-        index
-    )))
+    let mut rips = state.active_rips.write().await;
+    if let Some(handle) = rips.remove(&index) {
+        handle.abort();
+        state.sse.send_status(&format!("rip:cancelled:{}", index));
+        info!("Cancelled rip on drive {}", index);
+        Json(ApiResponse::ok(format!("Drive {} rip cancelled", index)))
+    } else {
+        info!("No active rip found for drive {}", index);
+        Json(ApiResponse::ok(format!("No active rip on drive {}", index)))
+    }
 }
 
 // --- Config ---

@@ -5,38 +5,31 @@ use tracing::info;
 pub async fn show_status(db: &Database) -> Result<(), anyhow::Error> {
     info!("Getting pipeline status");
 
-    // Get file counts by status
-    let all_files = db.get_all_files().await?;
+    let total = db.count_files_by_status("Scanned").await?
+        + db.count_files_by_status("Matched").await?
+        + db.count_files_by_status("Needs Review").await?
+        + db.count_files_by_status("Failed").await?
+        + db.count_files_by_status("Confirmed").await?
+        + db.count_files_by_status("Moved").await?;
 
-    let mut files_scanned = 0;
-    let mut files_matched = 0;
-    let mut files_needs_review = 0;
-    let mut files_failed = 0;
-    let mut files_confirmed = 0;
-    let mut files_moved = 0;
-
-    for file in &all_files {
-        match file.status {
-            riply_core::PipelineStatus::Scanned => files_scanned += 1,
-            riply_core::PipelineStatus::Matched => files_matched += 1,
-            riply_core::PipelineStatus::NeedsReview => files_needs_review += 1,
-            riply_core::PipelineStatus::Failed => files_failed += 1,
-            riply_core::PipelineStatus::Confirmed => files_confirmed += 1,
-            riply_core::PipelineStatus::Moved => files_moved += 1,
-        }
-    }
+    let scanned = db.count_files_by_status("Scanned").await?;
+    let matched = db.count_files_by_status("Matched").await?;
+    let needs_review = db.count_files_by_status("Needs Review").await?;
+    let failed = db.count_files_by_status("Failed").await?;
+    let confirmed = db.count_files_by_status("Confirmed").await?;
+    let moved = db.count_files_by_status("Moved").await?;
 
     println!("Riply Status:");
-    println!("  Total files: {}", all_files.len());
-    println!("  Files scanned: {}", files_scanned);
-    println!("  Files matched: {}", files_matched);
-    println!("  Files need review: {}", files_needs_review);
-    println!("  Files failed: {}", files_failed);
-    println!("  Files confirmed: {}", files_confirmed);
-    println!("  Files moved: {}", files_moved);
-    println!("  Drives: 0");
-    println!("  Active rips: 0");
-    println!("  Active moves: 0");
+    println!("  Total files: {}", total);
+    println!("  Scanned:     {}", scanned);
+    println!("  Matched:     {}", matched);
+    println!("  Review:      {}", needs_review);
+    println!("  Confirmed:   {}", confirmed);
+    println!("  Moved:       {}", moved);
+    println!("  Failed:      {}", failed);
+    println!();
+    println!("  Drives:      (use `riply serve` + web UI for drive info)");
+    println!("  Jobs:        (use web UI at http://localhost:3000/#/jobs)");
 
     Ok(())
 }

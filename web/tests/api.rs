@@ -1,4 +1,5 @@
 use serde_json::Value;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tempfile::NamedTempFile;
 use tokio::sync::RwLock;
@@ -27,6 +28,7 @@ async fn setup() -> TestContext {
         sse: SseManager::new(16),
         backend: None,
         scheduler: JobScheduler::new(),
+        active_rips: RwLock::new(HashMap::new()),
     });
 
     let router = create_router(state.clone());
@@ -369,14 +371,11 @@ async fn test_start_rip_no_makemkv() {
 }
 
 #[tokio::test]
-async fn test_cancel_rip_stub() {
+async fn test_cancel_rip_no_active() {
     let ctx = setup().await;
     let (status, body) = post(&ctx, "/api/ripper/0/cancel", serde_json::json!({})).await;
     assert_eq!(status, 200);
-    assert!(body["data"]
-        .as_str()
-        .unwrap()
-        .contains("not yet implemented"));
+    assert!(body["data"].as_str().unwrap().contains("No active rip"));
 }
 
 // ===== Pagination =====

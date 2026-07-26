@@ -9,6 +9,9 @@ import { healthCheck, scan, analyze, move, review, connectSSE } from './api.js';
 import { store } from './store.js';
 import { renderDashboard } from './components/dashboard.js';
 import { renderJobs, stopJobsPolling } from './components/jobs.js';
+import { renderFiles } from './components/files.js';
+import { renderReview } from './components/review.js';
+import { renderRipper, stopRipperPolling } from './components/ripper.js';
 
 class RiplyApp {
   constructor() {
@@ -53,6 +56,7 @@ class RiplyApp {
     const view = hash.replace(/^\//, '') || 'dashboard';
     this.currentView = view;
     stopJobsPolling();
+    stopRipperPolling();
     this.renderView();
     this.updateNav();
   }
@@ -71,6 +75,15 @@ class RiplyApp {
     main.innerHTML = '';
 
     switch (this.currentView) {
+      case 'files':
+        renderFiles(main);
+        break;
+      case 'review':
+        renderReview(main);
+        break;
+      case 'ripper':
+        renderRipper(main);
+        break;
       case 'jobs':
         renderJobs(main);
         break;
@@ -200,6 +213,7 @@ class RiplyApp {
       this.unsubscribeSSE();
     }
     stopJobsPolling();
+    stopRipperPolling();
   }
 }
 

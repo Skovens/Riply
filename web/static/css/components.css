@@ -162,6 +162,28 @@
   aspect-ratio: 1;
 }
 
+/* ── Select ─────────────────────────────────────────────── */
+.select {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: border-color var(--transition-fast);
+}
+
+.select:hover {
+  border-color: var(--color-border-hover);
+}
+
+.select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
 /* ── Table ──────────────────────────────────────────────── */
 .table {
   width: 100%;
@@ -329,6 +351,11 @@
 }
 
 .jobs-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.drives-list {
   display: flex;
   flex-direction: column;
 }

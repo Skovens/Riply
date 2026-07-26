@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use app::JobScheduler;
@@ -31,6 +32,7 @@ pub async fn serve(
         sse: SseManager::new(256),
         backend,
         scheduler: JobScheduler::new(),
+        active_rips: RwLock::new(HashMap::new()),
     });
 
     let router = web::create_router(state);
