@@ -15,6 +15,10 @@ pub struct Config {
     pub tv_directory: String,
     /// Enable verbose logging
     pub verbose: bool,
+    /// TMDb API key (optional, enables metadata lookups)
+    pub tmdb_api_key: Option<String>,
+    /// OMDb API key (optional, fallback metadata source)
+    pub omdb_api_key: Option<String>,
     /// Web server bind address
     #[serde(default = "default_host")]
     pub host: String,
@@ -39,6 +43,8 @@ impl Default for Config {
             movies_directory: "movies".to_string(),
             tv_directory: "tv".to_string(),
             verbose: false,
+            tmdb_api_key: None,
+            omdb_api_key: None,
             host: default_host(),
             port: default_port(),
         }
@@ -117,6 +123,8 @@ mod tests {
             movies_directory: "movies".to_string(),
             tv_directory: "tv".to_string(),
             verbose: true,
+            tmdb_api_key: None,
+            omdb_api_key: None,
             host: "127.0.0.1".to_string(),
             port: 8080,
         };

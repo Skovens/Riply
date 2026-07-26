@@ -100,7 +100,7 @@ async fn main() -> anyhow::Result<()> {
             scan_directory(&directory, &config).await?;
         }
         Command::Analyze => {
-            analyze_files(&db).await?;
+            analyze_files(&db, &config).await?;
         }
         Command::Review { yolo } => {
             review_files(yolo, &db).await?;

@@ -1,0 +1,45 @@
+use std::future::Future;
+use std::pin::Pin;
+
+use crate::MediaType;
+
+/// Metadata found from a search
+#[derive(Debug, Clone)]
+pub struct MetadataMatch {
+    pub title: String,
+    pub year: Option<u32>,
+    pub tmdb_id: Option<i32>,
+    pub is_tv: bool,
+}
+
+/// Port for searching external metadata APIs (TMDb, OMDb, etc.)
+///
+/// Implemented by infra adapters, consumed by app services.
+pub trait MetadataSearcher: Send + Sync {
+    fn search_movies(
+        &self,
+        query: &str,
+        year: Option<u32>,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<MetadataMatch>, anyhow::Error>> + Send + '_>>;
+
+    fn search_tv(
+        &self,
+        query: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<MetadataMatch>, anyhow::Error>> + Send + '_>>;
+
+    fn search(
+        &self,
+        query: &str,
+        year: Option<u32>,
+        media_type: &MediaType,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<MetadataMatch>, anyhow::Error>> + Send + '_>> {
+        let media_type = media_type.clone();
+        let query = query.to_string();
+        Box::pin(async move {
+            match media_type {
+                MediaType::Tv => self.search_tv(&query).await,
+                MediaType::Movie => self.search_movies(&query, year).await,
+            }
+        })
+    }
+}
