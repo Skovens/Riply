@@ -7,6 +7,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use riply_core::{DriveInfo, RipBackend, RipEvent};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::info;
@@ -19,7 +20,7 @@ pub struct AppState {
     pub db: Arc<Database>,
     pub config: Arc<RwLock<Config>>,
     pub sse: SseManager,
-    pub mkv_client: Option<Arc<infra::MakeMkvClient>>,
+    pub backend: Option<Arc<dyn RipBackend>>,
 }
 
 /// Create the API router with all endpoints
@@ -402,13 +403,13 @@ async fn get_move_status(
 
 async fn list_drives(
     State(state): State<Arc<AppState>>,
-) -> Json<ApiResponse<Vec<infra::DriveInfo>>> {
-    let client = match &state.mkv_client {
-        Some(c) => c,
+) -> Json<ApiResponse<Vec<DriveInfo>>> {
+    let backend = match &state.backend {
+        Some(b) => b,
         None => return Json(ApiResponse::ok(vec![])),
     };
 
-    match client.detect_drives().await {
+    match backend.detect_drives() {
         Ok(drives) => Json(ApiResponse::ok(drives)),
         Err(e) => {
             info!("Failed to detect drives: {}", e);
@@ -421,9 +422,9 @@ async fn start_rip(
     State(state): State<Arc<AppState>>,
     Path(index): Path<usize>,
 ) -> Result<Json<ApiResponse<String>>, (StatusCode, String)> {
-    let client = state.mkv_client.as_ref().ok_or((
+    let backend = state.backend.as_ref().ok_or((
         StatusCode::SERVICE_UNAVAILABLE,
-        "MakeMKV is not installed".to_string(),
+        "No ripping backend available. Install makemkvcon or Flatpak package.".to_string(),
     ))?;
 
     let dest = {
@@ -434,9 +435,8 @@ async fn start_rip(
             .unwrap_or_else(|| ".".to_string())
     };
 
-    let mut handle = client
+    let mut handle = backend
         .start_rip(index, &dest)
-        .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // Spawn a task that runs the rip and broadcasts progress via SSE
@@ -446,7 +446,7 @@ async fn start_rip(
 
         while let Some(event) = handle.next_event().await {
             match event {
-                infra::RipEvent::Progress {
+                RipEvent::Progress {
                     current,
                     total,
                     max,
@@ -458,15 +458,15 @@ async fn start_rip(
                     };
                     sse.send_status(&format!("rip:progress:{}:{}", index, pct));
                 }
-                infra::RipEvent::Complete => {
+                RipEvent::Complete => {
                     sse.send_status(&format!("rip:complete:{}", index));
                     break;
                 }
-                infra::RipEvent::Error(e) => {
+                RipEvent::Error(e) => {
                     sse.send_status(&format!("rip:error:{}:{}", index, e));
                     break;
                 }
-                infra::RipEvent::Message(msg) => {
+                RipEvent::Message(msg) => {
                     sse.send_status(&format!("rip:message:{}:{}", index, msg));
                 }
             }

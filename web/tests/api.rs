@@ -23,7 +23,7 @@ async fn setup() -> TestContext {
         db: Arc::new(db),
         config: Arc::new(RwLock::new(Config::default())),
         sse: SseManager::new(16),
-        mkv_client: None,
+        backend: None,
     });
 
     let router = create_router(state.clone());

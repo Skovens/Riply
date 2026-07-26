@@ -2,6 +2,32 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tracing::info;
 
+/// Ripping backend configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RippingConfig {
+    /// Command to run for ripping. Can be:
+    /// - "makemkvcon" (native install)
+    /// - "flatpak run --command=makemkvcon com.makemkv.MakeMKV" (Flatpak)
+    ///
+    /// Auto-detected if not set.
+    #[serde(default)]
+    pub command: Option<String>,
+
+    /// Path to makemkvcon binary (deprecated, use `command` instead).
+    /// Still loaded for backward compatibility — maps to `command`.
+    #[serde(default)]
+    pub makemkvcon_path: Option<String>,
+}
+
+impl RippingConfig {
+    /// Resolve the command to use. Priority: `command` > `makemkvcon_path` (deprecated).
+    pub fn resolved_command(&self) -> Option<&str> {
+        self.command
+            .as_deref()
+            .or(self.makemkvcon_path.as_deref())
+    }
+}
+
 /// Application configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -19,9 +45,12 @@ pub struct Config {
     pub tmdb_api_key: Option<String>,
     /// OMDb API key (optional, fallback metadata source)
     pub omdb_api_key: Option<String>,
-    /// Path to makemkvcon binary (auto-detected if not set)
+    /// Path to makemkvcon binary (deprecated, use `ripping.command` instead)
     #[serde(default)]
     pub makemkvcon_path: Option<String>,
+    /// Ripping backend configuration
+    #[serde(default)]
+    pub ripping: RippingConfig,
     /// Web server bind address
     #[serde(default = "default_host")]
     pub host: String,
@@ -49,6 +78,7 @@ impl Default for Config {
             tmdb_api_key: None,
             omdb_api_key: None,
             makemkvcon_path: None,
+            ripping: RippingConfig::default(),
             host: default_host(),
             port: default_port(),
         }
@@ -98,6 +128,14 @@ impl Config {
         let config = Self::default();
         config.save(path)
     }
+
+    /// Resolve the ripping command from config.
+    /// Priority: `ripping.command` > `makemkvcon_path` (deprecated).
+    pub fn ripping_command(&self) -> Option<&str> {
+        self.ripping
+            .resolved_command()
+            .or(self.makemkvcon_path.as_deref())
+    }
 }
 
 #[cfg(test)]
@@ -130,6 +168,7 @@ mod tests {
             tmdb_api_key: None,
             omdb_api_key: None,
             makemkvcon_path: None,
+            ripping: RippingConfig::default(),
             host: "127.0.0.1".to_string(),
             port: 8080,
         };
@@ -162,5 +201,58 @@ mod tests {
         // Verify we can load it
         let config = Config::load(config_path.to_str().unwrap()).unwrap();
         assert_eq!(config.database_path, "riply.db");
+    }
+
+    #[test]
+    fn test_ripping_config_resolved_command() {
+        let c = RippingConfig::default();
+        assert_eq!(c.resolved_command(), None);
+
+        let c = RippingConfig {
+            command: Some("flatpak run --command=makemkvcon com.makemkv.MakeMKV".to_string()),
+            makemkvcon_path: Some("/usr/bin/makemkvcon".to_string()),
+        };
+        // command wins over makemkvcon_path
+        assert_eq!(
+            c.resolved_command(),
+            Some("flatpak run --command=makemkvcon com.makemkv.MakeMKV")
+        );
+
+        let c = RippingConfig {
+            command: None,
+            makemkvcon_path: Some("/usr/bin/makemkvcon".to_string()),
+        };
+        assert_eq!(c.resolved_command(), Some("/usr/bin/makemkvcon"));
+    }
+
+    #[test]
+    fn test_config_backward_compat() {
+        let toml = r#"
+database_path = "test.db"
+movies_directory = "movies"
+tv_directory = "tv"
+verbose = false
+makemkvcon_path = "/usr/bin/makemkvcon"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.makemkvcon_path.as_deref(), Some("/usr/bin/makemkvcon"));
+        assert_eq!(config.ripping_command(), Some("/usr/bin/makemkvcon"));
+    }
+
+    #[test]
+    fn test_ripping_command_priority() {
+        let config = Config {
+            makemkvcon_path: Some("/old/path".to_string()),
+            ripping: RippingConfig {
+                command: Some("flatpak run --command=makemkvcon com.makemkv.MakeMKV".to_string()),
+                makemkvcon_path: None,
+            },
+            ..Config::default()
+        };
+        // ripping.command wins over makemkvcon_path
+        assert_eq!(
+            config.ripping_command(),
+            Some("flatpak run --command=makemkvcon com.makemkv.MakeMKV")
+        );
     }
 }

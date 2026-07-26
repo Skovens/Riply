@@ -18,15 +18,15 @@ pub async fn serve(
 
     info!("Starting web server on {}", addr);
 
-    let mkv_client = infra::MakeMkvClient::new(config.makemkvcon_path.as_deref())
+    let backend = infra::MakemkvBackend::from_config_or_detect(config.ripping_command())
         .ok()
-        .map(Arc::new);
+        .map(|b| Arc::new(b) as Arc<dyn riply_core::RipBackend>);
 
     let state = Arc::new(AppState {
         db: Arc::new(db),
         config: Arc::new(RwLock::new(config)),
         sse: SseManager::new(256),
-        mkv_client,
+        backend,
     });
 
     let router = web::create_router(state);

@@ -4,7 +4,7 @@ pub mod db;
 pub mod http;
 pub mod makemkv;
 
-pub use config::Config;
+pub use config::{Config, RippingConfig};
 pub use db::Database;
 pub use http::HttpClient;
-pub use makemkv::{DriveInfo, DriveState, MakeMkvClient, MkvError, RipEvent, RipHandle};
+pub use makemkv::{DryRunBackend, MakemkvBackend, MakemkvSession};

@@ -1,5 +1,5 @@
 use clap::Subcommand;
-use infra::{MakeMkvClient, MkvError};
+use riply_core::{RipBackend, RipError};
 use tracing::info;
 
 /// Subcommands for rip operations
@@ -37,25 +37,33 @@ pub async fn rip_command(command: RipCommand) -> Result<(), anyhow::Error> {
     }
 }
 
-/// Helper to create a client, printing a helpful message if not installed.
-fn get_client() -> Result<MakeMkvClient, anyhow::Error> {
-    match MakeMkvClient::new(None) {
-        Ok(client) => Ok(client),
-        Err(MkvError::NotInstalled) => {
-            println!("MakeMKV is not installed.");
+/// Helper to create a backend, printing a helpful message if not available.
+fn get_backend() -> Result<Box<dyn RipBackend>, anyhow::Error> {
+    match infra::MakemkvBackend::auto_detect() {
+        Ok(backend) => Ok(Box::new(backend)),
+        Err(RipError::NotAvailable) => {
+            println!("No ripping backend found.");
             println!();
-            println!("Install instructions:");
-            println!("  1. Download from https://www.makemkv.com/download/");
-            println!("  2. Build from source:");
-            println!("     https://www.makemkv.com/forum/viewtopic.php?t=224");
+            println!("Install one of:");
             println!();
-            println!("Quick build (Ubuntu/Debian):");
-            println!("  sudo apt-get install build-essential pkg-config libc6-dev \\");
-            println!("    libssl-dev libexpat1-dev libavcodec-dev \\");
-            println!("    libgl1-mesa-dev qtbase5-dev zlib1g-dev");
-            println!("  tar xf makemkv-oss-*.tar.gz && cd makemkv-oss-* && ./configure && make && sudo make install");
-            println!("  tar xf makemkv-bin-*.tar.gz && cd makemkv-bin-* && make && sudo make install");
-            Err(anyhow::anyhow!("MakeMKV not installed"))
+            println!("  Option 1: Native install");
+            println!("    Download from https://www.makemkv.com/download/");
+            println!("    Or build from source:");
+            println!("      sudo apt-get install build-essential pkg-config libc6-dev \\");
+            println!("        libssl-dev libexpat1-dev libavcodec-dev \\");
+            println!("        libgl1-mesa-dev qtbase5-dev zlib1g-dev");
+            println!("      tar xf makemkv-oss-*.tar.gz && cd makemkv-oss-* && ./configure && make && sudo make install");
+            println!("      tar xf makemkv-bin-*.tar.gz && cd makemkv-bin-* && make && sudo make install");
+            println!();
+            println!("  Option 2: Flatpak");
+            println!("    flatpak install flathub com.makemkv.MakeMKV");
+            println!();
+            println!("  Option 3: Configure a custom command in config.toml:");
+            println!("    [ripping]");
+            println!("    command = \"/path/to/makemkvcon\"");
+            println!("    # or");
+            println!("    command = \"flatpak run --command=makemkvcon com.makemkv.MakeMKV\"");
+            Err(anyhow::anyhow!("No ripping backend available"))
         }
         Err(e) => Err(e.into()),
     }
@@ -63,10 +71,10 @@ fn get_client() -> Result<MakeMkvClient, anyhow::Error> {
 
 /// List available MakeMKV drives
 async fn list_drives() -> Result<(), anyhow::Error> {
-    info!("Listing MakeMKV drives");
-    let client = get_client()?;
+    info!("Listing drives");
+    let backend = get_backend()?;
 
-    let drives = client.detect_drives().await?;
+    let drives = backend.detect_drives()?;
 
     if drives.is_empty() {
         println!("No drives found");
@@ -87,15 +95,15 @@ async fn list_drives() -> Result<(), anyhow::Error> {
 /// Start ripping on a drive
 async fn start_rip(index: usize, destination: &str) -> Result<(), anyhow::Error> {
     info!("Starting rip on drive: {}", index);
-    let client = get_client()?;
-    let mut handle = client.start_rip(index, destination).await?;
+    let backend = get_backend()?;
+    let mut handle = backend.start_rip(index, destination)?;
 
     println!("Ripping started on drive {} → {}", index, destination);
     println!("Press Ctrl+C to cancel");
 
     while let Some(event) = handle.next_event().await {
         match event {
-            infra::RipEvent::Progress {
+            riply_core::RipEvent::Progress {
                 current,
                 total,
                 max,
@@ -109,15 +117,15 @@ async fn start_rip(index: usize, destination: &str) -> Result<(), anyhow::Error>
                 use std::io::Write;
                 std::io::stdout().flush().ok();
             }
-            infra::RipEvent::Complete => {
+            riply_core::RipEvent::Complete => {
                 println!("\nRip complete!");
                 break;
             }
-            infra::RipEvent::Error(e) => {
+            riply_core::RipEvent::Error(e) => {
                 println!("\nError: {}", e);
                 return Err(anyhow::anyhow!(e));
             }
-            infra::RipEvent::Message(msg) => {
+            riply_core::RipEvent::Message(msg) => {
                 println!("{}", msg);
             }
         }
