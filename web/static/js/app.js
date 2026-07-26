@@ -13,6 +13,7 @@ import { renderJobs, stopJobsPolling } from './components/jobs.js';
 import { renderFiles } from './components/files.js';
 import { renderReview } from './components/review.js';
 import { renderRipper, stopRipperPolling } from './components/ripper.js';
+import { renderSettings } from './components/settings.js';
 
 class RiplyApp {
   constructor() {
@@ -87,6 +88,9 @@ class RiplyApp {
         break;
       case 'jobs':
         renderJobs(main);
+        break;
+      case 'settings':
+        renderSettings(main);
         break;
       case 'dashboard':
       default:

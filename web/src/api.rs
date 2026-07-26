@@ -35,6 +35,7 @@ const JS_COMPONENTS_JOBS: &str = include_str!("../static/js/components/jobs.js")
 const JS_COMPONENTS_FILES: &str = include_str!("../static/js/components/files.js");
 const JS_COMPONENTS_REVIEW: &str = include_str!("../static/js/components/review.js");
 const JS_COMPONENTS_RIPPER: &str = include_str!("../static/js/components/ripper.js");
+const JS_COMPONENTS_SETTINGS: &str = include_str!("../static/js/components/settings.js");
 
 /// Shared application state
 pub struct AppState {
@@ -130,6 +131,10 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route(
             "/static/js/components/ripper.js",
             get(|| async { js_response(JS_COMPONENTS_RIPPER) }),
+        )
+        .route(
+            "/static/js/components/settings.js",
+            get(|| async { js_response(JS_COMPONENTS_SETTINGS) }),
         )
         .with_state(state)
 }
@@ -886,6 +891,7 @@ pub struct ConfigUpdateBody {
     pub port: Option<u16>,
     pub tmdb_api_key: Option<String>,
     pub omdb_api_key: Option<String>,
+    pub ripping_command: Option<String>,
 }
 
 async fn update_config(
@@ -920,6 +926,9 @@ async fn update_config(
     }
     if let Some(v) = body.omdb_api_key {
         config.omdb_api_key = Some(v);
+    }
+    if let Some(v) = body.ripping_command {
+        config.ripping.command = Some(v);
     }
 
     let updated = config.clone();
