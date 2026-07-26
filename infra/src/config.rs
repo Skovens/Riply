@@ -22,9 +22,7 @@ pub struct RippingConfig {
 impl RippingConfig {
     /// Resolve the command to use. Priority: `command` > `makemkvcon_path` (deprecated).
     pub fn resolved_command(&self) -> Option<&str> {
-        self.command
-            .as_deref()
-            .or(self.makemkvcon_path.as_deref())
+        self.command.as_deref().or(self.makemkvcon_path.as_deref())
     }
 }
 
@@ -235,7 +233,10 @@ verbose = false
 makemkvcon_path = "/usr/bin/makemkvcon"
 "#;
         let config: Config = toml::from_str(toml).unwrap();
-        assert_eq!(config.makemkvcon_path.as_deref(), Some("/usr/bin/makemkvcon"));
+        assert_eq!(
+            config.makemkvcon_path.as_deref(),
+            Some("/usr/bin/makemkvcon")
+        );
         assert_eq!(config.ripping_command(), Some("/usr/bin/makemkvcon"));
     }
 

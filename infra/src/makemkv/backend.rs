@@ -58,10 +58,7 @@ impl MakemkvBackend {
         if StdCommand::new("flatpak")
             .args(["list", "--application"])
             .output()
-            .map(|o| {
-                String::from_utf8_lossy(&o.stdout)
-                    .contains("com.makemkv.MakeMKV")
-            })
+            .map(|o| String::from_utf8_lossy(&o.stdout).contains("com.makemkv.MakeMKV"))
             .unwrap_or(false)
         {
             info!("Found MakeMKV via Flatpak");

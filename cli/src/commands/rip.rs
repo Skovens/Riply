@@ -147,10 +147,7 @@ async fn eject_disc(index: usize) -> Result<(), anyhow::Error> {
 
     // Try Linux eject command
     let device = format!("/dev/sr{}", index);
-    match std::process::Command::new("eject")
-        .arg(&device)
-        .output()
-    {
+    match std::process::Command::new("eject").arg(&device).output() {
         Ok(output) if output.status.success() => {
             println!("Ejected disc from drive {} ({})", index, device);
             Ok(())

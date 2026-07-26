@@ -1,9 +1,8 @@
 # MakeMKV Backend Abstraction — Implementation Plan
 
-## Status: IN PROGRESS
+## Status: DONE
 
-Phase 5: Abstract ripping behind traits. Separate `RipBackend` (sync, dyn-compatible)
-from `RipSession` (async, Pin<Box>). No extra dependencies.
+Completed in commit `94b3ac1` (`refactor(ripping): trait-based backend abstraction with Flatpak support`).
 
 ---
 

@@ -163,10 +163,7 @@ impl JobScheduler {
     }
 
     /// Start an analyze job.
-    pub async fn start_analyze_job<F, Fut>(
-        &self,
-        work: F,
-    ) -> Result<String, anyhow::Error>
+    pub async fn start_analyze_job<F, Fut>(&self, work: F) -> Result<String, anyhow::Error>
     where
         F: FnOnce(CancellationToken, ProgressHandle) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = Result<(), anyhow::Error>> + Send + 'static,
@@ -269,22 +266,13 @@ impl JobScheduler {
     pub async fn cleanup_finished(&self) -> usize {
         let mut jobs = self.jobs.write().await;
         let before = jobs.len();
-        jobs.retain(|_, job| {
-            matches!(
-                job.status,
-                JobStatus::Queued | JobStatus::Running
-            )
-        });
+        jobs.retain(|_, job| matches!(job.status, JobStatus::Queued | JobStatus::Running));
         before - jobs.len()
     }
 
     // --- internal ---
 
-    async fn start_job_inner<F, Fut>(
-        &self,
-        kind: JobKind,
-        work: F,
-    ) -> Result<String, anyhow::Error>
+    async fn start_job_inner<F, Fut>(&self, kind: JobKind, work: F) -> Result<String, anyhow::Error>
     where
         F: FnOnce(CancellationToken, ProgressHandle) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = Result<(), anyhow::Error>> + Send + 'static,

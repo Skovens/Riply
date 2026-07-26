@@ -279,10 +279,8 @@ mod tests {
 
     #[test]
     fn test_parse_message() {
-        let msg = parse_message_line(
-            r#"MSG:201003,0,0,"Copy complete.","MakeMKV copy complete.""#,
-        )
-        .unwrap();
+        let msg = parse_message_line(r#"MSG:201003,0,0,"Copy complete.","MakeMKV copy complete.""#)
+            .unwrap();
         assert_eq!(msg.code, 201003);
         assert_eq!(msg.flags, 0);
         assert_eq!(msg.message, "Copy complete.");
@@ -290,10 +288,8 @@ mod tests {
 
     #[test]
     fn test_parse_message_with_params() {
-        let msg = parse_message_line(
-            r#"MSG:301001,0,1,"No disc found.","Drive %1 has no disc.""#,
-        )
-        .unwrap();
+        let msg = parse_message_line(r#"MSG:301001,0,1,"No disc found.","Drive %1 has no disc.""#)
+            .unwrap();
         assert_eq!(msg.code, 301001);
         assert_eq!(msg.message, "No disc found.");
     }
@@ -311,20 +307,14 @@ mod tests {
         assert!(is_error_message(
             r#"MSG:301001,0,0,"Error","Error occurred""#
         ));
-        assert!(!is_error_message(
-            r#"MSG:201003,0,0,"Done","Complete""#
-        ));
+        assert!(!is_error_message(r#"MSG:201003,0,0,"Done","Complete""#));
         assert!(!is_error_message("hello"));
     }
 
     #[test]
     fn test_is_completion_line() {
-        assert!(is_completion_line(
-            "MSG:201003,0,0,\"Copy complete.\""
-        ));
-        assert!(!is_completion_line(
-            "MSG:301001,0,0,\"Error\""
-        ));
+        assert!(is_completion_line("MSG:201003,0,0,\"Copy complete.\""));
+        assert!(!is_completion_line("MSG:301001,0,0,\"Error\""));
         assert!(!is_completion_line("PRGV:100,100,100"));
     }
 
@@ -362,10 +352,7 @@ DRV:0,1,1,24,"HL-DT-ST BD-RE BH16NS40","INCEPTION_2010"
 DRV:1,1,1,16,"TSSTcorp CDDVDW SH-224DB","THE_DARK_KNIGHT"
 DRV:2,0,0,0,"Virtual Drive","#;
 
-        let drives: Vec<_> = output
-            .lines()
-            .filter_map(parse_drive_line)
-            .collect();
+        let drives: Vec<_> = output.lines().filter_map(parse_drive_line).collect();
 
         assert_eq!(drives.len(), 3);
         assert_eq!(drives[0].disc_name.as_deref(), Some("INCEPTION_2010"));

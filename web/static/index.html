@@ -16,13 +16,20 @@
           <h1 class="header__title">Riply</h1>
         </div>
         <nav class="header__nav">
-          <button class="btn btn--secondary btn--sm" id="btn-scan">
+          <button class="header__nav-link header__nav-link--active" data-view="dashboard" onclick="window.riply.navigate('dashboard')">
+            Dashboard
+          </button>
+          <button class="header__nav-link" data-view="jobs" onclick="window.riply.navigate('jobs')">
+            Jobs
+          </button>
+          <span class="header__nav-divider"></span>
+          <button class="btn btn--secondary btn--sm" id="btn-scan" onclick="window.riply.scan()">
             Scan
           </button>
-          <button class="btn btn--secondary btn--sm" id="btn-analyze">
+          <button class="btn btn--secondary btn--sm" id="btn-analyze" onclick="window.riply.analyze()">
             Analyze
           </button>
-          <button class="btn btn--primary btn--sm" id="btn-move">
+          <button class="btn btn--primary btn--sm" id="btn-move" onclick="window.riply.moveFiles()">
             Move
           </button>
         </nav>

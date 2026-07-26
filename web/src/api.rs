@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{
@@ -13,6 +14,7 @@ use tokio::sync::RwLock;
 use tracing::info;
 
 use crate::sse::SseManager;
+use app::JobScheduler;
 use infra::{Config, Database};
 
 /// Embedded static files (compiled into the binary)
@@ -27,13 +29,16 @@ const JS_API: &str = include_str!("../static/js/api.js");
 const JS_APP: &str = include_str!("../static/js/app.js");
 const JS_STORE: &str = include_str!("../static/js/store.js");
 const JS_COMPONENTS_DASHBOARD: &str = include_str!("../static/js/components/dashboard.js");
+const JS_COMPONENTS_JOBS: &str = include_str!("../static/js/components/jobs.js");
 
 /// Shared application state
 pub struct AppState {
     pub db: Arc<Database>,
     pub config: Arc<RwLock<Config>>,
+    pub config_path: Option<String>,
     pub sse: SseManager,
     pub backend: Option<Arc<dyn RipBackend>>,
+    pub scheduler: JobScheduler,
 }
 
 /// Create the API router with all endpoints and static file serving
@@ -51,8 +56,13 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/review", get(get_review_queue))
         .route("/api/review/:id/accept", post(accept_file))
         .route("/api/review/:id/reject", post(reject_file))
+        .route("/api/scan", post(start_scan))
+        .route("/api/analyze", post(start_analyze))
         .route("/api/move", post(start_move))
         .route("/api/move/status", get(get_move_status))
+        .route("/api/jobs", get(list_jobs))
+        .route("/api/jobs/:id", get(get_job))
+        .route("/api/jobs/:id/cancel", post(cancel_job))
         .route("/api/ripper/drives", get(list_drives))
         .route("/api/ripper/:index/start", post(start_rip))
         .route("/api/ripper/:index/cancel", post(cancel_rip))
@@ -60,16 +70,44 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/sse", get(sse_endpoint))
         // Static file routes (embedded in binary)
         .route("/", get(index_handler))
-        .route("/static/css/style.css", get(|| async { css_response(CSS_STYLE, "text/css") }))
-        .route("/static/css/variables.css", get(|| async { css_response(CSS_VARIABLES, "text/css") }))
-        .route("/static/css/base.css", get(|| async { css_response(CSS_BASE, "text/css") }))
-        .route("/static/css/layout.css", get(|| async { css_response(CSS_LAYOUT, "text/css") }))
-        .route("/static/css/components.css", get(|| async { css_response(CSS_COMPONENTS, "text/css") }))
-        .route("/static/css/utilities.css", get(|| async { css_response(CSS_UTILITIES, "text/css") }))
+        .route(
+            "/static/css/style.css",
+            get(|| async { css_response(CSS_STYLE, "text/css") }),
+        )
+        .route(
+            "/static/css/variables.css",
+            get(|| async { css_response(CSS_VARIABLES, "text/css") }),
+        )
+        .route(
+            "/static/css/base.css",
+            get(|| async { css_response(CSS_BASE, "text/css") }),
+        )
+        .route(
+            "/static/css/layout.css",
+            get(|| async { css_response(CSS_LAYOUT, "text/css") }),
+        )
+        .route(
+            "/static/css/components.css",
+            get(|| async { css_response(CSS_COMPONENTS, "text/css") }),
+        )
+        .route(
+            "/static/css/utilities.css",
+            get(|| async { css_response(CSS_UTILITIES, "text/css") }),
+        )
         .route("/static/js/api.js", get(|| async { js_response(JS_API) }))
         .route("/static/js/app.js", get(|| async { js_response(JS_APP) }))
-        .route("/static/js/store.js", get(|| async { js_response(JS_STORE) }))
-        .route("/static/js/components/dashboard.js", get(|| async { js_response(JS_COMPONENTS_DASHBOARD) }))
+        .route(
+            "/static/js/store.js",
+            get(|| async { js_response(JS_STORE) }),
+        )
+        .route(
+            "/static/js/components/dashboard.js",
+            get(|| async { js_response(JS_COMPONENTS_DASHBOARD) }),
+        )
+        .route(
+            "/static/js/components/jobs.js",
+            get(|| async { js_response(JS_COMPONENTS_JOBS) }),
+        )
         .with_state(state)
 }
 
@@ -446,11 +484,227 @@ async fn get_move_status(
     })))
 }
 
+// --- Scan ---
+
+#[derive(Debug, Deserialize)]
+pub struct ScanBody {
+    pub directory: String,
+}
+
+#[derive(Serialize)]
+pub struct JobStartedResponse {
+    pub job_id: String,
+    pub status: String,
+}
+
+async fn start_scan(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<ScanBody>,
+) -> Result<Json<ApiResponse<JobStartedResponse>>, (StatusCode, String)> {
+    let dir = PathBuf::from(&body.directory);
+    if !dir.exists() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("Directory does not exist: {}", body.directory),
+        ));
+    }
+
+    let db = state.db.clone();
+    let sse = state.sse.clone();
+    let directory = body.directory.clone();
+
+    let job_id = state
+        .scheduler
+        .start_scan_job(&body.directory, move |cancel, progress| {
+            let db = db.clone();
+            let sse = sse.clone();
+            let directory = directory.clone();
+            async move {
+                let scanner = app::ScannerService::new();
+                let records = scanner.scan_directory(&dir).await?;
+                progress.set_total(records.len());
+
+                sse.send_status(&format!("scan:starting:{}", records.len()));
+
+                for (i, record) in records.iter().enumerate() {
+                    if cancel.is_cancelled() {
+                        sse.send_status("scan:cancelled");
+                        return Ok(());
+                    }
+                    if let Err(e) = db.save_file(record).await {
+                        sse.send_log(
+                            "warn",
+                            &format!("Failed to save {}: {}", record.filename, e),
+                        );
+                    }
+                    progress.increment();
+                    if (i + 1) % 10 == 0 || i + 1 == records.len() {
+                        sse.send_status(&format!("scan:progress:{}:{}", i + 1, records.len()));
+                    }
+                }
+
+                sse.send_status(&format!("scan:complete:{}", records.len()));
+                info!("Scan complete: {} files from {}", records.len(), directory);
+                Ok(())
+            }
+        })
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(ApiResponse::ok(JobStartedResponse {
+        job_id,
+        status: "Queued".to_string(),
+    })))
+}
+
+// --- Analyze ---
+
+async fn start_analyze(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ApiResponse<JobStartedResponse>>, (StatusCode, String)> {
+    let db = state.db.clone();
+    let sse = state.sse.clone();
+    let config = state.config.read().await.clone();
+
+    let job_id = state
+        .scheduler
+        .start_analyze_job(move |cancel, progress| {
+            let db = db.clone();
+            let sse = sse.clone();
+            async move {
+                let records = db.get_files_by_status("Scanned").await?;
+                if records.is_empty() {
+                    sse.send_status("analyze:complete:0");
+                    return Ok(());
+                }
+
+                progress.set_total(records.len());
+                sse.send_status(&format!("analyze:starting:{}", records.len()));
+
+                let searcher: Option<Box<dyn riply_core::MetadataSearcher>> =
+                    if config.tmdb_api_key.is_some() || config.omdb_api_key.is_some() {
+                        let client = infra::HttpClient::new(
+                            config.tmdb_api_key.clone(),
+                            config.omdb_api_key.clone(),
+                        );
+                        Some(Box::new(client))
+                    } else {
+                        None
+                    };
+
+                let analyzer = app::AnalyzerService::new(searcher);
+                let mut matched = 0;
+                let mut review = 0;
+
+                for (i, record) in records.iter().enumerate() {
+                    if cancel.is_cancelled() {
+                        sse.send_status("analyze:cancelled");
+                        return Ok(());
+                    }
+                    match analyzer.analyze_file(record).await {
+                        Ok(updated) => {
+                            match updated.status {
+                                riply_core::PipelineStatus::Matched => matched += 1,
+                                riply_core::PipelineStatus::NeedsReview => review += 1,
+                                _ => {}
+                            }
+                            let _ = db.update_file(&updated).await;
+                        }
+                        Err(e) => {
+                            sse.send_log(
+                                "warn",
+                                &format!("Failed to analyze {}: {}", record.filename, e),
+                            );
+                        }
+                    }
+                    progress.increment();
+                    if (i + 1) % 10 == 0 || i + 1 == records.len() {
+                        sse.send_status(&format!("analyze:progress:{}:{}", i + 1, records.len()));
+                    }
+                }
+
+                sse.send_status(&format!(
+                    "analyze:complete:matched={},review={}",
+                    matched, review
+                ));
+                info!(
+                    "Analysis complete: {} matched, {} need review",
+                    matched, review
+                );
+                Ok(())
+            }
+        })
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(ApiResponse::ok(JobStartedResponse {
+        job_id,
+        status: "Queued".to_string(),
+    })))
+}
+
+// --- Jobs ---
+
+#[derive(Serialize)]
+pub struct JobInfoResponse {
+    pub id: String,
+    pub kind: String,
+    pub status: String,
+    pub progress_total: usize,
+    pub progress_processed: usize,
+}
+
+async fn list_jobs(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Vec<JobInfoResponse>>> {
+    let jobs = state.scheduler.list_jobs().await;
+    let items: Vec<JobInfoResponse> = jobs
+        .into_iter()
+        .map(|j| JobInfoResponse {
+            id: j.id,
+            kind: j.kind.to_string(),
+            status: j.status.to_string(),
+            progress_total: j.progress.total,
+            progress_processed: j.progress.processed,
+        })
+        .collect();
+    Json(ApiResponse::ok(items))
+}
+
+async fn get_job(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<ApiResponse<JobInfoResponse>>, (StatusCode, String)> {
+    let job = state
+        .scheduler
+        .get_job_status(&id)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+
+    Ok(Json(ApiResponse::ok(JobInfoResponse {
+        id: job.id,
+        kind: job.kind.to_string(),
+        status: job.status.to_string(),
+        progress_total: job.progress.total,
+        progress_processed: job.progress.processed,
+    })))
+}
+
+async fn cancel_job(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<ApiResponse<String>>, (StatusCode, String)> {
+    state
+        .scheduler
+        .cancel_job(&id)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+
+    state.sse.send_status(&format!("job:cancelled:{}", id));
+    Ok(Json(ApiResponse::ok(id)))
+}
+
 // --- Ripper ---
 
-async fn list_drives(
-    State(state): State<Arc<AppState>>,
-) -> Json<ApiResponse<Vec<DriveInfo>>> {
+async fn list_drives(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Vec<DriveInfo>>> {
     let backend = match &state.backend {
         Some(b) => b,
         None => return Json(ApiResponse::ok(vec![])),
@@ -587,6 +841,14 @@ async fn update_config(
     }
 
     let updated = config.clone();
+
+    // Persist to disk if config path is known
+    if let Some(ref path) = state.config_path.clone() {
+        if let Err(e) = updated.save(path) {
+            tracing::warn!("Failed to save config to {}: {}", path, e);
+        }
+    }
+
     Ok(Json(ApiResponse::ok(updated)))
 }
 

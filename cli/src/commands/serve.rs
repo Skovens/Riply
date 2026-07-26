@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use app::JobScheduler;
 use infra::{Config, Database};
 use tokio::sync::RwLock;
 use tracing::info;
@@ -9,6 +10,7 @@ use web::{AppState, SseManager};
 pub async fn serve(
     db: Database,
     config: Config,
+    config_path: Option<String>,
     host: Option<String>,
     port: Option<u16>,
 ) -> Result<(), anyhow::Error> {
@@ -25,8 +27,10 @@ pub async fn serve(
     let state = Arc::new(AppState {
         db: Arc::new(db),
         config: Arc::new(RwLock::new(config)),
+        config_path,
         sse: SseManager::new(256),
         backend,
+        scheduler: JobScheduler::new(),
     });
 
     let router = web::create_router(state);

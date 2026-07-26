@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use reqwest::Client;
-use riply_core::{MetadataMatch, MetadataSearcher, MediaType};
+use riply_core::{MediaType, MetadataMatch, MetadataSearcher};
 use tracing::info;
 
 /// HTTP client adapter - handles API requests with retry and rate limiting
@@ -81,12 +81,7 @@ impl HttpClient {
         tmdb_api_key: Option<String>,
         omdb_api_key: Option<String>,
     ) -> Self {
-        Self::with_urls(
-            base_url.clone(),
-            base_url,
-            tmdb_api_key,
-            omdb_api_key,
-        )
+        Self::with_urls(base_url.clone(), base_url, tmdb_api_key, omdb_api_key)
     }
 
     pub async fn search_tmdb_movies(
@@ -107,7 +102,14 @@ impl HttpClient {
         }
 
         let url = format!("{}/search/movie", self.tmdb_base_url);
-        let resp: TmdbSearchResponse = self.client.get(&url).query(&params).send().await?.json().await?;
+        let resp: TmdbSearchResponse = self
+            .client
+            .get(&url)
+            .query(&params)
+            .send()
+            .await?
+            .json()
+            .await?;
 
         let matches = resp
             .results
@@ -126,10 +128,7 @@ impl HttpClient {
         Ok(matches)
     }
 
-    pub async fn search_tmdb_tv(
-        &self,
-        query: &str,
-    ) -> Result<Vec<MetadataMatch>, anyhow::Error> {
+    pub async fn search_tmdb_tv(&self, query: &str) -> Result<Vec<MetadataMatch>, anyhow::Error> {
         let api_key = match &self.tmdb_api_key {
             Some(key) => key.clone(),
             None => return Ok(vec![]),
@@ -140,7 +139,14 @@ impl HttpClient {
         params.insert("query".to_string(), query.to_string());
 
         let url = format!("{}/search/tv", self.tmdb_base_url);
-        let resp: TmdbSearchResponse = self.client.get(&url).query(&params).send().await?.json().await?;
+        let resp: TmdbSearchResponse = self
+            .client
+            .get(&url)
+            .query(&params)
+            .send()
+            .await?
+            .json()
+            .await?;
 
         let matches = resp
             .results
@@ -178,7 +184,14 @@ impl HttpClient {
         params.insert("type".to_string(), "movie".to_string());
 
         let url = format!("{}/", self.omdb_base_url);
-        let resp: OmdbResponse = self.client.get(&url).query(&params).send().await?.json().await?;
+        let resp: OmdbResponse = self
+            .client
+            .get(&url)
+            .query(&params)
+            .send()
+            .await?
+            .json()
+            .await?;
 
         if resp.response.as_deref() == Some("True") {
             let year = resp.year.as_ref().and_then(|y| y.trim().parse().ok());
@@ -199,8 +212,11 @@ impl MetadataSearcher for HttpClient {
         &self,
         query: &str,
         year: Option<u32>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<MetadataMatch>, anyhow::Error>> + Send + '_>>
-    {
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<Vec<MetadataMatch>, anyhow::Error>> + Send + '_,
+        >,
+    > {
         let query = query.to_string();
         Box::pin(async move { self.search_tmdb_movies(&query, year).await })
     }
@@ -208,8 +224,11 @@ impl MetadataSearcher for HttpClient {
     fn search_tv(
         &self,
         query: &str,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<MetadataMatch>, anyhow::Error>> + Send + '_>>
-    {
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<Vec<MetadataMatch>, anyhow::Error>> + Send + '_,
+        >,
+    > {
         let query = query.to_string();
         Box::pin(async move { self.search_tmdb_tv(&query).await })
     }
@@ -219,8 +238,11 @@ impl MetadataSearcher for HttpClient {
         query: &str,
         year: Option<u32>,
         media_type: &MediaType,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<MetadataMatch>, anyhow::Error>> + Send + '_>>
-    {
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<Vec<MetadataMatch>, anyhow::Error>> + Send + '_,
+        >,
+    > {
         let query = query.to_string();
         let media_type = media_type.clone();
         Box::pin(async move {
@@ -244,7 +266,8 @@ impl MetadataSearcher for HttpClient {
 mod tests {
     use super::*;
     use riply_core::MetadataSearcher;
-    use wiremock::matchers::{method, path_regex};    use wiremock::{Mock, MockServer, ResponseTemplate};
+    use wiremock::matchers::{method, path_regex};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
     async fn test_tmdb_movie_search() {
@@ -264,11 +287,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = HttpClient::for_testing(
-            mock_server.uri(),
-            Some("test_key".to_string()),
-            None,
-        );
+        let client = HttpClient::for_testing(mock_server.uri(), Some("test_key".to_string()), None);
 
         let results = client
             .search_movies("Fight Club", Some(1999))
@@ -300,16 +319,9 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = HttpClient::for_testing(
-            mock_server.uri(),
-            Some("test_key".to_string()),
-            None,
-        );
+        let client = HttpClient::for_testing(mock_server.uri(), Some("test_key".to_string()), None);
 
-        let results = client
-            .search_tv("Breaking Bad")
-            .await
-            .unwrap();
+        let results = client.search_tv("Breaking Bad").await.unwrap();
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].title, "Breaking Bad");
@@ -332,16 +344,9 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = HttpClient::for_testing(
-            mock_server.uri(),
-            None,
-            Some("test_key".to_string()),
-        );
+        let client = HttpClient::for_testing(mock_server.uri(), None, Some("test_key".to_string()));
 
-        let results = client
-            .search_omdb("The Matrix", Some(1999))
-            .await
-            .unwrap();
+        let results = client.search_omdb("The Matrix", Some(1999)).await.unwrap();
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].title, "The Matrix");
@@ -352,22 +357,13 @@ mod tests {
     async fn test_no_api_key_returns_empty() {
         let client = HttpClient::new(None, None);
 
-        let results = client
-            .search_movies("Fight Club", None)
-            .await
-            .unwrap();
+        let results = client.search_movies("Fight Club", None).await.unwrap();
         assert!(results.is_empty());
 
-        let results = client
-            .search_tv("Breaking Bad")
-            .await
-            .unwrap();
+        let results = client.search_tv("Breaking Bad").await.unwrap();
         assert!(results.is_empty());
 
-        let results = client
-            .search_omdb("The Matrix", None)
-            .await
-            .unwrap();
+        let results = client.search_omdb("The Matrix", None).await.unwrap();
         assert!(results.is_empty());
     }
 }

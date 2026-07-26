@@ -112,7 +112,7 @@ async fn main() -> anyhow::Result<()> {
             do_rip(rip_command).await?;
         }
         Command::Serve { host, port } => {
-            commands::serve(db, config, host, port).await?;
+            commands::serve(db, config, Some(cli.config), host, port).await?;
         }
         Command::Status => {
             show_status(&db).await?;

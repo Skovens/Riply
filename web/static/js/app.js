@@ -1,13 +1,14 @@
 /**
  * Riply Web Application
- * 
+ *
  * Main entry point. Initializes the UI, connects to SSE,
  * and sets up global event handlers.
  */
 
-import { healthCheck, review, connectSSE } from './api.js';
+import { healthCheck, scan, analyze, move, review, connectSSE } from './api.js';
 import { store } from './store.js';
 import { renderDashboard } from './components/dashboard.js';
+import { renderJobs, stopJobsPolling } from './components/jobs.js';
 
 class RiplyApp {
   constructor() {
@@ -27,8 +28,16 @@ class RiplyApp {
       return;
     }
 
-    // Render initial view
-    this.renderView();
+    // Load config for default scan directory
+    try {
+      const { config: cfg } = await import('./api.js');
+      const result = await cfg.get();
+      if (result.data) store.set({ config: result.data });
+    } catch (_) {}
+
+    // Handle hash routing
+    this.handleRoute();
+    window.addEventListener('hashchange', () => this.handleRoute());
 
     // Connect to SSE for live updates
     this.connectSSE();
@@ -39,19 +48,36 @@ class RiplyApp {
     console.log('Riply ready');
   }
 
+  handleRoute() {
+    const hash = window.location.hash.slice(1) || '/';
+    const view = hash.replace(/^\//, '') || 'dashboard';
+    this.currentView = view;
+    stopJobsPolling();
+    this.renderView();
+    this.updateNav();
+  }
+
+  updateNav() {
+    document.querySelectorAll('.header__nav-link').forEach(link => {
+      const view = link.dataset.view;
+      link.classList.toggle('header__nav-link--active', view === this.currentView);
+    });
+  }
+
   renderView() {
     const main = document.getElementById('main-content');
     if (!main) return;
 
-    // Clear loading state
     main.innerHTML = '';
 
     switch (this.currentView) {
-      case 'dashboard':
-        renderDashboard(main);
+      case 'jobs':
+        renderJobs(main);
         break;
+      case 'dashboard':
       default:
         renderDashboard(main);
+        break;
     }
   }
 
@@ -60,20 +86,56 @@ class RiplyApp {
       console.log('SSE:', message);
       store.set({ lastEvent: message });
 
-      // Handle specific events
-      if (message.startsWith('review:')) {
-        // Refresh review queue
-        this.renderView();
-      } else if (message.startsWith('rip:')) {
-        // Refresh drives
-        this.renderView();
+      // Refresh view on relevant events
+      if (message.startsWith('review:') || message.startsWith('scan:') ||
+          message.startsWith('analyze:') || message.startsWith('move:') ||
+          message.startsWith('job:')) {
+        if (this.currentView === 'jobs') {
+          this.renderView();
+        }
       }
     });
   }
 
   setupGlobals() {
-    // Expose review actions for inline onclick handlers
     window.riply = {
+      scan: async () => {
+        const config = store.state.config;
+        const defaultDir = config?.scan_directory || '.';
+        const directory = prompt('Directory to scan:', defaultDir);
+        if (!directory) return;
+
+        try {
+          const result = await scan.start(directory);
+          this.showToast(`Scan started (job ${result.data?.job_id})`, 'success');
+          window.location.hash = '#/jobs';
+        } catch (error) {
+          this.showToast(`Failed to start scan: ${error.message}`, 'error');
+        }
+      },
+
+      analyze: async () => {
+        try {
+          const result = await analyze.start();
+          this.showToast(`Analysis started (job ${result.data?.job_id})`, 'success');
+          window.location.hash = '#/jobs';
+        } catch (error) {
+          this.showToast(`Failed to start analysis: ${error.message}`, 'error');
+        }
+      },
+
+      moveFiles: async () => {
+        if (!confirm('Move all confirmed files to the library?')) return;
+
+        try {
+          const result = await move.start();
+          this.showToast(`Move started (job ${result.data?.job_id})`, 'success');
+          window.location.hash = '#/jobs';
+        } catch (error) {
+          this.showToast(`Failed to start move: ${error.message}`, 'error');
+        }
+      },
+
       review: {
         accept: async (id) => {
           try {
@@ -93,6 +155,10 @@ class RiplyApp {
             this.showToast(`Failed to reject: ${error.message}`, 'error');
           }
         },
+      },
+
+      navigate: (view) => {
+        window.location.hash = `#/${view}`;
       },
     };
   }
@@ -119,12 +185,10 @@ class RiplyApp {
     toast.textContent = message;
     document.body.appendChild(toast);
 
-    // Trigger animation
     requestAnimationFrame(() => {
       toast.classList.add('toast--visible');
     });
 
-    // Auto-remove after 3 seconds
     setTimeout(() => {
       toast.classList.remove('toast--visible');
       setTimeout(() => toast.remove(), 200);
@@ -135,6 +199,7 @@ class RiplyApp {
     if (this.unsubscribeSSE) {
       this.unsubscribeSSE();
     }
+    stopJobsPolling();
   }
 }
 

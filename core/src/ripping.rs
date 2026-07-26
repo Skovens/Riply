@@ -41,11 +41,7 @@ impl fmt::Display for DriveState {
 
 #[derive(Debug, Clone)]
 pub enum RipEvent {
-    Progress {
-        current: u64,
-        total: u64,
-        max: u64,
-    },
+    Progress { current: u64, total: u64, max: u64 },
     Message(String),
     Complete,
     Error(String),

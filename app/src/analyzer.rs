@@ -1,5 +1,5 @@
 use regex::Regex;
-use riply_core::{MetadataSearcher, MediaType};
+use riply_core::{MediaType, MetadataSearcher};
 use tracing::info;
 
 /// Analyzer service - orchestrates media analysis operations
@@ -48,7 +48,10 @@ impl AnalyzerService {
                     }
                 }
                 Err(e) => {
-                    info!("Metadata search failed, falling back to filename parsing: {}", e);
+                    info!(
+                        "Metadata search failed, falling back to filename parsing: {}",
+                        e
+                    );
                 }
             }
         }

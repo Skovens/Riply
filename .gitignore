@@ -30,3 +30,6 @@ Thumbs.db
 # Coverage
 *.profraw
 *.profdata
+
+# User config
+config.toml

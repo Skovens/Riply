@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tempfile::NamedTempFile;
 use tokio::sync::RwLock;
 
+use app::JobScheduler;
 use infra::{Config, Database};
 use web::{create_router, AppState, SseManager};
 
@@ -22,8 +23,10 @@ async fn setup() -> TestContext {
     let state = Arc::new(AppState {
         db: Arc::new(db),
         config: Arc::new(RwLock::new(Config::default())),
+        config_path: None,
         sse: SseManager::new(16),
         backend: None,
+        scheduler: JobScheduler::new(),
     });
 
     let router = create_router(state.clone());

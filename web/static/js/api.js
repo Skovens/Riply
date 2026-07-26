@@ -102,6 +102,44 @@ export const review = {
 };
 
 /**
+ * Scan API
+ */
+export const scan = {
+  start(directory) {
+    return request('/api/scan', {
+      method: 'POST',
+      body: JSON.stringify({ directory }),
+    });
+  },
+};
+
+/**
+ * Analyze API
+ */
+export const analyze = {
+  start() {
+    return request('/api/analyze', { method: 'POST' });
+  },
+};
+
+/**
+ * Jobs API
+ */
+export const jobs = {
+  list() {
+    return request('/api/jobs');
+  },
+
+  get(id) {
+    return request(`/api/jobs/${id}`);
+  },
+
+  cancel(id) {
+    return request(`/api/jobs/${id}/cancel`, { method: 'POST' });
+  },
+};
+
+/**
  * Move API
  */
 export const move = {
@@ -174,6 +212,9 @@ export function connectSSE(onMessage) {
 
 export default {
   healthCheck,
+  scan,
+  analyze,
+  jobs,
   files,
   review,
   move,
