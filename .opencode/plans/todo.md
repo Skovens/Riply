@@ -57,7 +57,7 @@ Source: `improvements.md`
 | 15 | Quick win: Add retry logic to HTTP client (`backon` crate) | PENDING | `improvements.md` §2.4 |
 | 16 | Quick win: Add graceful shutdown to server in `cli/src/main.rs` | PENDING | `improvements.md` §2.2 |
 | 17 | Quick win: Add `--json` flags to `riply status` and `riply rip list` | PENDING | `improvements.md` §3.3 |
-| 18 | Structure: Split monolithic router into per-domain modules (`files.rs`, `review.rs`, `scan.rs`, `analyze.rs`, `mover.rs`, `jobs.rs`, `ripper.rs`, `config.rs`) | PENDING | `improvements.md` §1.2 |
+| 18 | Structure: Split monolithic router into per-domain modules (`files.rs`, `review.rs`, `scan.rs`, `analyze.rs`, `mover.rs`, `jobs.rs`, `ripper.rs`, `config.rs`) | DONE | `improvements.md` §1.2 |
 | 19 | Structure: Add typed `WebError` type implementing `IntoResponse` | PENDING | `improvements.md` §1.3 |
 | 20 | Structure: Add versioned database migrations with `sqlx::migrate!()` | PENDING | `improvements.md` §1.4 |
 | 21 | Robustness: Add CHECK constraints and indexes to database | PENDING | `improvements.md` §2.3 |
