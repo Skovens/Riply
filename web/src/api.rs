@@ -73,6 +73,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/analyze", post(start_analyze))
         .route("/api/move", post(start_move))
         .route("/api/move/status", get(get_move_status))
+        .route("/api/move/preview", get(preview_move))
         .route("/api/jobs", get(list_jobs))
         .route("/api/jobs/:id", get(get_job))
         .route("/api/jobs/:id/cancel", post(cancel_job))
@@ -457,6 +458,50 @@ async fn get_move_status(
         confirmed_count: confirmed,
         moved_count: moved,
     })))
+}
+
+#[derive(Serialize)]
+pub struct MovePreviewItem {
+    pub id: String,
+    pub filename: String,
+    pub source_path: String,
+    pub dest_path: String,
+    pub media_type: String,
+}
+
+async fn preview_move(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ApiResponse<Vec<MovePreviewItem>>>, (StatusCode, String)> {
+    let (movies_dir, tv_dir) = {
+        let config = state.config.read().await;
+        (config.movies_directory.clone(), config.tv_directory.clone())
+    };
+
+    let files = state
+        .db
+        .get_files_by_status("Confirmed")
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let mover = app::MoverService::new();
+    let mut previews = Vec::new();
+
+    for file in &files {
+        match mover.preview_move(file, &PathBuf::from(&movies_dir), &PathBuf::from(&tv_dir)).await {
+            Ok(dest_path) => previews.push(MovePreviewItem {
+                id: file.id.clone(),
+                filename: file.filename.clone(),
+                source_path: file.path.to_string_lossy().to_string(),
+                dest_path: dest_path.to_string_lossy().to_string(),
+                media_type: file.media_type.to_string(),
+            }),
+            Err(e) => {
+                tracing::warn!("Failed to preview move for {}: {}", file.filename, e);
+            }
+        }
+    }
+
+    Ok(Json(ApiResponse::ok(previews)))
 }
 
 // --- Scan ---

@@ -58,6 +58,26 @@
     }
   }
 
+  let previewOpen = $state(false);
+  let previewItems = $state([]);
+  let previewLoading = $state(false);
+
+  async function handlePreview() {
+    previewLoading = true;
+    previewOpen = true;
+    try {
+      const res = await fetch('/api/move/preview');
+      if (res.ok) {
+        const data = await res.json();
+        previewItems = data.data || [];
+      }
+    } catch (e) {
+      console.error('Preview error:', e);
+    } finally {
+      previewLoading = false;
+    }
+  }
+
   async function handleMove() {
     try {
       const res = await fetch('/api/move', { method: 'POST' });
@@ -92,6 +112,9 @@
         <button class="btn btn--secondary btn--sm" onclick={handleAnalyze}>
           Analyze
         </button>
+        <button class="btn btn--secondary btn--sm" onclick={handlePreview}>
+          Preview
+        </button>
         <button class="btn btn--primary btn--sm" onclick={handleMove}>
           Move
         </button>
@@ -107,3 +130,52 @@
     Riply &mdash; Media Management
   </footer>
 </div>
+
+{#if previewOpen}
+  <div class="modal-overlay" onclick={() => previewOpen = false}>
+    <div class="modal" onclick={(e) => e.stopPropagation()}>
+      <div class="modal__header">
+        <h3 class="modal__title">Move Preview</h3>
+        <button class="modal__close" onclick={() => previewOpen = false}>&times;</button>
+      </div>
+      <div class="modal__body">
+        {#if previewLoading}
+          <div class="empty"><div class="spinner"></div></div>
+        {:else if previewItems.length === 0}
+          <div class="empty">
+            <div class="empty__icon">&#128193;</div>
+            <div class="empty__title">No files to move</div>
+            <div class="empty__description">No confirmed files found</div>
+          </div>
+        {:else}
+          <div class="table" style="overflow-x: auto;">
+            <table>
+              <thead>
+                <tr>
+                  <th>File</th>
+                  <th>Source</th>
+                  <th>Destination</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each previewItems as item}
+                  <tr>
+                    <td class="truncate" style="max-width: 150px;">{item.filename}</td>
+                    <td class="truncate" style="max-width: 200px;" title={item.source_path}>{item.source_path}</td>
+                    <td class="truncate" style="max-width: 250px;" title={item.dest_path}>{item.dest_path}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+          <div class="text-sm text-muted" style="margin-top: var(--space-2);">
+            {previewItems.length} file(s) will be moved
+          </div>
+        {/if}
+      </div>
+      <div class="modal__footer">
+        <button class="btn btn--secondary" onclick={() => previewOpen = false}>Close</button>
+      </div>
+    </div>
+  </div>
+{/if}
