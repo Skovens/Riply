@@ -27,13 +27,24 @@ pub async fn serve(
 
     let state = Arc::new(AppState {
         db: Arc::new(db),
-        config: Arc::new(RwLock::new(config)),
+        config: Arc::new(RwLock::new(config.clone())),
         config_path,
         sse: SseManager::new(256),
         backend,
         scheduler: JobScheduler::new(),
         active_rips: RwLock::new(HashMap::new()),
+        autorip_handle: RwLock::new(None),
     });
+
+    // Start autorip if enabled
+    if config.ripping.autorip_enabled {
+        let state_clone = Arc::clone(&state);
+        let handle = tokio::spawn(async move {
+            web::autorip_poll_loop(state_clone).await;
+        });
+        *state.autorip_handle.write().await = Some(handle);
+        info!("Auto-rip enabled — polling for disc insertion");
+    }
 
     let router = web::create_router(state);
 

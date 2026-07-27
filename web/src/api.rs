@@ -34,6 +34,8 @@ pub struct AppState {
     pub scheduler: JobScheduler,
     /// Active rip tasks keyed by drive index. Used for cancellation.
     pub active_rips: RwLock<HashMap<usize, tokio::task::JoinHandle<()>>>,
+    /// Handle for the autorip background polling task.
+    pub autorip_handle: RwLock<Option<tokio::task::JoinHandle<()>>>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -132,6 +134,8 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/ripper/:index/start", post(ripper::start_rip))
         .route("/api/ripper/:index/cancel", post(ripper::cancel_rip))
         .route("/api/ripper/:index/eject", post(ripper::eject_disc))
+        .route("/api/ripper/autorip", get(ripper::autorip_status))
+        .route("/api/ripper/autorip/toggle", post(ripper::autorip_toggle))
         // Config
         .route("/api/config", get(cfg::get_config).put(cfg::update_config))
         // SSE

@@ -17,6 +17,18 @@ pub struct RippingConfig {
     /// Still loaded for backward compatibility — maps to `command`.
     #[serde(default)]
     pub makemkvcon_path: Option<String>,
+
+    /// Automatically rip discs when inserted. Default: true.
+    #[serde(default = "default_true")]
+    pub autorip_enabled: bool,
+
+    /// Eject disc after auto-rip completes. Default: true.
+    #[serde(default = "default_true")]
+    pub autorip_eject_after: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl RippingConfig {
@@ -237,6 +249,7 @@ mod tests {
         let c = RippingConfig {
             command: Some("flatpak run --command=makemkvcon com.makemkv.MakeMKV".to_string()),
             makemkvcon_path: Some("/usr/bin/makemkvcon".to_string()),
+            ..Default::default()
         };
         // command wins over makemkvcon_path
         assert_eq!(
@@ -247,6 +260,7 @@ mod tests {
         let c = RippingConfig {
             command: None,
             makemkvcon_path: Some("/usr/bin/makemkvcon".to_string()),
+            ..Default::default()
         };
         assert_eq!(c.resolved_command(), Some("/usr/bin/makemkvcon"));
     }
@@ -275,6 +289,7 @@ makemkvcon_path = "/usr/bin/makemkvcon"
             ripping: RippingConfig {
                 command: Some("flatpak run --command=makemkvcon com.makemkv.MakeMKV".to_string()),
                 makemkvcon_path: None,
+                ..Default::default()
             },
             ..Config::default()
         };
