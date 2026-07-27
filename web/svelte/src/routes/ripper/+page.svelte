@@ -10,6 +10,7 @@
   let loading = $state(true);
   let pollInterval = null;
   let ripProgress = $state({});
+  let ripEta = $state({});
   let disconnectSSE = null;
 
   onMount(() => {
@@ -49,17 +50,23 @@
     } else if (action === 'progress') {
       const pct = parseInt(parts[3]);
       ripProgress[index] = pct;
+      // ETA may or may not be present (rip:progress:{index}:{pct}:{eta_secs})
+      const eta = parts.length > 4 ? parseInt(parts[4]) : null;
+      ripEta[index] = eta;
       updateDriveState(index, 'Ripping');
     } else if (action === 'complete') {
       delete ripProgress[index];
+      delete ripEta[index];
       updateDriveState(index, 'Complete');
       loadDrives();
     } else if (action === 'error') {
       delete ripProgress[index];
+      delete ripEta[index];
       updateDriveState(index, 'Error');
       loadDrives();
     } else if (action === 'cancelled') {
       delete ripProgress[index];
+      delete ripEta[index];
       loadDrives();
     }
   }
@@ -210,6 +217,9 @@
                 </div>
                 <div class="text-sm text-muted" style="margin-top: var(--space-1);">
                   {ripProgress[drive.index]}%
+                  {#if ripEta[drive.index] && ripEta[drive.index] > 0}
+                    — {Math.floor(ripEta[drive.index] / 60)}m {ripEta[drive.index] % 60}s remaining
+                  {/if}
                 </div>
               {/if}
             </div>
