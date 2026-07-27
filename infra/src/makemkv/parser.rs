@@ -187,6 +187,66 @@ pub fn is_completion_line(line: &str) -> bool {
     line.starts_with("MSG:201003,")
 }
 
+/// Parse a MakeMKV disc name into a title and optional year.
+///
+/// MakeMKV disc names follow patterns like `INCEPTION_2010`, `THE_DARK_KNIGHT`,
+/// or `BRAVEHEART`. This function replaces underscores with spaces, extracts
+/// a trailing 4-digit year if present, and title-cases the result.
+///
+/// # Examples
+/// ```
+/// use infra::makemkv::parser::parse_disc_name;
+///
+/// assert_eq!(parse_disc_name("INCEPTION_2010"), ("Inception".to_string(), Some(2010)));
+/// assert_eq!(parse_disc_name("THE_DARK_KNIGHT"), ("The Dark Knight".to_string(), None));
+/// assert_eq!(parse_disc_name("BRAVEHEART"), ("Braveheart".to_string(), None));
+/// ```
+pub fn parse_disc_name(name: &str) -> (String, Option<u16>) {
+    let without_underscores = name.replace('_', " ");
+    let trimmed = without_underscores.trim();
+
+    // Check for trailing 4-digit year preceded by a space
+    let (title_part, year) = if trimmed.len() > 5 {
+        let last_4 = &trimmed[trimmed.len() - 4..];
+        if let Ok(y) = last_4.parse::<u16>() {
+            if (1900..=2100).contains(&y) {
+                // Look for " YYYY" at the end (space + year)
+                let space_year = &trimmed[trimmed.len() - 5..];
+                if space_year.starts_with(' ') {
+                    let title = trimmed[..trimmed.len() - 5].trim();
+                    (title, Some(y))
+                } else {
+                    (trimmed, None)
+                }
+            } else {
+                (trimmed, None)
+            }
+        } else {
+            (trimmed, None)
+        }
+    } else {
+        (trimmed, None)
+    };
+
+    // Title-case the result
+    let title = title_part
+        .split_whitespace()
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(first) => {
+                    let upper: String = chars.collect::<String>().to_uppercase();
+                    format!("{}{}", first.to_uppercase(), upper.to_lowercase())
+                }
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    (title, year)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,6 +418,66 @@ mod tests {
         assert!(is_completion_line("MSG:201003,0,0,\"Copy complete.\""));
         assert!(!is_completion_line("MSG:301001,0,0,\"Error\""));
         assert!(!is_completion_line("PRGV:100,100,100"));
+    }
+
+    // --- Disc name parsing ---
+
+    #[test]
+    fn test_parse_disc_name_with_year() {
+        assert_eq!(
+            parse_disc_name("INCEPTION_2010"),
+            ("Inception".to_string(), Some(2010))
+        );
+    }
+
+    #[test]
+    fn test_parse_disc_name_without_year() {
+        assert_eq!(
+            parse_disc_name("THE_DARK_KNIGHT"),
+            ("The Dark Knight".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn test_parse_disc_name_single_word() {
+        assert_eq!(
+            parse_disc_name("BRAVEHEART"),
+            ("Braveheart".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn test_parse_disc_name_year_in_title() {
+        assert_eq!(
+            parse_disc_name("2001_A_SPACE_ODYSSEY"),
+            ("2001 A Space Odyssey".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn test_parse_disc_name_year_too_old() {
+        assert_eq!(
+            parse_disc_name("MOVIE_1800"),
+            ("Movie 1800".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn test_parse_disc_name_empty() {
+        assert_eq!(parse_disc_name(""), ("".to_string(), None));
+    }
+
+    #[test]
+    fn test_parse_disc_name_just_underscores() {
+        assert_eq!(parse_disc_name("___"), ("".to_string(), None));
+    }
+
+    #[test]
+    fn test_parse_disc_name_two_words_with_year() {
+        assert_eq!(
+            parse_disc_name("STAR_WARS_1977"),
+            ("Star Wars".to_string(), Some(1977))
+        );
     }
 
     // --- Unquote ---
