@@ -216,8 +216,8 @@ mod tests {
         // Without command, auto-detect (will fail in CI)
         let result = MakemkvBackend::from_config_or_detect(None);
         // OK if it fails — CI won't have it
-        if result.is_err() {
-            assert!(matches!(result.unwrap_err(), RipError::NotAvailable));
+        if let Err(e) = result {
+            assert!(matches!(e, RipError::NotAvailable));
         }
     }
 }
