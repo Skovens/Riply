@@ -99,24 +99,30 @@ The `core` crate is imported as `riply_core` (not `core`) to avoid conflicting w
 
 ### Dev Workflow (auto-rebuild)
 
-Run these in two terminals for instant feedback on changes:
+Run this in one terminal — it watches both Rust and frontend files, rebuilding
+everything on any change:
 
-**Terminal 1 — Rust backend** (recompiles on `.rs` changes):
 ```bash
 cargo install cargo-watch   # one-time install
-cargo watch -x 'run -p cli -- serve'
+cargo watch -w cli/src -w web/src -w web/svelte/src -x 'bash scripts/watch.sh'
 ```
 
-**Terminal 2 — Svelte frontend** (hot reload on `.svelte`/`.ts` changes):
+This rebuilds the frontend (~0.5s) and starts the server on every change.
+
+**Alternative — separate processes** (frontend HMR on port 5173):
+
 ```bash
+# Terminal 1 — Rust backend
+cargo watch -x 'run -p cli -- serve'
+
+# Terminal 2 — Svelte frontend (hot reload)
 cd web/svelte
 npm install                 # one-time install
 npm run dev
 ```
 
-Open `http://localhost:5173` (Vite dev server). Frontend edits appear instantly
-without a page reload. When done, run `npm run build` to bake the frontend
-into the Rust binary for production.
+Open `http://localhost:5173` for frontend HMR. When done, run `npm run build`
+to bake the frontend into the Rust binary for production.
 
 ## Agent Instructions
 
