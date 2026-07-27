@@ -6,7 +6,7 @@ export type PipelineStatus =
   | 'NeedsReview'
   | 'Confirmed'
   | 'Moved'
-  | 'Error';
+  | 'Failed';
 
 // ── Media Types ──────────────────────────────────────────────
 
@@ -100,11 +100,10 @@ export interface Config {
 
 export interface Job {
   id: string;
-  type: string;
+  kind: string;
   status: string;
-  progress?: number;
-  created_at: string;
-  completed_at?: string;
+  progress_total: number;
+  progress_processed: number;
 }
 
 // ── Ripping Setup ────────────────────────────────────────────
@@ -125,6 +124,7 @@ export interface InstallationStatus {
   method: DetectionMethod;
   flatpak_available: boolean;
   flathub_configured: boolean;
+  flatpak_permissions_ok: boolean;
   drive_access_ok: boolean;
   missing: MissingComponent[];
 }

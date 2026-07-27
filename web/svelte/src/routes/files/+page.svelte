@@ -59,7 +59,7 @@
       NeedsReview: 'warning',
       Confirmed: 'success',
       Moved: 'success',
-      Error: 'error',
+      Failed: 'error',
     };
     return colors[status] || 'default';
   }
@@ -91,7 +91,7 @@
         <option value="NeedsReview">Needs Review</option>
         <option value="Confirmed">Confirmed</option>
         <option value="Moved">Moved</option>
-        <option value="Error">Failed</option>
+        <option value="Failed">Failed</option>
       </select>
     </div>
   </div>
