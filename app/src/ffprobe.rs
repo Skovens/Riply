@@ -60,10 +60,10 @@ pub fn extract_metadata(path: &Path) -> Result<FfprobeMetadata, anyhow::Error> {
         .and_then(|f| f.duration.as_ref())
         .and_then(|d| d.parse::<f64>().ok());
 
-    let video_stream = probe
-        .streams
-        .as_ref()
-        .and_then(|s| s.iter().find(|st| st.codec_type.as_deref() == Some("video")));
+    let video_stream = probe.streams.as_ref().and_then(|s| {
+        s.iter()
+            .find(|st| st.codec_type.as_deref() == Some("video"))
+    });
 
     let width = video_stream.and_then(|s| s.width);
     let height = video_stream.and_then(|s| s.height);

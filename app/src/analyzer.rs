@@ -8,14 +8,11 @@ use crate::ffprobe;
 static SXXEXX_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)S(\d{1,2})E(\d{1,3})").unwrap());
 
-static SXX_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)S(\d{1,2})(?:\s|$)").unwrap());
+static SXX_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)S(\d{1,2})(?:\s|$)").unwrap());
 
-static NXNN_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)(\d{1,2})x(\d{1,3})").unwrap());
+static NXNN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)(\d{1,2})x(\d{1,3})").unwrap());
 
-static YEAR_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\b(19|20)\d{2}\b").unwrap());
+static YEAR_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(19|20)\d{2}\b").unwrap());
 
 static EPISODE_PATTERN_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)S\d{1,2}E\d{1,3}(?:E\d{1,3})*").unwrap());
