@@ -38,7 +38,7 @@ impl MakemkvBackend {
     /// 1. `makemkvcon` on PATH (native install)
     /// 2. `/usr/bin/makemkvcon`
     /// 3. `/usr/local/bin/makemkvcon`
-    /// 4. Flatpak: `flatpak run --command=makemkvcon com.makemkv.MakeMKV`
+    /// 4. Flatpak: checks `flatpak list` for `com.makemkv.MakeMKV`
     pub fn auto_detect() -> Result<Self, RipError> {
         // Try native install on PATH
         if let Ok(output) = StdCommand::new("which").arg("makemkvcon").output() {
@@ -61,7 +61,7 @@ impl MakemkvBackend {
 
         // Try Flatpak
         if StdCommand::new("flatpak")
-            .args(["list", "--application"])
+            .args(["list"])
             .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).contains("com.makemkv.MakeMKV"))
             .unwrap_or(false)
@@ -194,11 +194,16 @@ mod tests {
     }
 
     #[test]
-    fn test_auto_detect_not_installed() {
-        // CI won't have makemkvcon or Flatpak
+    fn test_auto_detect_returns_valid_result() {
+        // auto_detect should work in any environment — find makemkvcon or not
         let result = MakemkvBackend::auto_detect();
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), RipError::NotAvailable));
+        match result {
+            Ok(backend) => {
+                assert!(!backend.command.is_empty());
+            }
+            Err(RipError::NotAvailable) => {}
+            Err(e) => panic!("Unexpected error: {}", e),
+        }
     }
 
     #[test]
