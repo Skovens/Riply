@@ -80,6 +80,9 @@ export interface MoveStatus {
 export interface RippingConfig {
   command?: string;
   makemkvcon_path?: string;
+  autorip_enabled?: boolean;
+  autorip_eject_after?: boolean;
+  autorip_excluded_drives?: number[];
 }
 
 export interface Config {

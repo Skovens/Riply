@@ -127,6 +127,7 @@ pub async fn start_rip(
 
         let mut progress_start: Option<Instant> = None;
         let mut progress_at_start: f64 = 0.0;
+        let mut eta_started = false;
 
         while let Some(event) = handle.next_event().await {
             match event {
@@ -136,27 +137,38 @@ pub async fn start_rip(
                     max,
                 } => {
                     let pct = if total > 0 && max > 0 {
-                        (current as f64 / total as f64 * 100.0) as u32
+                        (current as f64 / total as f64 * 100.0).clamp(0.0, 100.0) as u32
                     } else {
                         0
                     };
 
                     // Track time from first meaningful progress for ETA
-                    let eta_secs = if pct > 0 {
+                    let eta_secs = if pct > 0 && pct < 100 {
                         let now = Instant::now();
-                        if let Some(start) = progress_start {
+                        if !eta_started {
+                            progress_start = Some(now);
+                            progress_at_start = pct as f64;
+                            eta_started = true;
+                            None
+                        } else if let Some(start) = progress_start {
                             let elapsed = now.duration_since(start).as_secs_f64();
-                            let pct_done = (pct as f64 - progress_at_start) / 100.0;
-                            if elapsed > 15.0 && pct_done > 0.0 {
-                                let rate = pct_done / elapsed;
-                                let remaining = (1.0 - pct as f64 / 100.0) / rate;
-                                Some(remaining as u64)
+                            if elapsed >= 5.0 {
+                                let pct_done = (pct as f64 - progress_at_start) / 100.0;
+                                if pct_done > 0.01 {
+                                    let rate = pct_done / elapsed;
+                                    let remaining = (1.0 - pct as f64 / 100.0) / rate;
+                                    if remaining > 0.0 {
+                                        Some(remaining as u64)
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
                             } else {
                                 None
                             }
                         } else {
-                            progress_start = Some(now);
-                            progress_at_start = pct as f64;
                             None
                         }
                     } else {
@@ -420,6 +432,7 @@ async fn execute_rip(state: Arc<AppState>, index: usize, eject_after: bool) -> R
 
     let mut progress_start: Option<Instant> = None;
     let mut progress_at_start: f64 = 0.0;
+    let mut eta_started = false;
 
     while let Some(event) = handle.next_event().await {
         match event {
@@ -429,26 +442,37 @@ async fn execute_rip(state: Arc<AppState>, index: usize, eject_after: bool) -> R
                 max,
             } => {
                 let pct = if total > 0 && max > 0 {
-                    (current as f64 / total as f64 * 100.0) as u32
+                    (current as f64 / total as f64 * 100.0).clamp(0.0, 100.0) as u32
                 } else {
                     0
                 };
 
-                let eta_secs = if pct > 0 {
+                let eta_secs = if pct > 0 && pct < 100 {
                     let now = Instant::now();
-                    if let Some(start) = progress_start {
+                    if !eta_started {
+                        progress_start = Some(now);
+                        progress_at_start = pct as f64;
+                        eta_started = true;
+                        None
+                    } else if let Some(start) = progress_start {
                         let elapsed = now.duration_since(start).as_secs_f64();
-                        let pct_done = (pct as f64 - progress_at_start) / 100.0;
-                        if elapsed > 15.0 && pct_done > 0.0 {
-                            let rate = pct_done / elapsed;
-                            let remaining = (1.0 - pct as f64 / 100.0) / rate;
-                            Some(remaining as u64)
+                        if elapsed >= 5.0 {
+                            let pct_done = (pct as f64 - progress_at_start) / 100.0;
+                            if pct_done > 0.01 {
+                                let rate = pct_done / elapsed;
+                                let remaining = (1.0 - pct as f64 / 100.0) / rate;
+                                if remaining > 0.0 {
+                                    Some(remaining as u64)
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
                         } else {
                             None
                         }
                     } else {
-                        progress_start = Some(now);
-                        progress_at_start = pct as f64;
                         None
                     }
                 } else {

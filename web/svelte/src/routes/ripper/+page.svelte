@@ -10,6 +10,7 @@
   let autoripEnabled = $state(false);
   let excludedDrives = $state(new Set());
   let loading = $state(true);
+  let ripStatus = $state({});
   let pollInterval = null;
   let ripProgress = $state({});
   let ripEta = $state({});
@@ -18,7 +19,6 @@
   onMount(() => {
     loadStatus();
     loadConfig();
-    loadAutoripStatus();
     loadDrives();
     startPolling();
     disconnectSSE = connectSSE(handleSSE);
@@ -50,26 +50,22 @@
 
     if (action === 'starting') {
       updateDriveState(index, 'Ripping');
+      ripStatus[index] = { progress: 0, eta: null };
     } else if (action === 'progress') {
       const pct = parseInt(parts[3]);
-      ripProgress[index] = pct;
-      // ETA may or may not be present (rip:progress:{index}:{pct}:{eta_secs})
       const eta = parts.length > 4 ? parseInt(parts[4]) : null;
-      ripEta[index] = eta;
+      ripStatus[index] = { progress: pct, eta: eta || null };
       updateDriveState(index, 'Ripping');
     } else if (action === 'complete') {
-      delete ripProgress[index];
-      delete ripEta[index];
+      delete ripStatus[index];
       updateDriveState(index, 'Complete');
       loadDrives();
     } else if (action === 'error') {
-      delete ripProgress[index];
-      delete ripEta[index];
+      delete ripStatus[index];
       updateDriveState(index, 'Error');
       loadDrives();
     } else if (action === 'cancelled') {
-      delete ripProgress[index];
-      delete ripEta[index];
+      delete ripStatus[index];
       loadDrives();
     }
   }
@@ -91,16 +87,14 @@
   async function loadConfig() {
     try {
       config = await configApi.get();
+      if (config?.ripping?.autorip_excluded_drives) {
+        excludedDrives = new Set(config.ripping.autorip_excluded_drives);
+      }
+      if (config?.ripping?.autorip_enabled !== undefined) {
+        autoripEnabled = config.ripping.autorip_enabled;
+      }
     } catch (e) {
       console.error('Failed to load config:', e);
-    }
-  }
-
-  async function loadAutoripStatus() {
-    try {
-      autoripEnabled = await ripperApi.getAutoripStatus();
-    } catch (e) {
-      console.error('Failed to load autorip status:', e);
     }
   }
 
@@ -242,14 +236,14 @@
             <div class="drive__info">
               <div class="drive__name">{drive.name}</div>
               <div class="drive__disc">{drive.disc_name || 'No disc inserted'}</div>
-              {#if ripProgress[drive.index] !== undefined}
+              {#if ripStatus[drive.index]}
                 <div class="progress" style="margin-top: var(--space-2);">
-                  <div class="progress__bar" style="width: {ripProgress[drive.index]}%"></div>
+                  <div class="progress__bar" style="width: {ripStatus[drive.index].progress}%"></div>
                 </div>
                 <div class="text-sm text-muted" style="margin-top: var(--space-1);">
-                  {ripProgress[drive.index]}%
-                  {#if ripEta[drive.index] && ripEta[drive.index] > 0}
-                    — {Math.floor(ripEta[drive.index] / 60)}m {ripEta[drive.index] % 60}s remaining
+                  {ripStatus[drive.index].progress}%
+                  {#if ripStatus[drive.index].eta && ripStatus[drive.index].eta > 0}
+                    — ~{Math.floor(ripStatus[drive.index].eta / 60)}m {ripStatus[drive.index].eta % 60}s left
                   {/if}
                 </div>
               {/if}

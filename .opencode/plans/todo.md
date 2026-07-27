@@ -38,13 +38,17 @@
 
 | # | Task | Status | Depends On |
 |---|------|--------|------------|
-| 33 | Extract eject to `infra` + fix device path mapping (parse 7th DRV field) | PENDING | — |
-| 34 | Config validation: refuse to rip if required directories not set | PENDING | — |
-| 35 | Disc name parsing: extract title + year from disc name | PENDING | — |
-| 36 | Auto-create parent directory from disc name when ripping | PENDING | #35 |
-| 37 | Rip progress with time-remaining estimate (15s stabilization) | PENDING | — |
-| 38 | Auto-rip: background polling task detects disc insertion, starts rip | PENDING | #33, #34, #36 |
-| 39 | Per-drive autorip toggle in settings + config | PENDING | #38 |
+| 33 | Extract eject to `infra` + fix device path mapping (parse 7th DRV field) | DONE | — |
+| 34 | Config validation: refuse to rip if required directories not set | DONE | — |
+| 35 | Disc name parsing: extract title + year from disc name | DONE | — |
+| 36 | Auto-create parent directory from disc name when ripping | DONE | #35 |
+| 37 | Rip progress with time-remaining estimate (15s stabilization) | DONE | — |
+| 38 | Auto-rip: background polling task detects disc insertion, starts rip | DONE | #33, #34, #36 |
+| 39 | Per-drive autorip toggle in settings + config | DONE | #38 |
+| 40 | Fix time estimation display (SSE ETA not rendering in UI) | PENDING | — |
+| 41 | Add per-drive autorip toggle UI (independent on/off per drive card) | PENDING | #39 |
+| 42 | Add progress bar with percentage display during rip | PENDING | — |
+| 43 | Optimize dashboard loading during active rip (SSE polling blocking?) | PENDING | — |
 
 ### Legacy (folded into above)
 
@@ -180,3 +184,60 @@ unstable (disc spin-up), so ETA should only show after ~15 seconds.
   per drive card. Toggling adds/removes the drive index from `autorip_excluded_drives`
   via `PUT /api/config`.
 - Autorip polling task checks the excluded list before starting a rip
+
+### #40 — Fix time estimation display
+
+**Problem:** ETA from SSE `rip:progress:{index}:{pct}:{eta_secs}` is not rendering in the UI.
+The frontend may not be parsing the SSE event correctly, or the ETA value is 0/never stabilizing.
+
+**Investigation:**
+- Check if SSE event `rip:progress` is properly received in `+page.svelte`
+- Verify ETA calculation in `start_rip` — is 15s stabilization too long? Is first progress >0% being hit?
+- Check if `eta_secs` is being sent as a number or string
+- Add console logging to debug SSE parsing
+
+**Fix:**
+- Ensure SSE event format matches frontend parser
+- If ETA never stabilizes, debug the progress data from MakeMKV
+- Display ETA next to progress bar when > 0
+
+### #41 — Per-drive autorip toggle UI
+
+**Problem:** Autorip is a global on/off toggle. Users want to exclude specific drives from autorip.
+
+**Changes:**
+- `web/svelte/src/routes/ripper/+page.svelte` — on each drive card, show an autorip toggle icon/button
+- Clicking toggle calls `PUT /api/config` to update `autorip_excluded_drives` array
+- Drive card shows visual indicator: autorip enabled (green) vs excluded (gray)
+- When global autorip is disabled, per-drive toggles are hidden/disabled
+
+### #42 — Progress bar with percentage
+
+**Problem:** Rip progress is sent via SSE but no visual progress bar with percentage exists.
+
+**Changes:**
+- `web/svelte/src/routes/ripper/+page.svelte` — add progress bar component per active rip
+- Parse `rip:progress:{index}:{pct}:{eta_secs}` SSE events
+- Display: `<progress value={pct} max="100"> {pct}%</progress>` or custom styled bar
+- Show percentage text next to bar
+- Auto-ripple to 100% when rip completes
+
+### #43 — Optimize dashboard loading during active rip
+
+**Problem:** Dashboard takes a long time to load when a rip is in progress. Something is blocking.
+
+**Likely causes:**
+- SSE connection from ripper page is blocking other page loads
+- `/api/status` endpoint may be waiting on rip progress data
+- `detect_drives()` or other blocking calls in status endpoint
+
+**Investigation:**
+- Check if `/api/status` endpoint uses `spawn_blocking` for any blocking calls
+- Check if SSE connections are held open and blocking resources
+- Check if rip progress polling is using too frequent intervals
+- Profile server response times during active rip
+
+**Fix:**
+- Ensure all blocking calls use `spawn_blocking`
+- Add timeouts to SSE connections
+- Consider debouncing or throttling status updates during active rip
