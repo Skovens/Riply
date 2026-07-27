@@ -11,9 +11,8 @@
   let excludedDrives = $state(new Set());
   let loading = $state(true);
   let ripStatus = $state({});
+  let lastProgressTime = $state({});
   let pollInterval = null;
-  let ripProgress = $state({});
-  let ripEta = $state({});
   let disconnectSSE = null;
 
   onMount(() => {
@@ -51,21 +50,26 @@
     if (action === 'starting') {
       updateDriveState(index, 'Ripping');
       ripStatus[index] = { progress: 0, eta: null };
+      lastProgressTime[index] = Date.now();
     } else if (action === 'progress') {
       const pct = parseInt(parts[3]);
       const eta = parts.length > 4 ? parseInt(parts[4]) : null;
       ripStatus[index] = { progress: pct, eta: eta || null };
+      lastProgressTime[index] = Date.now();
       updateDriveState(index, 'Ripping');
     } else if (action === 'complete') {
       delete ripStatus[index];
+      delete lastProgressTime[index];
       updateDriveState(index, 'Complete');
       loadDrives();
     } else if (action === 'error') {
       delete ripStatus[index];
+      delete lastProgressTime[index];
       updateDriveState(index, 'Error');
       loadDrives();
     } else if (action === 'cancelled') {
       delete ripStatus[index];
+      delete lastProgressTime[index];
       loadDrives();
     }
   }
@@ -171,6 +175,26 @@
   }
 
   const hasActive = $derived(drives.some(d => d.state === 'Loading' || d.state === 'Ripping'));
+
+  function formatRemaining(eta) {
+    if (!eta || eta <= 0) return '';
+    const m = Math.floor(eta / 60);
+    const s = eta % 60;
+    if (m > 0) return `~${m}m ${s}s left`;
+    return `~${s}s left`;
+  }
+
+  function timeSince(ts) {
+    if (!ts) return '';
+    const secs = Math.floor((Date.now() - ts) / 1000);
+    if (secs < 10) return '';
+    if (secs < 60) return `${secs}s ago`;
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    if (m > 0 && s > 0) return `${m}m ${s}s ago`;
+    if (m > 0) return `${m}m ago`;
+    return `${secs}s ago`;
+  }
 </script>
 
 {#if status && !status.installed}
@@ -242,8 +266,11 @@
                 </div>
                 <div class="text-sm text-muted" style="margin-top: var(--space-1);">
                   {ripStatus[drive.index].progress}%
-                  {#if ripStatus[drive.index].eta && ripStatus[drive.index].eta > 0}
-                    — ~{Math.floor(ripStatus[drive.index].eta / 60)}m {ripStatus[drive.index].eta % 60}s left
+                  {#if formatRemaining(ripStatus[drive.index].eta)}
+                    — {formatRemaining(ripStatus[drive.index].eta)}
+                  {/if}
+                  {#if timeSince(lastProgressTime[drive.index])}
+                    — {timeSince(lastProgressTime[drive.index])}
                   {/if}
                 </div>
               {/if}
