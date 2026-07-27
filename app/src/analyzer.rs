@@ -1,6 +1,28 @@
 use regex::Regex;
 use riply_core::{MediaType, MetadataSearcher};
+use std::sync::LazyLock;
 use tracing::info;
+
+static SXXEXX_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)S(\d{1,2})E(\d{1,3})").unwrap());
+
+static SXX_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)S(\d{1,2})(?:\s|$)").unwrap());
+
+static NXNN_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)(\d{1,2})x(\d{1,3})").unwrap());
+
+static YEAR_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b(19|20)\d{2}\b").unwrap());
+
+static EPISODE_PATTERN_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)S\d{1,2}E\d{1,3}(?:E\d{1,3})*").unwrap());
+
+static NXNN_PATTERN_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\d{1,2}x\d{1,3}").unwrap());
+
+static SEASON_PATTERN_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)S\d{1,2}(?:\s|$)").unwrap());
 
 /// Analyzer service - orchestrates media analysis operations
 pub struct AnalyzerService {
@@ -145,32 +167,28 @@ fn parse_filename(filename: &str) -> ParsedFilename {
     let mut episode_number = None;
 
     // Try SxxExx pattern (e.g., S01E05, S01E05E06)
-    let sxxexx_regex = Regex::new(r"(?i)S(\d{1,2})E(\d{1,3})").unwrap();
-    if let Some(caps) = sxxexx_regex.captures(&normalized) {
+    if let Some(caps) = SXXEXX_RE.captures(&normalized) {
         season_number = caps.get(1).and_then(|m| m.as_str().parse().ok());
         episode_number = caps.get(2).and_then(|m| m.as_str().parse().ok());
     }
 
     // Try Sxx pattern without episode (season pack)
     if season_number.is_none() {
-        let sxx_regex = Regex::new(r"(?i)S(\d{1,2})(?:\s|$)").unwrap();
-        if let Some(caps) = sxx_regex.captures(&normalized) {
+        if let Some(caps) = SXX_RE.captures(&normalized) {
             season_number = caps.get(1).and_then(|m| m.as_str().parse().ok());
         }
     }
 
     // Try NxNN pattern (e.g., 1x05)
     if episode_number.is_none() {
-        let nxnn_regex = Regex::new(r"(?i)(\d{1,2})x(\d{1,3})").unwrap();
-        if let Some(caps) = nxnn_regex.captures(&normalized) {
+        if let Some(caps) = NXNN_RE.captures(&normalized) {
             season_number = caps.get(1).and_then(|m| m.as_str().parse().ok());
             episode_number = caps.get(2).and_then(|m| m.as_str().parse().ok());
         }
     }
 
     // Extract year (4 digits, typically in parentheses or after a dot)
-    let year_regex = Regex::new(r"\b(19|20)\d{2}\b").unwrap();
-    let year = year_regex
+    let year = YEAR_RE
         .find(&normalized)
         .and_then(|m| m.as_str().parse().ok());
 
@@ -178,18 +196,15 @@ fn parse_filename(filename: &str) -> ParsedFilename {
     let mut title = normalized.clone();
 
     // Remove SxxExx and NxNN patterns from title
-    let episode_pattern = Regex::new(r"(?i)S\d{1,2}E\d{1,3}(?:E\d{1,3})*").unwrap();
-    title = episode_pattern.replace(&title, "").to_string();
+    title = EPISODE_PATTERN_RE.replace(&title, "").to_string();
 
-    let nxnn_pattern = Regex::new(r"(?i)\d{1,2}x\d{1,3}").unwrap();
-    title = nxnn_pattern.replace(&title, "").to_string();
+    title = NXNN_PATTERN_RE.replace(&title, "").to_string();
 
     // Remove standalone Sxx season packs
-    let season_pattern = Regex::new(r"(?i)S\d{1,2}(?:\s|$)").unwrap();
-    title = season_pattern.replace(&title, "").to_string();
+    title = SEASON_PATTERN_RE.replace(&title, "").to_string();
 
     // Remove year from title for cleaner search
-    if let Some(ref year_re) = year_regex.find(&title) {
+    if let Some(ref year_re) = YEAR_RE.find(&title) {
         title = title[..year_re.start()].to_string() + &title[year_re.end()..];
     }
 
