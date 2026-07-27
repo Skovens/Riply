@@ -104,7 +104,7 @@ everything on any change:
 
 ```bash
 cargo install cargo-watch   # one-time install
-cargo watch -w cli/src -w web/src -w web/svelte/src -x 'bash scripts/watch.sh'
+cargo-watch -w cli/src -w web/src -w web/svelte/src -- bash scripts/watch.sh
 ```
 
 This rebuilds the frontend (~0.5s) and starts the server on every change.
