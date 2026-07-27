@@ -316,11 +316,12 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
         };
 
         // Check for config on each iteration (in case it changed)
-        let (autorip_enabled, autorip_eject) = {
+        let (autorip_enabled, autorip_eject, excluded) = {
             let config = state.config.read().await;
             (
                 config.ripping.autorip_enabled,
                 config.ripping.autorip_eject_after,
+                config.ripping.autorip_excluded_drives.clone(),
             )
         };
 
@@ -345,6 +346,13 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
             // Skip if already ripping on this drive
             if active.contains_key(&drive.index) {
                 continue;
+            }
+
+            // Skip if drive is in the excluded list
+            if let Some(ref excluded_list) = excluded {
+                if excluded_list.contains(&drive.index) {
+                    continue;
+                }
             }
 
             info!(

@@ -7,6 +7,8 @@
   let drives = $state([]);
   let status = $state(null);
   let config = $state(null);
+  let autoripEnabled = $state(false);
+  let excludedDrives = $state(new Set());
   let loading = $state(true);
   let pollInterval = null;
   let ripProgress = $state({});
@@ -16,6 +18,7 @@
   onMount(() => {
     loadStatus();
     loadConfig();
+    loadAutoripStatus();
     loadDrives();
     startPolling();
     disconnectSSE = connectSSE(handleSSE);
@@ -90,6 +93,34 @@
       config = await configApi.get();
     } catch (e) {
       console.error('Failed to load config:', e);
+    }
+  }
+
+  async function loadAutoripStatus() {
+    try {
+      autoripEnabled = await ripperApi.getAutoripStatus();
+    } catch (e) {
+      console.error('Failed to load autorip status:', e);
+    }
+  }
+
+  async function toggleAutoripDrive(index) {
+    if (excludedDrives.has(index)) {
+      excludedDrives.delete(index);
+    } else {
+      excludedDrives.add(index);
+    }
+    try {
+      await configApi.update({
+        autorip_excluded_drives: [...excludedDrives],
+      });
+    } catch (e) {
+      console.error('Failed to update autorip settings:', e);
+      if (excludedDrives.has(index)) {
+        excludedDrives.delete(index);
+      } else {
+        excludedDrives.add(index);
+      }
     }
   }
 
@@ -230,6 +261,15 @@
               {/if}
               {#if drive.state === 'Loading' || drive.state === 'Ripping'}
                 <button class="btn btn--danger btn--sm" onclick={() => handleCancel(drive.index)}>Cancel</button>
+              {/if}
+              {#if autoripEnabled && drive.disc_name}
+                <button
+                  class="btn btn--sm"
+                  style="background-color: {excludedDrives.has(drive.index) ? 'var(--color-muted)' : 'var(--color-primary)'}; color: white;"
+                  onclick={() => toggleAutoripDrive(drive.index)}
+                >
+                  {excludedDrives.has(drive.index) ? '⊘' : '⊙'}
+                </button>
               {/if}
             </div>
           </div>

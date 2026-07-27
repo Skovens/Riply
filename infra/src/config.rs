@@ -25,6 +25,11 @@ pub struct RippingConfig {
     /// Eject disc after auto-rip completes. Default: true.
     #[serde(default = "default_true")]
     pub autorip_eject_after: bool,
+
+    /// List of drive indices to exclude from auto-rip.
+    /// `None` means all drives are included.
+    #[serde(default)]
+    pub autorip_excluded_drives: Option<Vec<usize>>,
 }
 
 fn default_true() -> bool {

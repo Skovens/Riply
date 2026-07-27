@@ -22,4 +22,14 @@ export const ripperApi = {
       method: 'POST',
     });
   },
+
+  getAutoripStatus() {
+    return request<boolean>('/api/ripper/autorip');
+  },
+
+  toggleAutorip() {
+    return request<boolean>('/api/ripper/autorip/toggle', {
+      method: 'POST',
+    });
+  },
 };
