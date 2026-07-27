@@ -1,7 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { filesApi } from '$lib/api';
-  import { FileRecord } from '$lib/types';
+  import { filesApi, reviewApi } from '$lib/api';
 
   const PER_PAGE = 25;
 
@@ -9,7 +8,10 @@
   let total = $state(0);
   let currentPage = $state(1);
   let currentFilter = $state('');
+  let searchQuery = $state('');
+  let searchDebounce = $state(null);
   let loading = $state(false);
+  let retrying = $state(false);
 
   onMount(() => {
     loadFiles();
@@ -20,6 +22,7 @@
     try {
       const params = { page: currentPage, per_page: PER_PAGE };
       if (currentFilter) params.status = currentFilter;
+      if (searchQuery) params.search = searchQuery;
 
       const result = await filesApi.list(params);
       files = result.items || [];
@@ -37,6 +40,15 @@
     loadFiles();
   }
 
+  function handleSearchInput(e) {
+    searchQuery = e.target.value;
+    if (searchDebounce) clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => {
+      currentPage = 1;
+      loadFiles();
+    }, 300);
+  }
+
   function handlePrev() {
     if (currentPage > 1) {
       currentPage--;
@@ -49,6 +61,18 @@
     if (currentPage < totalPages) {
       currentPage++;
       loadFiles();
+    }
+  }
+
+  async function handleRetryFailed() {
+    retrying = true;
+    try {
+      const res = await fetch('/api/analyze/retry-failed', { method: 'POST' });
+      if (!res.ok) throw new Error(`Retry failed: ${res.status}`);
+    } catch (e) {
+      console.error('Retry error:', e);
+    } finally {
+      retrying = false;
     }
   }
 
@@ -84,6 +108,14 @@
   <div class="section__header">
     <h2 class="section__title">Files</h2>
     <div class="flex gap-2">
+      <input
+        type="text"
+        placeholder="Search files..."
+        class="select"
+        style="min-width: 200px;"
+        oninput={handleSearchInput}
+        value={searchQuery}
+      />
       <select id="files-filter" class="select" onchange={handleFilterChange}>
         <option value="">All statuses</option>
         <option value="Scanned">Scanned</option>
@@ -93,6 +125,11 @@
         <option value="Moved">Moved</option>
         <option value="Failed">Failed</option>
       </select>
+      {#if currentFilter === 'Failed' && total > 0}
+        <button class="btn btn--warning btn--sm" onclick={handleRetryFailed} disabled={retrying}>
+          {#if retrying}Retrying...{:else}Retry All Failed{/if}
+        </button>
+      {/if}
     </div>
   </div>
 
@@ -102,7 +139,7 @@
     <div class="empty">
       <div class="empty__icon">&#128193;</div>
       <div class="empty__title">No files found</div>
-      <div class="empty__description">{currentFilter ? 'No files with this status' : 'Run a scan to get started'}</div>
+      <div class="empty__description">{currentFilter || searchQuery ? 'No files match your criteria' : 'Run a scan to get started'}</div>
     </div>
   {:else}
     <div class="table" style="overflow-x: auto;">

@@ -360,82 +360,132 @@ impl Database {
         Ok(())
     }
 
-    /// Count files with optional status filter
-    pub async fn count_files(&self, status: Option<&str>) -> Result<i64, anyhow::Error> {
-        let row = if let Some(s) = status {
-            sqlx::query("SELECT COUNT(*) as count FROM files WHERE status = ?")
-                .bind(s)
+    /// Count files with optional status and search filters
+    pub async fn count_files(
+        &self,
+        status: Option<&str>,
+        search: Option<&str>,
+    ) -> Result<i64, anyhow::Error> {
+        let mut sql = "SELECT COUNT(*) as count FROM files".to_string();
+        let has_filters = status.is_some() || search.is_some();
+
+        if has_filters {
+            sql.push_str(" WHERE 1=1");
+            if status.is_some() {
+                sql.push_str(" AND status = ?");
+            }
+            if search.is_some() {
+                sql.push_str(" AND (filename LIKE ? OR canonical_title LIKE ?)");
+            }
+        }
+
+        if let Some(s) = status {
+            if let Some(search_term) = search {
+                let pattern = format!("%{}%", search_term);
+                let row = sqlx::query(&sql)
+                    .bind(s)
+                    .bind(&pattern)
+                    .bind(&pattern)
+                    .fetch_one(&self.pool)
+                    .await?;
+                return Ok(row.try_get("count")?);
+            }
+            let row = sqlx::query(&sql).bind(s).fetch_one(&self.pool).await?;
+            Ok(row.try_get("count")?)
+        } else if let Some(search_term) = search {
+            let pattern = format!("%{}%", search_term);
+            let row = sqlx::query(&sql)
+                .bind(&pattern)
+                .bind(&pattern)
                 .fetch_one(&self.pool)
-                .await?
+                .await?;
+            Ok(row.try_get("count")?)
         } else {
-            sqlx::query("SELECT COUNT(*) as count FROM files")
-                .fetch_one(&self.pool)
-                .await?
-        };
-        Ok(row.try_get("count")?)
+            let row = sqlx::query(&sql).fetch_one(&self.pool).await?;
+            Ok(row.try_get("count")?)
+        }
     }
 
-    /// Get paginated files with optional status filter
+    /// Get paginated files with optional status and search filters
     pub async fn get_files_paginated(
         &self,
         status: Option<&str>,
+        search: Option<&str>,
         page: u32,
         per_page: u32,
     ) -> Result<(Vec<riply_core::FileRecord>, i64), anyhow::Error> {
         let offset = (page - 1) * per_page;
 
-        let count = self.count_files(status).await?;
+        let count = self.count_files(status, search).await?;
 
-        let rows = if let Some(s) = status {
-            sqlx::query(
-                r#"
-                SELECT
-                    id, path, filename, size, duration, hash, status,
-                    suggested_title, suggested_year, confidence,
-                    canonical_title, canonical_year, tmdb_id,
-                    content_type, media_type, series_name,
-                    season_number, episode_number, episode_title,
-                    source, subtitle_text, duplicate_path,
-                    reviewed, created_at, updated_at
-                FROM files
-                WHERE status = ?
-                ORDER BY updated_at DESC
-                LIMIT ? OFFSET ?
-                "#,
-            )
-            .bind(s)
-            .bind(per_page as i64)
-            .bind(offset as i64)
-            .fetch_all(&self.pool)
-            .await?
-        } else {
-            sqlx::query(
-                r#"
-                SELECT
-                    id, path, filename, size, duration, hash, status,
-                    suggested_title, suggested_year, confidence,
-                    canonical_title, canonical_year, tmdb_id,
-                    content_type, media_type, series_name,
-                    season_number, episode_number, episode_title,
-                    source, subtitle_text, duplicate_path,
-                    reviewed, created_at, updated_at
-                FROM files
-                ORDER BY updated_at DESC
-                LIMIT ? OFFSET ?
-                "#,
-            )
-            .bind(per_page as i64)
-            .bind(offset as i64)
-            .fetch_all(&self.pool)
-            .await?
-        };
+        let base_sql = r#"
+            SELECT
+                id, path, filename, size, duration, hash, status,
+                suggested_title, suggested_year, confidence,
+                canonical_title, canonical_year, tmdb_id,
+                content_type, media_type, series_name,
+                season_number, episode_number, episode_title,
+                source, subtitle_text, duplicate_path,
+                reviewed, created_at, updated_at
+            FROM files
+        "#;
 
-        let mut files = Vec::new();
-        for row in rows {
-            let file = self.row_to_file_record(&row)?;
-            files.push(file);
+        let has_filters = status.is_some() || search.is_some();
+        let order_sql = " ORDER BY updated_at DESC LIMIT ? OFFSET ?";
+
+        if let Some(s) = status {
+            if let Some(search_term) = search {
+                let pattern = format!("%{}%", search_term);
+                let sql = format!(
+                    "{} WHERE 1=1 AND status = ? AND (filename LIKE ? OR canonical_title LIKE ?){}",
+                    base_sql, order_sql
+                );
+                let rows = sqlx::query(&sql)
+                    .bind(s)
+                    .bind(&pattern)
+                    .bind(&pattern)
+                    .bind(per_page as i64)
+                    .bind(offset as i64)
+                    .fetch_all(&self.pool)
+                    .await?;
+                let files: Vec<_> = rows.iter().map(|r| self.row_to_file_record(r)).collect::<Result<_, _>>()?;
+                return Ok((files, count));
+            }
+            let sql = format!("{} WHERE 1=1 AND status = ?{}", base_sql, order_sql);
+            let rows = sqlx::query(&sql)
+                .bind(s)
+                .bind(per_page as i64)
+                .bind(offset as i64)
+                .fetch_all(&self.pool)
+                .await?;
+            let files: Vec<_> = rows.iter().map(|r| self.row_to_file_record(r)).collect::<Result<_, _>>()?;
+            return Ok((files, count));
         }
 
+        if let Some(search_term) = search {
+            let pattern = format!("%{}%", search_term);
+            let sql = format!(
+                "{} WHERE 1=1 AND (filename LIKE ? OR canonical_title LIKE ?){}",
+                base_sql, order_sql
+            );
+            let rows = sqlx::query(&sql)
+                .bind(&pattern)
+                .bind(&pattern)
+                .bind(per_page as i64)
+                .bind(offset as i64)
+                .fetch_all(&self.pool)
+                .await?;
+            let files: Vec<_> = rows.iter().map(|r| self.row_to_file_record(r)).collect::<Result<_, _>>()?;
+            return Ok((files, count));
+        }
+
+        let sql = format!("{}{}", base_sql, order_sql);
+        let rows = sqlx::query(&sql)
+            .bind(per_page as i64)
+            .bind(offset as i64)
+            .fetch_all(&self.pool)
+            .await?;
+        let files: Vec<_> = rows.iter().map(|r| self.row_to_file_record(r)).collect::<Result<_, _>>()?;
         Ok((files, count))
     }
 

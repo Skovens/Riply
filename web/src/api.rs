@@ -13,7 +13,7 @@ use riply_core::{DriveInfo, RipBackend, RipEvent};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tower_http::services::{ServeDir, ServeFile};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::sse::SseManager;
 use app::JobScheduler;
@@ -71,6 +71,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/review/:id/reject", post(reject_file))
         .route("/api/scan", post(start_scan))
         .route("/api/analyze", post(start_analyze))
+        .route("/api/analyze/retry-failed", post(retry_failed))
         .route("/api/move", post(start_move))
         .route("/api/move/status", get(get_move_status))
         .route("/api/move/preview", get(preview_move))
@@ -93,6 +94,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
 #[derive(Debug, Deserialize)]
 pub struct FileListParams {
     pub status: Option<String>,
+    pub search: Option<String>,
     pub page: Option<u32>,
     pub per_page: Option<u32>,
 }
@@ -154,6 +156,7 @@ async fn list_files(
         .db
         .get_files_paginated(
             params.status.as_deref(),
+            params.search.as_deref(),
             page,
             per_page,
         )
@@ -565,6 +568,99 @@ async fn start_scan(
 
                 sse.send_status(&format!("scan:complete:{}", records.len()));
                 info!("Scan complete: {} files from {}", records.len(), directory);
+                Ok(())
+            }
+        })
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(ApiResponse::ok(JobStartedResponse {
+        job_id,
+        status: "Queued".to_string(),
+    })))
+}
+
+// --- Analyze Retry ---
+
+async fn retry_failed(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ApiResponse<JobStartedResponse>>, (StatusCode, String)> {
+    let db = state.db.clone();
+    let sse = state.sse.clone();
+    let config = state.config.read().await.clone();
+
+    // Reset Failed files to Scanned
+    let failed_files = db
+        .get_files_by_status("Failed")
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    for file in &failed_files {
+        let mut updated = file.clone();
+        updated.update_status(riply_core::PipelineStatus::Scanned);
+        let _ = db.update_file(&updated).await;
+    }
+
+    let m = config.tmdb_api_key.clone();
+    let o = config.omdb_api_key.clone();
+
+    let job_id = state
+        .scheduler
+        .start_analyze_job(move |cancel, progress| {
+            let db = db.clone();
+            let sse = sse.clone();
+            async move {
+                let records = db.get_files_by_status("Scanned").await?;
+                if records.is_empty() {
+                    sse.send_status("analyze:complete:0");
+                    return Ok(());
+                }
+
+                progress.set_total(records.len());
+                sse.send_status(&format!("analyze:starting:{}", records.len()));
+
+                let searcher: Option<Box<dyn riply_core::MetadataSearcher>> =
+                    if m.is_some() || o.is_some() {
+                        let client = infra::HttpClient::new(m, o);
+                        Some(Box::new(client))
+                    } else {
+                        None
+                    };
+
+                let analyzer = app::AnalyzerService::new(searcher);
+                let mut matched = 0;
+                let mut review = 0;
+
+                for (i, record) in records.iter().enumerate() {
+                    if cancel.is_cancelled() {
+                        sse.send_status("analyze:cancelled");
+                        return Ok(());
+                    }
+                    match analyzer.analyze_file(record).await {
+                        Ok(updated) => {
+                            match updated.status {
+                                riply_core::PipelineStatus::Matched => matched += 1,
+                                riply_core::PipelineStatus::NeedsReview => review += 1,
+                                _ => {}
+                            }
+                            let _ = db.update_file(&updated).await;
+                        }
+                        Err(e) => {
+                            warn!("Analysis failed for {}: {}", record.filename, e);
+                        }
+                    }
+
+                    progress.increment();
+                    if i % 5 == 0 {
+                        sse.send_status(&format!("analyze:progress:{}:{}", i + 1, records.len()));
+                    }
+                }
+
+                sse.send_status(&format!("analyze:complete:{}", records.len()));
+                info!(
+                    "Analysis complete (retry): {} matched, {} need review",
+                    matched, review
+                );
                 Ok(())
             }
         })
