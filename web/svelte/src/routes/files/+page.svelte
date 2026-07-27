@@ -21,12 +21,17 @@
     loading = true;
     try {
       const params = { page: currentPage, per_page: PER_PAGE };
-      if (currentFilter) params.status = currentFilter;
+      if (currentFilter && currentFilter !== 'Duplicates') params.status = currentFilter;
       if (searchQuery) params.search = searchQuery;
 
       const result = await filesApi.list(params);
-      files = result.items || [];
-      total = result.total || 0;
+      if (currentFilter === 'Duplicates') {
+        files = (result.items || []).filter(f => f.duplicate_path);
+        total = files.length;
+      } else {
+        files = result.items || [];
+        total = result.total || 0;
+      }
     } catch (e) {
       console.error('Failed to load files:', e);
     } finally {
@@ -124,6 +129,7 @@
         <option value="Confirmed">Confirmed</option>
         <option value="Moved">Moved</option>
         <option value="Failed">Failed</option>
+        <option value="Duplicates">Duplicates</option>
       </select>
       {#if currentFilter === 'Failed' && total > 0}
         <button class="btn btn--warning btn--sm" onclick={handleRetryFailed} disabled={retrying}>

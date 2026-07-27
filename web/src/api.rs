@@ -545,6 +545,17 @@ async fn start_scan(
             async move {
                 let scanner = app::ScannerService::new();
                 let records = scanner.scan_directory(&dir).await?;
+
+                // Detect duplicates before saving
+                let mut duplicates = std::collections::HashMap::new();
+                for record in &records {
+                    if let Ok(Some(existing)) = db.find_file_by_hash(&record.hash).await {
+                        if existing.path != record.path {
+                            duplicates.insert(record.hash.clone(), existing.path.clone());
+                        }
+                    }
+                }
+
                 progress.set_total(records.len());
 
                 sse.send_status(&format!("scan:starting:{}", records.len()));
@@ -554,7 +565,17 @@ async fn start_scan(
                         sse.send_status("scan:cancelled");
                         return Ok(());
                     }
-                    if let Err(e) = db.save_file(record).await {
+
+                    let mut save_record = record.clone();
+                    if let Some(dup_path) = duplicates.get(&record.hash) {
+                        save_record.duplicate_path = Some(dup_path.clone());
+                        sse.send_log(
+                            "info",
+                            &format!("Duplicate found: {} matches {}", record.filename, dup_path.display()),
+                        );
+                    }
+
+                    if let Err(e) = db.save_file(&save_record).await {
                         sse.send_log(
                             "warn",
                             &format!("Failed to save {}: {}", record.filename, e),

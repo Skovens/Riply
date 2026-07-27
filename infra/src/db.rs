@@ -515,6 +515,32 @@ impl Database {
         }
         Ok(counts)
     }
+
+    /// Find a file record by its hash
+    pub async fn find_file_by_hash(
+        &self,
+        hash: &str,
+    ) -> Result<Option<riply_core::FileRecord>, anyhow::Error> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+                id, path, filename, size, duration, hash, status,
+                suggested_title, suggested_year, confidence,
+                canonical_title, canonical_year, tmdb_id,
+                content_type, media_type, series_name,
+                season_number, episode_number, episode_title,
+                source, subtitle_text, duplicate_path,
+                reviewed, created_at, updated_at
+            FROM files
+            WHERE hash = ?
+            "#,
+        )
+        .bind(hash)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|r| self.row_to_file_record(&r)).transpose()
+    }
 }
 
 #[cfg(test)]
