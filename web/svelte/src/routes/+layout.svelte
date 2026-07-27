@@ -18,8 +18,23 @@
     return $page.url.pathname.startsWith(href);
   }
 
+  let defaultDir = '';
+
+  async function loadConfig() {
+    try {
+      const res = await fetch('/api/config');
+      if (res.ok) {
+        const data = await res.json();
+        defaultDir = data.data?.scan_directory || '';
+      }
+    } catch (e) {
+      console.error('Config load error:', e);
+    }
+  }
+
+  loadConfig();
+
   async function handleScan() {
-    const defaultDir = '/home/morten';
     const dir = window.prompt('Directory to scan:', defaultDir);
     if (!dir) return;
     try {
