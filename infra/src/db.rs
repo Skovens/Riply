@@ -430,7 +430,6 @@ impl Database {
             FROM files
         "#;
 
-        let has_filters = status.is_some() || search.is_some();
         let order_sql = " ORDER BY updated_at DESC LIMIT ? OFFSET ?";
 
         if let Some(s) = status {
@@ -448,7 +447,10 @@ impl Database {
                     .bind(offset as i64)
                     .fetch_all(&self.pool)
                     .await?;
-                let files: Vec<_> = rows.iter().map(|r| self.row_to_file_record(r)).collect::<Result<_, _>>()?;
+                let files: Vec<_> = rows
+                    .iter()
+                    .map(|r| self.row_to_file_record(r))
+                    .collect::<Result<_, _>>()?;
                 return Ok((files, count));
             }
             let sql = format!("{} WHERE 1=1 AND status = ?{}", base_sql, order_sql);
@@ -458,7 +460,10 @@ impl Database {
                 .bind(offset as i64)
                 .fetch_all(&self.pool)
                 .await?;
-            let files: Vec<_> = rows.iter().map(|r| self.row_to_file_record(r)).collect::<Result<_, _>>()?;
+            let files: Vec<_> = rows
+                .iter()
+                .map(|r| self.row_to_file_record(r))
+                .collect::<Result<_, _>>()?;
             return Ok((files, count));
         }
 
@@ -475,7 +480,10 @@ impl Database {
                 .bind(offset as i64)
                 .fetch_all(&self.pool)
                 .await?;
-            let files: Vec<_> = rows.iter().map(|r| self.row_to_file_record(r)).collect::<Result<_, _>>()?;
+            let files: Vec<_> = rows
+                .iter()
+                .map(|r| self.row_to_file_record(r))
+                .collect::<Result<_, _>>()?;
             return Ok((files, count));
         }
 
@@ -485,7 +493,10 @@ impl Database {
             .bind(offset as i64)
             .fetch_all(&self.pool)
             .await?;
-        let files: Vec<_> = rows.iter().map(|r| self.row_to_file_record(r)).collect::<Result<_, _>>()?;
+        let files: Vec<_> = rows
+            .iter()
+            .map(|r| self.row_to_file_record(r))
+            .collect::<Result<_, _>>()?;
         Ok((files, count))
     }
 

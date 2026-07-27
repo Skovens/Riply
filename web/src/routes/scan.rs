@@ -1,0 +1,98 @@
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use axum::{extract::State, http::StatusCode, Json};
+use serde::Deserialize;
+use tracing::info;
+
+use crate::api::{ApiResponse, AppState, JobStartedResponse};
+
+#[derive(Debug, Deserialize)]
+pub struct ScanBody {
+    pub directory: String,
+}
+
+pub async fn start_scan(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<ScanBody>,
+) -> Result<Json<ApiResponse<JobStartedResponse>>, (StatusCode, String)> {
+    let dir = PathBuf::from(&body.directory);
+    if !dir.exists() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("Directory does not exist: {}", body.directory),
+        ));
+    }
+
+    let db = state.db.clone();
+    let sse = state.sse.clone();
+    let directory = body.directory.clone();
+
+    let job_id = state
+        .scheduler
+        .start_scan_job(&body.directory, move |cancel, progress| {
+            let db = db.clone();
+            let sse = sse.clone();
+            let directory = directory.clone();
+            async move {
+                let scanner = app::ScannerService::new();
+                let records = scanner.scan_directory(&dir).await?;
+
+                let mut duplicates = HashMap::new();
+                for record in &records {
+                    if let Ok(Some(existing)) = db.find_file_by_hash(&record.hash).await {
+                        if existing.path != record.path {
+                            duplicates.insert(record.hash.clone(), existing.path.clone());
+                        }
+                    }
+                }
+
+                progress.set_total(records.len());
+
+                sse.send_status(&format!("scan:starting:{}", records.len()));
+
+                for (i, record) in records.iter().enumerate() {
+                    if cancel.is_cancelled() {
+                        sse.send_status("scan:cancelled");
+                        return Ok(());
+                    }
+
+                    let mut save_record = record.clone();
+                    if let Some(dup_path) = duplicates.get(&record.hash) {
+                        save_record.duplicate_path = Some(dup_path.clone());
+                        sse.send_log(
+                            "info",
+                            &format!(
+                                "Duplicate found: {} matches {}",
+                                record.filename,
+                                dup_path.display()
+                            ),
+                        );
+                    }
+
+                    if let Err(e) = db.save_file(&save_record).await {
+                        sse.send_log(
+                            "warn",
+                            &format!("Failed to save {}: {}", record.filename, e),
+                        );
+                    }
+                    progress.increment();
+                    if (i + 1) % 10 == 0 || i + 1 == records.len() {
+                        sse.send_status(&format!("scan:progress:{}:{}", i + 1, records.len()));
+                    }
+                }
+
+                sse.send_status(&format!("scan:complete:{}", records.len()));
+                info!("Scan complete: {} files from {}", records.len(), directory);
+                Ok(())
+            }
+        })
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(ApiResponse::ok(JobStartedResponse {
+        job_id,
+        status: "Queued".to_string(),
+    })))
+}
