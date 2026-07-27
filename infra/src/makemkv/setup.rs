@@ -28,6 +28,7 @@ pub struct InstallationStatus {
     pub method: DetectionMethod,
     pub flatpak_available: bool,
     pub flathub_configured: bool,
+    pub flatpak_permissions_ok: bool,
     pub drive_access_ok: bool,
     pub missing: Vec<MissingComponent>,
 }
@@ -50,6 +51,7 @@ pub fn check_installation() -> InstallationStatus {
 
     let flatpak_available = check_flatpak();
     let flathub_configured = flatpak_available && check_flathub();
+    let flatpak_permissions_ok = flatpak_available && check_flatpak_permissions();
     let drive_access_ok = check_cdrom_group();
 
     let mut missing = Vec::new();
@@ -70,6 +72,7 @@ pub fn check_installation() -> InstallationStatus {
         method,
         flatpak_available,
         flathub_configured,
+        flatpak_permissions_ok,
         drive_access_ok,
         missing,
     }
@@ -237,6 +240,18 @@ fn check_flathub() -> bool {
         .unwrap_or(false)
 }
 
+fn check_flatpak_permissions() -> bool {
+    let output = match StdCommand::new("flatpak")
+        .args(["info", "--show-permissions", "com.makemkv.MakeMKV"])
+        .output()
+    {
+        Ok(o) => o,
+        Err(_) => return false,
+    };
+    let info = String::from_utf8_lossy(&output.stdout);
+    info.contains("device=all") || info.contains("devices=all") || info.contains("device=all-all")
+}
+
 fn check_cdrom_group() -> bool {
     let output = match StdCommand::new("id").arg("-nG").output() {
         Ok(o) => o,
@@ -362,6 +377,7 @@ mod tests {
             method: DetectionMethod::None,
             flatpak_available: false,
             flathub_configured: false,
+            flatpak_permissions_ok: false,
             drive_access_ok: false,
             missing: vec![MissingComponent::Flatpak, MissingComponent::MakeMKV],
         };
