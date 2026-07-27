@@ -1,6 +1,6 @@
 # MakeMKV Setup & Installation — Plan
 
-## Status: BUILDING
+## Status: COMPLETE
 
 ---
 
@@ -240,22 +240,17 @@ The `missing` array provides detail — the frontend can show exactly what's nee
 
 ## Verification
 
-```bash
-cargo fmt
-cargo clippy --all
-cargo build --all
-cargo test --all
-```
-
-Manual testing:
-1. `cargo run -p cli -- setup` — should detect missing components and offer install
-2. `cargo run -p cli -- rip list` — should show "Run `riply setup`" when not installed
-3. `cargo run -p cli -- serve` → curl localhost:3000/api/ripper/status → should return InstallationStatus
-4. Web UI ripping page should show banner when MakeMKV not installed
+All done:
+- `cargo fmt`, `cargo clippy --all`, `cargo build --all`, `cargo test --all` — all pass (146 tests, 0 warnings)
+- `riply setup` — interactive flow works end-to-end
+- `riply rip list` — shows "Run `riply setup`" when not installed
+- `GET /api/ripper/status` — returns InstallationStatus with all fields including flatpak_permissions_ok
+- Web UI shows setup banner when MakeMKV not installed
+- Flatpak permissions check detects `devices=all` in manifest
 
 ---
 
-## Commit
+## Commits
 
 ```
 feat(infra): add MakeMKV installation checker and interactive setup
@@ -267,4 +262,20 @@ feat(infra): add MakeMKV installation checker and interactive setup
 - Add GET /api/ripper/status endpoint for web UI
 - Show setup banner on ripping page when not installed
 - Simplify rip command error to point to riply setup
+
+fix(infra): use flatpak list instead of flatpak list --application
+
+MakeMKV's Flatpak manifest doesn't register as a desktop application,
+so 'flatpak list --application' doesn't find it. Plain 'flatpak list'
+works correctly.
+
+Also fix test_auto_detect_not_installed which assumed makemkvcon is
+never present —改为 test that auto_detect returns a valid result.
+
+feat(infra): add Flatpak drive permissions check and rebuild frontend
+
+- Add flatpak_permissions_ok field to InstallationStatus
+- Check flatpak info --show-permissions for device=all/devices=all
+- Fix frontend build to embed latest SvelteKit output
+- Update test to include new field
 ```
