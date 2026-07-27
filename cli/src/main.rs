@@ -111,7 +111,7 @@ async fn main() -> anyhow::Result<()> {
             move_files(&db, &config).await?;
         }
         Command::Rip { rip_command } => {
-            do_rip(rip_command).await?;
+            do_rip(rip_command, &config).await?;
         }
         Command::Serve { host, port } => {
             commands::serve(db, config, Some(cli.config), host, port).await?;

@@ -97,6 +97,27 @@ Quick check: `cargo check`
 
 The `core` crate is imported as `riply_core` (not `core`) to avoid conflicting with Rust's std `core` crate.
 
+### Dev Workflow (auto-rebuild)
+
+Run these in two terminals for instant feedback on changes:
+
+**Terminal 1 — Rust backend** (recompiles on `.rs` changes):
+```bash
+cargo install cargo-watch   # one-time install
+cargo watch -x 'run -p cli -- serve'
+```
+
+**Terminal 2 — Svelte frontend** (hot reload on `.svelte`/`.ts` changes):
+```bash
+cd web/svelte
+npm install                 # one-time install
+npm run dev
+```
+
+Open `http://localhost:5173` (Vite dev server). Frontend edits appear instantly
+without a page reload. When done, run `npm run build` to bake the frontend
+into the Rust binary for production.
+
 ## Agent Instructions
 
 See [AGENTS.md](AGENTS.md) for coding conventions, build commands, and agent task board.

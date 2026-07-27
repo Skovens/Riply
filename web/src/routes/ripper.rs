@@ -5,14 +5,27 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use riply_core::{DriveInfo, RipEvent};
+use riply_core::{DriveInfo, DriveState, RipEvent};
 use serde::Deserialize;
 use tracing::info;
 
 use crate::api::{ApiResponse, AppState};
 
 pub async fn ripper_status() -> Json<ApiResponse<infra::InstallationStatus>> {
-    let status = infra::check_installation();
+    let status = tokio::task::spawn_blocking(infra::check_installation)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::error!("check_installation panicked: {}", e);
+            infra::InstallationStatus {
+                installed: false,
+                method: infra::DetectionMethod::None,
+                flatpak_available: false,
+                flathub_configured: false,
+                flatpak_permissions_ok: false,
+                drive_access_ok: false,
+                missing: vec![infra::MissingComponent::MakeMKV],
+            }
+        });
     Json(ApiResponse::ok(status))
 }
 
@@ -20,12 +33,29 @@ pub async fn list_drives(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<ApiResponse<Vec<DriveInfo>>>, (StatusCode, String)> {
     let backend = match &state.backend {
-        Some(b) => b,
+        Some(b) => Arc::clone(b),
         None => return Ok(Json(ApiResponse::ok(vec![]))),
     };
 
-    match backend.detect_drives() {
-        Ok(drives) => Ok(Json(ApiResponse::ok(drives))),
+    let drives = tokio::task::spawn_blocking(move || backend.detect_drives())
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Task failed: {}", e),
+            )
+        })?;
+
+    match drives {
+        Ok(mut drives) => {
+            let rips = state.active_rips.read().await;
+            for drive in &mut drives {
+                if rips.contains_key(&drive.index) {
+                    drive.state = DriveState::Ripping;
+                }
+            }
+            Ok(Json(ApiResponse::ok(drives)))
+        }
         Err(e) => {
             info!("Failed to detect drives: {}", e);
             Err((
@@ -52,12 +82,13 @@ pub async fn start_rip(
     ))?;
 
     let dest = match body.destination {
-        Some(d) => d,
-        None => {
+        Some(d) if !d.is_empty() => d,
+        _ => {
             let config = state.config.read().await;
             config
-                .scan_directory
+                .rip_output_directory
                 .clone()
+                .or_else(|| config.scan_directory.clone())
                 .unwrap_or_else(|| ".".to_string())
         }
     };
@@ -121,4 +152,55 @@ pub async fn cancel_rip(
         info!("No active rip found for drive {}", index);
         Json(ApiResponse::ok(format!("No active rip on drive {}", index)))
     }
+}
+
+pub async fn eject_disc(
+    State(state): State<Arc<AppState>>,
+    Path(index): Path<usize>,
+) -> Result<Json<ApiResponse<String>>, (StatusCode, String)> {
+    let backend = match &state.backend {
+        Some(b) => Arc::clone(b),
+        None => {
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                "No ripping backend available".to_string(),
+            ))
+        }
+    };
+
+    let drives = tokio::task::spawn_blocking(move || backend.detect_drives())
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Task failed: {}", e),
+            )
+        })?
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let device_path = drives
+        .iter()
+        .find(|d| d.index == index)
+        .and_then(|d| d.device_path.clone())
+        .ok_or((
+            StatusCode::NOT_FOUND,
+            format!("Drive {} not found or has no device path", index),
+        ))?;
+
+    let device_path_log = device_path.clone();
+    tokio::task::spawn_blocking(move || infra::eject_disc(&device_path))
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Task failed: {}", e),
+            )
+        })?
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    info!("Ejected disc from drive {} ({})", index, device_path_log);
+    Ok(Json(ApiResponse::ok(format!(
+        "Ejected disc from drive {}",
+        index
+    ))))
 }

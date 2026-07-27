@@ -21,12 +21,14 @@ impl RipBackend for DryRunBackend {
                 index: 0,
                 name: "Fake DVD Drive".to_string(),
                 disc_name: Some("Test Movie (2024)".to_string()),
+                device_path: Some("/dev/sr0".to_string()),
                 state: DriveState::Ready,
             },
             DriveInfo {
                 index: 1,
                 name: "Fake Blu-ray Drive".to_string(),
                 disc_name: None,
+                device_path: Some("/dev/sr1".to_string()),
                 state: DriveState::Empty,
             },
         ])

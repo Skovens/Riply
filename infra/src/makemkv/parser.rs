@@ -2,11 +2,13 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedDrive {
     pub index: usize,
+    /// Drive is present (status != 256). Status values: 0=empty, 1=open, 2=closed, 3=loading, 256=not-attached
     pub visible: bool,
     pub enabled: bool,
     pub flags: u32,
     pub drive_name: String,
     pub disc_name: Option<String>,
+    pub device_path: Option<String>,
 }
 
 /// Parsed progress from a `PRGV:` line
@@ -70,7 +72,11 @@ fn parse_csv_fields(line: &str) -> Vec<String> {
 
 /// Parse a `DRV:` line from `makemkvcon -r` output.
 ///
-/// Format: `DRV:index,visible,enabled,flags,"drive_name","disc_name"`
+/// Format: `DRV:index,status,enabled,flags,"drive_name","disc_name","device_path"`
+///
+/// Status values: 0=empty, 1=open, 2=closed, 3=loading, 256=not-attached.
+/// A drive is considered visible when status != 256.
+/// The device_path field (e.g. `/dev/sr0`) is optional and may be empty.
 ///
 /// # Example
 /// ```ignore
@@ -85,8 +91,8 @@ pub fn parse_drive_line(line: &str) -> Option<ParsedDrive> {
     }
 
     let index = fields[0].parse().ok()?;
-    let visible = fields[1].parse::<u8>().ok()? != 0;
-    let enabled = fields[2].parse::<u8>().ok()? != 0;
+    let visible = fields[1].parse::<u32>().ok()? != 256;
+    let enabled = fields[2].parse::<u32>().ok()? != 0;
     let flags = fields[3].parse().unwrap_or(0);
     let drive_name = unquote(&fields[4]);
     let disc_name = {
@@ -97,6 +103,16 @@ pub fn parse_drive_line(line: &str) -> Option<ParsedDrive> {
             Some(raw)
         }
     };
+    let device_path = if fields.len() > 6 {
+        let raw = unquote(&fields[6]);
+        if raw.is_empty() {
+            None
+        } else {
+            Some(raw)
+        }
+    } else {
+        None
+    };
 
     Some(ParsedDrive {
         index,
@@ -105,6 +121,7 @@ pub fn parse_drive_line(line: &str) -> Option<ParsedDrive> {
         flags,
         drive_name,
         disc_name,
+        device_path,
     })
 }
 
@@ -200,12 +217,23 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_drive_not_visible() {
-        let line = r#"DRV:2,0,0,0,"Virtual Drive","#;
+    fn test_parse_drive_empty_present() {
+        let line = r#"DRV:0,0,999,0,"BD-ROM TSSTcorp DVDWBD SH-B123L","","/dev/sr1""#;
+        let drive = parse_drive_line(line).unwrap();
+        assert_eq!(drive.index, 0);
+        assert!(drive.visible);
+        assert!(drive.enabled);
+        assert!(drive.disc_name.is_none());
+        assert_eq!(drive.device_path.as_deref(), Some("/dev/sr1"));
+    }
+
+    #[test]
+    fn test_parse_drive_not_attached() {
+        let line = r#"DRV:2,256,999,0,"","","""#;
         let drive = parse_drive_line(line).unwrap();
         assert_eq!(drive.index, 2);
         assert!(!drive.visible);
-        assert!(!drive.enabled);
+        assert!(drive.enabled);
     }
 
     #[test]
@@ -218,6 +246,20 @@ mod tests {
     #[test]
     fn test_parse_drive_too_few_fields() {
         assert!(parse_drive_line("DRV:0,1,1").is_none());
+    }
+
+    #[test]
+    fn test_parse_drive_with_device_path() {
+        let line = r#"DRV:1,2,999,1,"BD-ROM ATAPI iHOS104","INCEPTION","/dev/sr0""#;
+        let drive = parse_drive_line(line).unwrap();
+        assert_eq!(drive.device_path.as_deref(), Some("/dev/sr0"));
+    }
+
+    #[test]
+    fn test_parse_drive_without_device_path() {
+        let line = r#"DRV:0,1,1,24,"HL-DT-ST BD-RE BH16NS40","INCEPTION""#;
+        let drive = parse_drive_line(line).unwrap();
+        assert!(drive.device_path.is_none());
     }
 
     #[test]
@@ -348,16 +390,21 @@ mod tests {
     #[test]
     fn test_full_drive_listing_output() {
         let output = r#"MSG:0,0,0,"Using libmakemkv 1.18.4 (26) for x86_64-linux-gnu","(version)"
-DRV:0,1,1,24,"HL-DT-ST BD-RE BH16NS40","INCEPTION_2010"
-DRV:1,1,1,16,"TSSTcorp CDDVDW SH-224DB","THE_DARK_KNIGHT"
-DRV:2,0,0,0,"Virtual Drive","#;
+DRV:0,1,1,24,"HL-DT-ST BD-RE BH16NS40","INCEPTION_2010","/dev/sr1"
+DRV:1,1,1,16,"TSSTcorp CDDVDW SH-224DB","THE_DARK_KNIGHT","/dev/sr0"
+DRV:2,256,999,0,"","","""#;
 
         let drives: Vec<_> = output.lines().filter_map(parse_drive_line).collect();
 
         assert_eq!(drives.len(), 3);
+        assert!(drives[0].visible);
         assert_eq!(drives[0].disc_name.as_deref(), Some("INCEPTION_2010"));
+        assert_eq!(drives[0].device_path.as_deref(), Some("/dev/sr1"));
+        assert!(drives[1].visible);
         assert_eq!(drives[1].disc_name.as_deref(), Some("THE_DARK_KNIGHT"));
-        assert!(drives[2].disc_name.is_none());
+        assert_eq!(drives[1].device_path.as_deref(), Some("/dev/sr0"));
+        assert!(!drives[2].visible);
+        assert!(drives[2].device_path.is_none());
     }
 
     #[test]

@@ -1,22 +1,72 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
   import { ripperApi } from '$lib/api';
+  import { connectSSE } from '$lib/api/sse';
   import { DriveInfo, InstallationStatus } from '$lib/types';
 
   let drives = $state([]);
   let status = $state(null);
   let loading = $state(true);
   let pollInterval = null;
+  let ripProgress = $state({});
+  let disconnectSSE = null;
 
   onMount(() => {
     loadStatus();
     loadDrives();
-    pollInterval = setInterval(loadDrives, 3000);
+    startPolling();
+    disconnectSSE = connectSSE(handleSSE);
   });
 
   onDestroy(() => {
     if (pollInterval) clearInterval(pollInterval);
+    if (disconnectSSE) disconnectSSE();
   });
+
+  function startPolling() {
+    if (pollInterval) clearInterval(pollInterval);
+    pollInterval = setInterval(loadDrives, 5000);
+  }
+
+  function stopPolling() {
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+    }
+  }
+
+  function handleSSE(data) {
+    if (!data.startsWith('rip:')) return;
+
+    const parts = data.split(':');
+    const action = parts[1];
+    const index = parseInt(parts[2]);
+
+    if (action === 'starting') {
+      updateDriveState(index, 'Ripping');
+    } else if (action === 'progress') {
+      const pct = parseInt(parts[3]);
+      ripProgress[index] = pct;
+      updateDriveState(index, 'Ripping');
+    } else if (action === 'complete') {
+      delete ripProgress[index];
+      updateDriveState(index, 'Complete');
+      loadDrives();
+    } else if (action === 'error') {
+      delete ripProgress[index];
+      updateDriveState(index, 'Error');
+      loadDrives();
+    } else if (action === 'cancelled') {
+      delete ripProgress[index];
+      loadDrives();
+    }
+  }
+
+  function updateDriveState(index, state) {
+    drives = drives.map(d =>
+      d.index === index ? { ...d, state } : d
+    );
+  }
 
   async function loadStatus() {
     try {
@@ -28,7 +78,8 @@
 
   async function loadDrives() {
     try {
-      drives = await ripperApi.listDrives();
+      const newDrives = await ripperApi.listDrives();
+      drives = newDrives;
     } catch (e) {
       console.error('Failed to load drives:', e);
     } finally {
@@ -38,8 +89,8 @@
 
   async function handleStart(index) {
     try {
-      await ripperApi.start(index, '');
-      await loadDrives();
+      await ripperApi.start(index);
+      stopPolling();
     } catch (e) {
       console.error('Failed to start rip:', e);
     }
@@ -48,7 +99,8 @@
   async function handleCancel(index) {
     try {
       await ripperApi.cancel(index);
-      await loadDrives();
+      loadDrives();
+      startPolling();
     } catch (e) {
       console.error('Failed to cancel rip:', e);
     }
@@ -130,6 +182,14 @@
             <div class="drive__info">
               <div class="drive__name">{drive.name}</div>
               <div class="drive__disc">{drive.disc_name || 'No disc inserted'}</div>
+              {#if ripProgress[drive.index] !== undefined}
+                <div class="progress" style="margin-top: var(--space-2);">
+                  <div class="progress__bar" style="width: {ripProgress[drive.index]}%"></div>
+                </div>
+                <div class="text-sm text-muted" style="margin-top: var(--space-1);">
+                  {ripProgress[drive.index]}%
+                </div>
+              {/if}
             </div>
             <div class="drive__actions flex gap-2">
               <span class="badge badge--{getStateColor(drive.state)}">{drive.state}</span>

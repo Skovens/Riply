@@ -37,6 +37,8 @@ pub struct Config {
     pub movies_directory: String,
     /// TV Shows destination directory
     pub tv_directory: String,
+    /// Directory to rip disc content into
+    pub rip_output_directory: Option<String>,
     /// Enable verbose logging
     pub verbose: bool,
     /// TMDb API key (optional, enables metadata lookups)
@@ -72,6 +74,7 @@ impl Default for Config {
             scan_directory: None,
             movies_directory: "movies".to_string(),
             tv_directory: "tv".to_string(),
+            rip_output_directory: None,
             verbose: false,
             tmdb_api_key: None,
             omdb_api_key: None,
@@ -162,6 +165,7 @@ mod tests {
             scan_directory: Some("/test".to_string()),
             movies_directory: "movies".to_string(),
             tv_directory: "tv".to_string(),
+            rip_output_directory: Some("/rips".to_string()),
             verbose: true,
             tmdb_api_key: None,
             omdb_api_key: None,
@@ -181,6 +185,7 @@ mod tests {
         assert_eq!(loaded.scan_directory, Some("/test".to_string()));
         assert_eq!(loaded.movies_directory, "movies");
         assert_eq!(loaded.tv_directory, "tv");
+        assert_eq!(loaded.rip_output_directory, Some("/rips".to_string()));
         assert!(loaded.verbose);
         assert_eq!(loaded.host, "127.0.0.1");
         assert_eq!(loaded.port, 8080);

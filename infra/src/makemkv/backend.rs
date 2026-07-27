@@ -129,6 +129,7 @@ impl RipBackend for MakemkvBackend {
                         index: parsed.index,
                         name: parsed.drive_name,
                         disc_name: parsed.disc_name,
+                        device_path: parsed.device_path,
                         state,
                     });
                 }

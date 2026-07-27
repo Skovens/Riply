@@ -11,9 +11,9 @@ pub enum RipCommand {
     Start {
         /// Drive index to rip
         index: usize,
-        /// Destination directory (default: current directory)
-        #[arg(short, long, default_value = ".")]
-        destination: String,
+        /// Destination directory (default: rip_output_directory from config)
+        #[arg(short, long)]
+        destination: Option<String>,
     },
     /// Eject disc from a drive
     Eject {
@@ -23,10 +23,15 @@ pub enum RipCommand {
 }
 
 /// Execute rip commands
-pub async fn rip_command(command: RipCommand) -> Result<(), anyhow::Error> {
+pub async fn rip_command(command: RipCommand, config: &infra::Config) -> Result<(), anyhow::Error> {
     match command {
         RipCommand::List => list_drives().await,
-        RipCommand::Start { index, destination } => start_rip(index, &destination).await,
+        RipCommand::Start { index, destination } => {
+            let dest = destination
+                .or_else(|| config.rip_output_directory.clone())
+                .unwrap_or_else(|| ".".to_string());
+            start_rip(index, &dest).await
+        }
         RipCommand::Eject { index } => eject_disc(index).await,
     }
 }
@@ -113,35 +118,15 @@ async fn start_rip(index: usize, destination: &str) -> Result<(), anyhow::Error>
 async fn eject_disc(index: usize) -> Result<(), anyhow::Error> {
     info!("Ejecting disc from drive: {}", index);
 
-    // Try Linux eject command
-    let device = format!("/dev/sr{}", index);
-    match std::process::Command::new("eject").arg(&device).output() {
-        Ok(output) if output.status.success() => {
-            println!("Ejected disc from drive {} ({})", index, device);
-            Ok(())
-        }
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            if stderr.contains("No medium found") {
-                println!("Drive {} is already empty", index);
-                Ok(())
-            } else if stderr.contains("not found") || stderr.contains("No such") {
-                Err(anyhow::anyhow!(
-                    "Device {} not found. Check that the drive index is correct.",
-                    device
-                ))
-            } else {
-                Err(anyhow::anyhow!("Eject failed: {}", stderr.trim()))
-            }
-        }
-        Err(e) => {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                Err(anyhow::anyhow!(
-                    "'eject' command not found. Install with: sudo apt-get install eject"
-                ))
-            } else {
-                Err(e.into())
-            }
-        }
-    }
+    let backend = get_backend()?;
+    let drives = backend.detect_drives()?;
+    let device_path = drives
+        .iter()
+        .find(|d| d.index == index)
+        .and_then(|d| d.device_path.clone())
+        .ok_or_else(|| anyhow::anyhow!("Drive {} not found or has no device path", index))?;
+
+    infra::eject_disc(&device_path)?;
+    println!("Ejected disc from drive {} ({})", index, device_path);
+    Ok(())
 }

@@ -131,6 +131,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/ripper/status", get(ripper::ripper_status))
         .route("/api/ripper/:index/start", post(ripper::start_rip))
         .route("/api/ripper/:index/cancel", post(ripper::cancel_rip))
+        .route("/api/ripper/:index/eject", post(ripper::eject_disc))
         // Config
         .route("/api/config", get(cfg::get_config).put(cfg::update_config))
         // SSE

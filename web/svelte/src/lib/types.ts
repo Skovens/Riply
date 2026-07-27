@@ -87,6 +87,7 @@ export interface Config {
   scan_directory?: string;
   movies_directory: string;
   tv_directory: string;
+  rip_output_directory?: string;
   verbose: boolean;
   tmdb_api_key?: string;
   omdb_api_key?: string;

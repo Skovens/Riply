@@ -14,6 +14,7 @@
   let host = $state('');
   let port = $state(3000);
   let ripping_command = $state('');
+  let rip_output_directory = $state('');
   let database_path = $state('');
   let verbose = $state(false);
 
@@ -31,6 +32,7 @@
       host = currentConfig.host || '0.0.0.0';
       port = currentConfig.port || 3000;
       ripping_command = currentConfig.ripping?.command || '';
+      rip_output_directory = currentConfig.rip_output_directory || '';
       database_path = currentConfig.database_path || 'riply.db';
       verbose = currentConfig.verbose || false;
     } catch (e) {
@@ -53,6 +55,7 @@
         host: host || '0.0.0.0',
         port: parseInt(port, 10),
         ripping_command: ripping_command || '',
+        rip_output_directory: rip_output_directory || '',
         database_path: database_path || 'riply.db',
         verbose,
       };
@@ -162,6 +165,14 @@
               <input class="settings__input" type="text" id="settings-ripping_command" bind:value={ripping_command} autocomplete="off" />
             </div>
             <div class="settings__hint">Auto-detected if empty (makemkvcon)</div>
+          </div>
+
+          <div class="settings__field">
+            <label class="settings__label" for="settings-rip_output_directory">Rip Output Directory</label>
+            <div class="settings__input-wrap">
+              <input class="settings__input" type="text" id="settings-rip_output_directory" bind:value={rip_output_directory} autocomplete="off" />
+            </div>
+            <div class="settings__hint">Where ripped disc content is saved. Falls back to scan directory if empty.</div>
           </div>
         </div>
 
