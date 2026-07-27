@@ -149,27 +149,15 @@ async fn list_files(
     let page = params.page.unwrap_or(1).max(1);
     let per_page = params.per_page.unwrap_or(50).min(200);
 
-    let files = if let Some(ref status) = params.status {
-        state
-            .db
-            .get_files_by_status(status)
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-    } else {
-        state
-            .db
-            .get_all_files()
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-    };
-
-    let total = files.len() as i64;
-    let start = ((page - 1) * per_page) as usize;
-    let items: Vec<_> = files
-        .into_iter()
-        .skip(start)
-        .take(per_page as usize)
-        .collect();
+    let (items, total) = state
+        .db
+        .get_files_paginated(
+            params.status.as_deref(),
+            page,
+            per_page,
+        )
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(ApiResponse::ok(PaginatedResponse {
         items,

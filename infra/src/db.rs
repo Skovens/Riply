@@ -360,6 +360,85 @@ impl Database {
         Ok(())
     }
 
+    /// Count files with optional status filter
+    pub async fn count_files(&self, status: Option<&str>) -> Result<i64, anyhow::Error> {
+        let row = if let Some(s) = status {
+            sqlx::query("SELECT COUNT(*) as count FROM files WHERE status = ?")
+                .bind(s)
+                .fetch_one(&self.pool)
+                .await?
+        } else {
+            sqlx::query("SELECT COUNT(*) as count FROM files")
+                .fetch_one(&self.pool)
+                .await?
+        };
+        Ok(row.try_get("count")?)
+    }
+
+    /// Get paginated files with optional status filter
+    pub async fn get_files_paginated(
+        &self,
+        status: Option<&str>,
+        page: u32,
+        per_page: u32,
+    ) -> Result<(Vec<riply_core::FileRecord>, i64), anyhow::Error> {
+        let offset = (page - 1) * per_page;
+
+        let count = self.count_files(status).await?;
+
+        let rows = if let Some(s) = status {
+            sqlx::query(
+                r#"
+                SELECT
+                    id, path, filename, size, duration, hash, status,
+                    suggested_title, suggested_year, confidence,
+                    canonical_title, canonical_year, tmdb_id,
+                    content_type, media_type, series_name,
+                    season_number, episode_number, episode_title,
+                    source, subtitle_text, duplicate_path,
+                    reviewed, created_at, updated_at
+                FROM files
+                WHERE status = ?
+                ORDER BY updated_at DESC
+                LIMIT ? OFFSET ?
+                "#,
+            )
+            .bind(s)
+            .bind(per_page as i64)
+            .bind(offset as i64)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                r#"
+                SELECT
+                    id, path, filename, size, duration, hash, status,
+                    suggested_title, suggested_year, confidence,
+                    canonical_title, canonical_year, tmdb_id,
+                    content_type, media_type, series_name,
+                    season_number, episode_number, episode_title,
+                    source, subtitle_text, duplicate_path,
+                    reviewed, created_at, updated_at
+                FROM files
+                ORDER BY updated_at DESC
+                LIMIT ? OFFSET ?
+                "#,
+            )
+            .bind(per_page as i64)
+            .bind(offset as i64)
+            .fetch_all(&self.pool)
+            .await?
+        };
+
+        let mut files = Vec::new();
+        for row in rows {
+            let file = self.row_to_file_record(&row)?;
+            files.push(file);
+        }
+
+        Ok((files, count))
+    }
+
     /// Count files by status
     pub async fn count_files_by_status(&self, status: &str) -> Result<i64, anyhow::Error> {
         let row = sqlx::query("SELECT COUNT(*) as count FROM files WHERE status = ?")
