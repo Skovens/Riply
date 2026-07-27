@@ -27,9 +27,18 @@ pub async fn rip_command(command: RipCommand, config: &infra::Config) -> Result<
     match command {
         RipCommand::List => list_drives().await,
         RipCommand::Start { index, destination } => {
-            let dest = destination
-                .or_else(|| config.rip_output_directory.clone())
-                .unwrap_or_else(|| ".".to_string());
+            let dest = match destination {
+                Some(d) => d,
+                None => {
+                    config
+                        .validate_for_ripping()
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                    config
+                        .rip_output_directory
+                        .clone()
+                        .unwrap_or_else(|| ".".to_string())
+                }
+            };
             start_rip(index, &dest).await
         }
         RipCommand::Eject { index } => eject_disc(index).await,

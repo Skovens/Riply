@@ -81,14 +81,16 @@ pub async fn start_rip(
         "No ripping backend available. Install makemkvcon or Flatpak package.".to_string(),
     ))?;
 
-    let dest = match body.destination {
-        Some(d) if !d.is_empty() => d,
+    let dest = match &body.destination {
+        Some(d) if !d.is_empty() => d.clone(),
         _ => {
             let config = state.config.read().await;
             config
+                .validate_for_ripping()
+                .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+            config
                 .rip_output_directory
                 .clone()
-                .or_else(|| config.scan_directory.clone())
                 .unwrap_or_else(|| ".".to_string())
         }
     };

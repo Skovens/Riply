@@ -1,11 +1,12 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { ripperApi } from '$lib/api';
+  import { ripperApi, configApi } from '$lib/api';
   import { connectSSE } from '$lib/api/sse';
   import { DriveInfo, InstallationStatus } from '$lib/types';
 
   let drives = $state([]);
   let status = $state(null);
+  let config = $state(null);
   let loading = $state(true);
   let pollInterval = null;
   let ripProgress = $state({});
@@ -13,6 +14,7 @@
 
   onMount(() => {
     loadStatus();
+    loadConfig();
     loadDrives();
     startPolling();
     disconnectSSE = connectSSE(handleSSE);
@@ -73,6 +75,14 @@
       status = await ripperApi.getStatus();
     } catch (e) {
       console.error('Failed to load installation status:', e);
+    }
+  }
+
+  async function loadConfig() {
+    try {
+      config = await configApi.get();
+    } catch (e) {
+      console.error('Failed to load config:', e);
     }
   }
 
@@ -149,6 +159,18 @@
           Drive access requires cdrom group membership. The setup command can add this for you.
         </div>
       {/if}
+    </div>
+  </div>
+{/if}
+
+{#if config && !config.rip_output_directory}
+  <div class="banner banner--warning" style="margin-bottom: var(--space-4);">
+    <div class="banner__icon">&#9888;</div>
+    <div class="banner__content">
+      <div class="banner__title">Rip output directory not set</div>
+      <div class="banner__text">
+        Go to <a href="/settings">Settings → Ripping</a> to configure where ripped files are saved.
+      </div>
     </div>
   </div>
 {/if}

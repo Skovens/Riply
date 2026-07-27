@@ -137,6 +137,29 @@ impl Config {
             .resolved_command()
             .or(self.makemkvcon_path.as_deref())
     }
+
+    /// Validate that the config has the required directories for ripping.
+    /// Returns `Ok(())` if valid, or a descriptive error message.
+    pub fn validate_for_ripping(&self) -> Result<(), String> {
+        match &self.rip_output_directory {
+            Some(dir) if !dir.is_empty() => {
+                let path = std::path::Path::new(dir);
+                if let Some(parent) = path.parent() {
+                    if !parent.as_os_str().is_empty() && !parent.exists() {
+                        return Err(format!(
+                            "Parent directory of rip_output_directory does not exist: {}",
+                            parent.display()
+                        ));
+                    }
+                }
+                Ok(())
+            }
+            _ => Err(
+                "rip_output_directory is not set. Go to Settings → Ripping to configure it."
+                    .to_string(),
+            ),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -260,5 +283,42 @@ makemkvcon_path = "/usr/bin/makemkvcon"
             config.ripping_command(),
             Some("flatpak run --command=makemkvcon com.makemkv.MakeMKV")
         );
+    }
+
+    #[test]
+    fn test_validate_for_ripping_missing() {
+        let config = Config::default();
+        let err = config.validate_for_ripping().unwrap_err();
+        assert!(err.contains("rip_output_directory is not set"));
+    }
+
+    #[test]
+    fn test_validate_for_ripping_empty_string() {
+        let config = Config {
+            rip_output_directory: Some("".to_string()),
+            ..Config::default()
+        };
+        let err = config.validate_for_ripping().unwrap_err();
+        assert!(err.contains("rip_output_directory is not set"));
+    }
+
+    #[test]
+    fn test_validate_for_ripping_valid() {
+        let dir = tempdir().unwrap();
+        let config = Config {
+            rip_output_directory: Some(dir.path().to_string_lossy().to_string()),
+            ..Config::default()
+        };
+        assert!(config.validate_for_ripping().is_ok());
+    }
+
+    #[test]
+    fn test_validate_for_ripping_nonexistent_parent() {
+        let config = Config {
+            rip_output_directory: Some("/nonexistent/path/rips".to_string()),
+            ..Config::default()
+        };
+        let err = config.validate_for_ripping().unwrap_err();
+        assert!(err.contains("Parent directory"));
     }
 }
