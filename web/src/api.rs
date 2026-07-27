@@ -9,10 +9,10 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use tower_http::services::{ServeDir, ServeFile};
 use riply_core::{DriveInfo, RipBackend, RipEvent};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
+use tower_http::services::{ServeDir, ServeFile};
 use tracing::info;
 
 use crate::sse::SseManager;
@@ -56,8 +56,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
 
     let spa_fallback = ServeFile::new(build_dir.join("index.html"));
 
-    let static_service = ServeDir::new(&build_dir)
-        .not_found_service(spa_fallback);
+    let static_service = ServeDir::new(&build_dir).not_found_service(spa_fallback);
 
     Router::new()
         // API routes
@@ -78,6 +77,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/jobs/:id", get(get_job))
         .route("/api/jobs/:id/cancel", post(cancel_job))
         .route("/api/ripper/drives", get(list_drives))
+        .route("/api/ripper/status", get(ripper_status))
         .route("/api/ripper/:index/start", post(start_rip))
         .route("/api/ripper/:index/cancel", post(cancel_rip))
         .route("/api/config", get(get_config).put(update_config))
@@ -690,6 +690,11 @@ async fn cancel_job(
 }
 
 // --- Ripper ---
+
+async fn ripper_status() -> Json<ApiResponse<infra::InstallationStatus>> {
+    let status = infra::check_installation();
+    Json(ApiResponse::ok(status))
+}
 
 async fn list_drives(
     State(state): State<Arc<AppState>>,

@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use commands::{
-    analyze_files, move_files, review_files, rip_command as do_rip, scan_directory, show_status,
-    RipCommand,
+    analyze_files, move_files, review_files, rip_command as do_rip, run_setup, scan_directory,
+    show_status, RipCommand, SetupArgs,
 };
 use infra::{Config, Database};
 use tracing::{info, Level};
@@ -60,6 +60,8 @@ enum Command {
     },
     /// Show current pipeline status
     Status,
+    /// Set up MakeMKV installation
+    Setup(SetupArgs),
 }
 
 #[tokio::main]
@@ -116,6 +118,9 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Status => {
             show_status(&db).await?;
+        }
+        Command::Setup(args) => {
+            run_setup(args)?;
         }
     }
 

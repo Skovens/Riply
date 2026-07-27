@@ -107,6 +107,28 @@ export interface Job {
   completed_at?: string;
 }
 
+// ── Ripping Setup ────────────────────────────────────────────
+
+export type DetectionMethod =
+  | { Native: string }
+  | 'Flatpak'
+  | 'None';
+
+export type MissingComponent =
+  | 'Flatpak'
+  | 'Flathub'
+  | 'MakeMKV'
+  | 'CdromGroup';
+
+export interface InstallationStatus {
+  installed: boolean;
+  method: DetectionMethod;
+  flatpak_available: boolean;
+  flathub_configured: boolean;
+  drive_access_ok: boolean;
+  missing: MissingComponent[];
+}
+
 // ── API Response Wrappers ────────────────────────────────────
 
 export interface ApiResponse<T> {

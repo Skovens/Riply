@@ -1,7 +1,11 @@
 import { request } from './request';
-import type { DriveInfo } from '$lib/types';
+import type { DriveInfo, InstallationStatus } from '$lib/types';
 
 export const ripperApi = {
+  getStatus() {
+    return request<InstallationStatus>('/api/ripper/status');
+  },
+
   listDrives() {
     return request<DriveInfo[]>('/api/ripper/drives');
   },

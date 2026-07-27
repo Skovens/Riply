@@ -42,27 +42,8 @@ fn get_backend() -> Result<Box<dyn RipBackend>, anyhow::Error> {
     match infra::MakemkvBackend::auto_detect() {
         Ok(backend) => Ok(Box::new(backend)),
         Err(RipError::NotAvailable) => {
-            println!("No ripping backend found.");
-            println!();
-            println!("Install one of:");
-            println!();
-            println!("  Option 1: Native install");
-            println!("    Download from https://www.makemkv.com/download/");
-            println!("    Or build from source:");
-            println!("      sudo apt-get install build-essential pkg-config libc6-dev \\");
-            println!("        libssl-dev libexpat1-dev libavcodec-dev \\");
-            println!("        libgl1-mesa-dev qtbase5-dev zlib1g-dev");
-            println!("      tar xf makemkv-oss-*.tar.gz && cd makemkv-oss-* && ./configure && make && sudo make install");
-            println!("      tar xf makemkv-bin-*.tar.gz && cd makemkv-bin-* && make && sudo make install");
-            println!();
-            println!("  Option 2: Flatpak");
-            println!("    flatpak install flathub com.makemkv.MakeMKV");
-            println!();
-            println!("  Option 3: Configure a custom command in config.toml:");
-            println!("    [ripping]");
-            println!("    command = \"/path/to/makemkvcon\"");
-            println!("    # or");
-            println!("    command = \"flatpak run --command=makemkvcon com.makemkv.MakeMKV\"");
+            println!("No ripping backend found.\n");
+            println!("Run `riply setup` to install MakeMKV via Flatpak.");
             Err(anyhow::anyhow!("No ripping backend available"))
         }
         Err(e) => Err(e.into()),

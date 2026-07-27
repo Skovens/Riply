@@ -27,6 +27,11 @@ impl MakemkvBackend {
         Self::new(parts)
     }
 
+    /// Return the full command as a single string (for display/detection).
+    pub fn command_string(&self) -> String {
+        self.command.join(" ")
+    }
+
     /// Auto-detect makemkvcon installation.
     ///
     /// Tries in order:

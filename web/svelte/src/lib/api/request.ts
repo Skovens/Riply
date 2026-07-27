@@ -10,6 +10,12 @@ export class ApiError extends Error {
   }
 }
 
+interface ApiResponse<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
+
 export async function request<T = unknown>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${BASE_URL}${endpoint}`;
 
@@ -33,5 +39,16 @@ export async function request<T = unknown>(endpoint: string, options: RequestIni
     throw new ApiError(response.status, text);
   }
 
-  return response.json() as Promise<T>;
+  const json = await response.json() as ApiResponse<T> | T;
+
+  // Unwrap ApiResponse wrapper if present
+  if (json && typeof json === 'object' && 'success' in json && 'data' in json) {
+    const wrapped = json as ApiResponse<T>;
+    if (!wrapped.success && wrapped.error) {
+      throw new ApiError(response.status, wrapped.error);
+    }
+    return wrapped.data as T;
+  }
+
+  return json as T;
 }
