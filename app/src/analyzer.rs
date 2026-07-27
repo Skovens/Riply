@@ -3,6 +3,8 @@ use riply_core::{MediaType, MetadataSearcher};
 use std::sync::LazyLock;
 use tracing::info;
 
+use crate::ffprobe;
+
 static SXXEXX_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)S(\d{1,2})E(\d{1,3})").unwrap());
 
@@ -43,6 +45,14 @@ impl AnalyzerService {
         info!("Analyzing file: {}", file.filename);
 
         let mut record = file.clone();
+
+        // Extract media metadata via ffprobe (skip gracefully if not available)
+        if let Ok(metadata) = ffprobe::extract_metadata(&record.path) {
+            record.duration = metadata.duration_secs.map(|d| d as i64);
+            if let Some(ref ct) = metadata.content_type {
+                record.content_type = ct.clone();
+            }
+        }
 
         // Parse filename for title, year, and TV episode info
         let parsed = parse_filename(&record.filename);
