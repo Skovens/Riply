@@ -15,11 +15,6 @@ pub enum RipCommand {
         #[arg(short, long, default_value = ".")]
         destination: String,
     },
-    /// Cancel ripping on a drive (press Ctrl+C during a rip instead)
-    Cancel {
-        /// Drive index to cancel
-        index: usize,
-    },
     /// Eject disc from a drive
     Eject {
         /// Drive index to eject
@@ -32,7 +27,6 @@ pub async fn rip_command(command: RipCommand) -> Result<(), anyhow::Error> {
     match command {
         RipCommand::List => list_drives().await,
         RipCommand::Start { index, destination } => start_rip(index, &destination).await,
-        RipCommand::Cancel { index } => cancel_rip(index).await,
         RipCommand::Eject { index } => eject_disc(index).await,
     }
 }
@@ -112,13 +106,6 @@ async fn start_rip(index: usize, destination: &str) -> Result<(), anyhow::Error>
         }
     }
 
-    Ok(())
-}
-
-/// Cancel ripping on a drive
-async fn cancel_rip(_index: usize) -> Result<(), anyhow::Error> {
-    println!("To cancel a rip, press Ctrl+C while a rip is running.");
-    println!("The rip process will be killed automatically.");
     Ok(())
 }
 
