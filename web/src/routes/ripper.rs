@@ -348,6 +348,11 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
             let prev = prev_states.get(&drive.index).cloned();
             prev_states.insert(drive.index, drive.state.clone());
 
+            // Push state changes to frontend via SSE
+            if prev != Some(drive.state.clone()) {
+                state.sse.send_status(&format!("drive:changed:{}:{}", drive.index, drive.state));
+            }
+
             // Detect Empty → Ready transition (disc inserted)
             let is_new_disc = matches!(prev, Some(DriveState::Empty) | None)
                 && matches!(drive.state, DriveState::Ready);

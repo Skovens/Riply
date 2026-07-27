@@ -12,35 +12,29 @@
   let loading = $state(true);
   let ripStatus = $state({});
   let lastProgressTime = $state({});
-  let pollInterval = null;
   let disconnectSSE = null;
 
   onMount(() => {
     loadStatus();
     loadConfig();
     loadDrives();
-    startPolling();
     disconnectSSE = connectSSE(handleSSE);
   });
 
   onDestroy(() => {
-    if (pollInterval) clearInterval(pollInterval);
     if (disconnectSSE) disconnectSSE();
   });
 
-  function startPolling() {
-    if (pollInterval) clearInterval(pollInterval);
-    pollInterval = setInterval(loadDrives, 5000);
-  }
-
-  function stopPolling() {
-    if (pollInterval) {
-      clearInterval(pollInterval);
-      pollInterval = null;
-    }
-  }
-
   function handleSSE(data) {
+    if (data.startsWith('drive:')) {
+      const parts = data.split(':');
+      const index = parseInt(parts[2]);
+      const state = parts[3];
+      updateDriveState(index, state);
+      loadDrives();
+      return;
+    }
+
     if (!data.startsWith('rip:')) return;
 
     const parts = data.split(':');
@@ -136,7 +130,6 @@
   async function handleStart(index) {
     try {
       await ripperApi.start(index);
-      stopPolling();
     } catch (e) {
       console.error('Failed to start rip:', e);
     }
@@ -146,7 +139,6 @@
     try {
       await ripperApi.cancel(index);
       loadDrives();
-      startPolling();
     } catch (e) {
       console.error('Failed to cancel rip:', e);
     }
