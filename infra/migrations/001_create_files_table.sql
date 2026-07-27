@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS files (
     size INTEGER,
     duration INTEGER,
     hash TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'SCANNED',
+    status TEXT NOT NULL DEFAULT 'Scanned',
     suggested_title TEXT,
     suggested_year INTEGER,
     confidence REAL,
