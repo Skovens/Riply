@@ -85,9 +85,22 @@ async fn list_drives() -> Result<(), anyhow::Error> {
 async fn start_rip(index: usize, destination: &str) -> Result<(), anyhow::Error> {
     info!("Starting rip on drive: {}", index);
     let backend = get_backend()?;
-    let mut handle = backend.start_rip(index, destination)?;
 
-    println!("Ripping started on drive {} → {}", index, destination);
+    // Look up disc name and create subdirectory if applicable
+    let mut dest = destination.to_string();
+    let drives = backend.detect_drives()?;
+    if let Some(drive) = drives.iter().find(|d| d.index == index) {
+        if let Some(ref disc_name) = drive.disc_name {
+            let (title, _year) = infra::makemkv::parser::parse_disc_name(disc_name);
+            if !title.is_empty() {
+                dest = format!("{}/{}", dest, title);
+            }
+        }
+    }
+
+    let mut handle = backend.start_rip(index, &dest)?;
+
+    println!("Ripping started on drive {} → {}", index, dest);
     println!("Press Ctrl+C to cancel");
 
     while let Some(event) = handle.next_event().await {

@@ -81,9 +81,11 @@ pub async fn start_rip(
         "No ripping backend available. Install makemkvcon or Flatpak package.".to_string(),
     ))?;
 
-    let dest = match &body.destination {
-        Some(d) if !d.is_empty() => d.clone(),
-        _ => {
+    let explicit_dest = body.destination.as_ref().filter(|d| !d.is_empty()).cloned();
+
+    let mut dest = match &explicit_dest {
+        Some(d) => d.clone(),
+        None => {
             let config = state.config.read().await;
             config
                 .validate_for_ripping()
@@ -94,6 +96,24 @@ pub async fn start_rip(
                 .unwrap_or_else(|| ".".to_string())
         }
     };
+
+    // If no explicit destination, look up disc name and create subdirectory
+    if explicit_dest.is_none() {
+        let backend_clone = Arc::clone(backend);
+        let drives = tokio::task::spawn_blocking(move || backend_clone.detect_drives())
+            .await
+            .unwrap_or(Ok(vec![]))
+            .unwrap_or(vec![]);
+
+        if let Some(drive) = drives.iter().find(|d| d.index == index) {
+            if let Some(ref disc_name) = drive.disc_name {
+                let (title, _year) = infra::makemkv::parser::parse_disc_name(disc_name);
+                if !title.is_empty() {
+                    dest = format!("{}/{}", dest, title);
+                }
+            }
+        }
+    }
 
     let mut handle = backend
         .start_rip(index, &dest)
