@@ -92,8 +92,6 @@ struct PackageManager {
 fn check_flatpak() -> bool         // `which flatpak`
 fn check_flathub() -> bool         // `flatpak remotes` contains "flathub"
 fn check_cdrom_group() -> bool     // `id -nG $USER` contains "cdrom"
-fn check_drive_permissions() -> bool // `flatpak info --show-permissions` contains "device=all"
-fn check_network() -> bool         // quick connectivity test (flatpak remote-ls)
 fn get_install_user() -> String    // $SUDO_USER || $USER — the user to add to cdrom group
 ```
 
@@ -118,11 +116,6 @@ Interactive, CLI-only, synchronous. Each step: check → skip if done → offer 
 If `dry_run` is true, prints what would be done without executing any commands.
 
 ```
-Step 0: Network check
-  if check_network() → proceed
-  else → "[!] No network connection. Flatpak operations require internet.
-          Check your connection and try again." → return Err
-
 Step 1: Flatpak
   if check_flatpak() → "[✓] Flatpak already installed"
   else:

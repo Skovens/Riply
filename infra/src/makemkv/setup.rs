@@ -81,19 +81,6 @@ pub fn install_makemkv(dry_run: bool) -> anyhow::Result<InstallationStatus> {
     println!("MakeMKV Setup");
     println!("=============\n");
 
-    // Step 0: Network check
-    if !dry_run {
-        print!("Checking network connectivity... ");
-        io::stdout().flush()?;
-        if !check_network() {
-            println!("FAILED");
-            println!("\nNo network connection. Flatpak operations require internet.");
-            println!("Check your connection and try again.");
-            return Err(anyhow::anyhow!("No network connection"));
-        }
-        println!("OK");
-    }
-
     // Step 1: Flatpak
     if check_flatpak() {
         println!("[✓] Flatpak already installed");
@@ -257,16 +244,6 @@ fn check_cdrom_group() -> bool {
     };
     let groups = String::from_utf8_lossy(&output.stdout);
     groups.split_whitespace().any(|g| g == "cdrom")
-}
-
-fn check_network() -> bool {
-    StdCommand::new("flatpak")
-        .args(["remote-ls", "flathub", "--columns=application"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
 }
 
 fn get_install_user() -> String {
