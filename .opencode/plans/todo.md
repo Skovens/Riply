@@ -48,7 +48,7 @@
 | 40 | Fix time estimation display (SSE ETA not rendering in UI) | PENDING | — |
 | 41 | Add per-drive autorip toggle UI (independent on/off per drive card) | PENDING | #39 |
 | 42 | Add progress bar with percentage display during rip | PENDING | — |
-| 43 | Optimize dashboard loading during active rip (SSE polling blocking?) | PENDING | — |
+| 43 | Optimize dashboard loading during active rip (SSE polling blocking?) | DONE | — |
 
 ### Legacy (folded into above)
 

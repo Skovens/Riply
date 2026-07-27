@@ -17,6 +17,7 @@
   onMount(() => {
     loadStatus();
     loadConfig();
+    loadAutoripStatus();
     loadDrives();
     disconnectSSE = connectSSE(handleSSE);
   });
@@ -88,11 +89,25 @@
       if (config?.ripping?.autorip_excluded_drives) {
         excludedDrives = new Set(config.ripping.autorip_excluded_drives);
       }
-      if (config?.ripping?.autorip_enabled !== undefined) {
-        autoripEnabled = config.ripping.autorip_enabled;
-      }
     } catch (e) {
       console.error('Failed to load config:', e);
+    }
+  }
+
+  async function loadAutoripStatus() {
+    try {
+      autoripEnabled = await ripperApi.getAutoripStatus();
+    } catch (e) {
+      console.error('Failed to load autorip status:', e);
+    }
+  }
+
+  async function toggleAutorip() {
+    try {
+      autoripEnabled = await ripperApi.toggleAutorip();
+      await configApi.update({ autorip_enabled: autoripEnabled });
+    } catch (e) {
+      console.error('Failed to toggle autorip:', e);
     }
   }
 
@@ -223,10 +238,25 @@
   </div>
 {/if}
 
+{#if autoripEnabled}
+  <div class="banner banner--info" style="margin-bottom: var(--space-4);">
+    <div class="banner__icon">&#128640;</div>
+    <div class="banner__content">
+      <div class="banner__title">Auto-rip active</div>
+      <div class="banner__text">Discs will be ripped automatically when inserted. Use the toggle below each drive to exclude it.</div>
+    </div>
+  </div>
+{/if}
+
 <section class="section">
   <div class="section__header">
     <h2 class="section__title">Disc Drives</h2>
-    <button class="btn btn--secondary btn--sm" onclick={loadDrives}>Refresh</button>
+    <div class="flex gap-2">
+      <button class="btn btn--secondary btn--sm" onclick={toggleAutorip}>
+        {autoripEnabled ? 'Disable Auto-rip' : 'Enable Auto-rip'}
+      </button>
+      <button class="btn btn--secondary btn--sm" onclick={loadDrives}>Refresh</button>
+    </div>
   </div>
 
   {#if loading}
