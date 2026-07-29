@@ -43,6 +43,9 @@ sha2 = "0.10"
 # CLI
 clap = { version = "4", features = ["derive"] }
 
+# Retry
+backon = { version = "1", features = ["tokio"] }
+
 # Testing
 proptest = "1"
 wiremock = "0.5"

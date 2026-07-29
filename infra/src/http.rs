@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use backon::{ExponentialBuilder, Retryable};
 use reqwest::Client;
 use riply_core::{MediaType, MetadataMatch, MetadataSearcher};
 use tracing::info;
@@ -99,6 +100,25 @@ impl HttpClient {
         Self::with_urls(base_url.clone(), base_url, tmdb_api_key, omdb_api_key)
     }
 
+    async fn get_json<T: serde::de::DeserializeOwned>(
+        &self,
+        url: &str,
+        params: &HashMap<String, String>,
+    ) -> Result<T, anyhow::Error> {
+        let url = url.to_string();
+        let params = params.clone();
+        let client = self.client.clone();
+        let resp = (move || {
+            let client = client.clone();
+            let url = url.clone();
+            let params = params.clone();
+            async move { client.get(&url).query(&params).send().await }
+        })
+        .retry(ExponentialBuilder::default())
+        .await?;
+        Ok(resp.json::<T>().await?)
+    }
+
     pub async fn search_tmdb_movies(
         &self,
         query: &str,
@@ -117,14 +137,7 @@ impl HttpClient {
         }
 
         let url = format!("{}/search/movie", self.tmdb_base_url);
-        let resp: TmdbSearchResponse = self
-            .client
-            .get(&url)
-            .query(&params)
-            .send()
-            .await?
-            .json()
-            .await?;
+        let resp: TmdbSearchResponse = self.get_json(&url, &params).await?;
 
         let matches = resp
             .results
@@ -158,14 +171,7 @@ impl HttpClient {
         params.insert("query".to_string(), query.to_string());
 
         let url = format!("{}/search/tv", self.tmdb_base_url);
-        let resp: TmdbSearchResponse = self
-            .client
-            .get(&url)
-            .query(&params)
-            .send()
-            .await?
-            .json()
-            .await?;
+        let resp: TmdbSearchResponse = self.get_json(&url, &params).await?;
 
         let matches = resp
             .results
@@ -206,14 +212,7 @@ impl HttpClient {
         }
 
         let url = format!("{}/", self.omdb_base_url);
-        let resp: OmdbResponse = self
-            .client
-            .get(&url)
-            .query(&params)
-            .send()
-            .await?
-            .json()
-            .await?;
+        let resp: OmdbResponse = self.get_json(&url, &params).await?;
 
         if resp.response.as_deref() == Some("True") {
             let year = resp.year.as_ref().and_then(|y| y.trim().parse().ok());
@@ -252,14 +251,7 @@ impl HttpClient {
         }
 
         let url = format!("{}/", self.omdb_base_url);
-        let resp: OmdbResponse = self
-            .client
-            .get(&url)
-            .query(&params)
-            .send()
-            .await?
-            .json()
-            .await?;
+        let resp: OmdbResponse = self.get_json(&url, &params).await?;
 
         if resp.response.as_deref() == Some("True") {
             let year = resp.year.as_ref().and_then(|y| y.trim().parse().ok());
@@ -297,7 +289,19 @@ impl HttpClient {
         );
         let params = HashMap::from([("api_key".to_string(), api_key)]);
 
-        let resp = self.client.get(&url).query(&params).send().await?;
+        let resp: reqwest::Response = {
+            let url = url.clone();
+            let params = params.clone();
+            let client = self.client.clone();
+            (move || {
+                let client = client.clone();
+                let url = url.clone();
+                let params = params.clone();
+                async move { client.get(&url).query(&params).send().await }
+            })
+            .retry(ExponentialBuilder::default())
+            .await?
+        };
 
         if !resp.status().is_success() {
             return Ok(None);
