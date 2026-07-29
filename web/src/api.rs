@@ -8,6 +8,7 @@ use axum::{
 use riply_core::RipBackend;
 use tokio::sync::RwLock;
 use tower_http::services::{ServeDir, ServeFile};
+use tower_http::trace::TraceLayer;
 use tracing::info;
 
 use crate::sse::SseManager;
@@ -144,5 +145,6 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/sse", get(sse_handler::sse_endpoint))
         // Static files
         .fallback_service(static_service)
+        .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
