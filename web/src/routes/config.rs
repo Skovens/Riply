@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{extract::State, Json};
 use infra::Config;
 use serde::Deserialize;
 
 use crate::api::{ApiResponse, AppState};
+use crate::error::WebError;
 
 pub async fn get_config(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Config>> {
     let config = state.config.read().await;
@@ -34,7 +35,7 @@ pub struct ConfigUpdateBody {
 pub async fn update_config(
     State(state): State<Arc<AppState>>,
     Json(body): Json<ConfigUpdateBody>,
-) -> Result<Json<ApiResponse<Config>>, (StatusCode, String)> {
+) -> Result<Json<ApiResponse<Config>>, WebError> {
     let mut config = state.config.write().await;
 
     if let Some(v) = body.database_path {

@@ -1,11 +1,12 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
 use crate::api::{ApiResponse, AppState, JobStartedResponse};
+use crate::error::WebError;
 
 #[derive(Debug, Deserialize)]
 pub struct StartMoveBody {
@@ -31,7 +32,7 @@ pub struct MovePreviewItem {
 pub async fn start_move(
     State(state): State<Arc<AppState>>,
     Json(body): Json<StartMoveBody>,
-) -> Result<Json<ApiResponse<JobStartedResponse>>, (StatusCode, String)> {
+) -> Result<Json<ApiResponse<JobStartedResponse>>, WebError> {
     let (movies_dir, tv_dir) = {
         let config = state.config.read().await;
         let m = body
@@ -108,7 +109,7 @@ pub async fn start_move(
             }
         })
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| WebError::Internal(e.to_string()))?;
 
     Ok(Json(ApiResponse::ok(JobStartedResponse {
         job_id,
@@ -118,18 +119,18 @@ pub async fn start_move(
 
 pub async fn get_move_status(
     State(state): State<Arc<AppState>>,
-) -> Result<Json<ApiResponse<MoveStatusResponse>>, (StatusCode, String)> {
+) -> Result<Json<ApiResponse<MoveStatusResponse>>, WebError> {
     let confirmed = state
         .db
         .count_files_by_status("Confirmed")
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| WebError::Internal(e.to_string()))?;
 
     let moved = state
         .db
         .count_files_by_status("Moved")
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| WebError::Internal(e.to_string()))?;
 
     Ok(Json(ApiResponse::ok(MoveStatusResponse {
         confirmed_count: confirmed,
@@ -139,7 +140,7 @@ pub async fn get_move_status(
 
 pub async fn preview_move(
     State(state): State<Arc<AppState>>,
-) -> Result<Json<ApiResponse<Vec<MovePreviewItem>>>, (StatusCode, String)> {
+) -> Result<Json<ApiResponse<Vec<MovePreviewItem>>>, WebError> {
     let (movies_dir, tv_dir) = {
         let config = state.config.read().await;
         (config.movies_directory.clone(), config.tv_directory.clone())
@@ -149,7 +150,7 @@ pub async fn preview_move(
         .db
         .get_files_by_status("Confirmed")
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| WebError::Internal(e.to_string()))?;
 
     let mover = app::MoverService::new();
     let mut previews = Vec::new();

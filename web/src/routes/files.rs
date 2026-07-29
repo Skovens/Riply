@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
     Json,
 };
 use riply_core::FileRecord;
 use serde::Deserialize;
 
 use crate::api::{ApiResponse, AppState, PaginatedResponse};
+use crate::error::WebError;
 
 #[derive(Debug, Deserialize)]
 pub struct FileListParams {
@@ -31,7 +31,7 @@ pub struct UpdateFileBody {
 pub async fn list_files(
     State(state): State<Arc<AppState>>,
     Query(params): Query<FileListParams>,
-) -> Result<Json<ApiResponse<PaginatedResponse<FileRecord>>>, (StatusCode, String)> {
+) -> Result<Json<ApiResponse<PaginatedResponse<FileRecord>>>, WebError> {
     let page = params.page.unwrap_or(1).max(1);
     let per_page = params.per_page.unwrap_or(50).min(200);
 
@@ -44,7 +44,7 @@ pub async fn list_files(
             per_page,
         )
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| WebError::Internal(e.to_string()))?;
 
     Ok(Json(ApiResponse::ok(PaginatedResponse {
         items,
@@ -57,15 +57,15 @@ pub async fn list_files(
 pub async fn get_file(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-) -> Result<Json<ApiResponse<FileRecord>>, (StatusCode, String)> {
+) -> Result<Json<ApiResponse<FileRecord>>, WebError> {
     match state
         .db
         .get_file_by_id(&id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(|e| WebError::Internal(e.to_string()))?
     {
         Some(file) => Ok(Json(ApiResponse::ok(file))),
-        None => Err((StatusCode::NOT_FOUND, format!("File not found: {}", id))),
+        None => Err(WebError::NotFound(format!("File not found: {}", id))),
     }
 }
 
@@ -73,13 +73,13 @@ pub async fn update_file(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(body): Json<UpdateFileBody>,
-) -> Result<Json<ApiResponse<FileRecord>>, (StatusCode, String)> {
+) -> Result<Json<ApiResponse<FileRecord>>, WebError> {
     let mut file = state
         .db
         .get_file_by_id(&id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("File not found: {}", id)))?;
+        .map_err(|e| WebError::Internal(e.to_string()))?
+        .ok_or_else(|| WebError::NotFound(format!("File not found: {}", id)))?;
 
     if let Some(title) = body.canonical_title {
         file.canonical_title = Some(title);
@@ -107,7 +107,7 @@ pub async fn update_file(
         .db
         .update_file(&file)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| WebError::Internal(e.to_string()))?;
 
     Ok(Json(ApiResponse::ok(file)))
 }
@@ -115,22 +115,22 @@ pub async fn update_file(
 pub async fn delete_file(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-) -> Result<Json<ApiResponse<String>>, (StatusCode, String)> {
+) -> Result<Json<ApiResponse<String>>, WebError> {
     if state
         .db
         .get_file_by_id(&id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(|e| WebError::Internal(e.to_string()))?
         .is_none()
     {
-        return Err((StatusCode::NOT_FOUND, format!("File not found: {}", id)));
+        return Err(WebError::NotFound(format!("File not found: {}", id)));
     }
 
     state
         .db
         .delete_file(&id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| WebError::Internal(e.to_string()))?;
 
     Ok(Json(ApiResponse::ok(id)))
 }

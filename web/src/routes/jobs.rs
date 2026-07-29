@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
     Json,
 };
 use serde::Serialize;
 
 use crate::api::{ApiResponse, AppState};
+use crate::error::WebError;
 
 #[derive(Serialize)]
 pub struct JobInfoResponse {
@@ -38,12 +38,12 @@ pub async fn list_jobs(
 pub async fn get_job(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-) -> Result<Json<ApiResponse<JobInfoResponse>>, (StatusCode, String)> {
+) -> Result<Json<ApiResponse<JobInfoResponse>>, WebError> {
     let job = state
         .scheduler
         .get_job_status(&id)
         .await
-        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+        .map_err(|e| WebError::NotFound(e.to_string()))?;
 
     Ok(Json(ApiResponse::ok(JobInfoResponse {
         id: job.id,
@@ -57,12 +57,12 @@ pub async fn get_job(
 pub async fn cancel_job(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-) -> Result<Json<ApiResponse<String>>, (StatusCode, String)> {
+) -> Result<Json<ApiResponse<String>>, WebError> {
     state
         .scheduler
         .cancel_job(&id)
         .await
-        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+        .map_err(|e| WebError::NotFound(e.to_string()))?;
 
     state.sse.send_status(&format!("job:cancelled:{}", id));
     Ok(Json(ApiResponse::ok(id)))

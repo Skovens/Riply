@@ -1,5 +1,6 @@
 // Web layer - HTTP API and SSE endpoints
 pub mod api;
+pub mod error;
 pub mod routes;
 pub mod sse;
 

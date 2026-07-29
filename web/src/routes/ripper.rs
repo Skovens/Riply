@@ -3,7 +3,6 @@ use std::time::Instant;
 
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
     Json,
 };
 use riply_core::{DriveInfo, DriveState, RipEvent, RipHandle};
@@ -11,6 +10,7 @@ use serde::Deserialize;
 use tracing::info;
 
 use crate::api::{ApiResponse, AppState};
+use crate::error::WebError;
 
 pub async fn ripper_status() -> Json<ApiResponse<infra::InstallationStatus>> {
     let status = tokio::task::spawn_blocking(infra::check_installation)
@@ -32,7 +32,7 @@ pub async fn ripper_status() -> Json<ApiResponse<infra::InstallationStatus>> {
 
 pub async fn list_drives(
     State(state): State<Arc<AppState>>,
-) -> Result<Json<ApiResponse<Vec<DriveInfo>>>, (StatusCode, String)> {
+) -> Result<Json<ApiResponse<Vec<DriveInfo>>>, WebError> {
     let backend = match &state.backend {
         Some(b) => Arc::clone(b),
         None => return Ok(Json(ApiResponse::ok(vec![]))),
@@ -40,12 +40,7 @@ pub async fn list_drives(
 
     let drives = tokio::task::spawn_blocking(move || backend.detect_drives())
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Task failed: {}", e),
-            )
-        })?;
+        .map_err(|e| WebError::Internal(format!("Task failed: {}", e)))?;
 
     match drives {
         Ok(mut drives) => {
@@ -59,10 +54,10 @@ pub async fn list_drives(
         }
         Err(e) => {
             info!("Failed to detect drives: {}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to detect drives: {}", e),
-            ))
+            Err(WebError::Internal(format!(
+                "Failed to detect drives: {}",
+                e
+            )))
         }
     }
 }
@@ -179,11 +174,12 @@ pub async fn start_rip(
     State(state): State<Arc<AppState>>,
     Path(index): Path<usize>,
     Json(body): Json<StartRipBody>,
-) -> Result<Json<ApiResponse<String>>, (StatusCode, String)> {
-    let backend = state.backend.as_ref().ok_or((
-        StatusCode::SERVICE_UNAVAILABLE,
-        "No ripping backend available. Install makemkvcon or Flatpak package.".to_string(),
-    ))?;
+) -> Result<Json<ApiResponse<String>>, WebError> {
+    let backend = state.backend.as_ref().ok_or_else(|| {
+        WebError::ServiceUnavailable(
+            "No ripping backend available. Install makemkvcon or Flatpak package.".to_string(),
+        )
+    })?;
 
     let explicit_dest = body.destination.as_ref().filter(|d| !d.is_empty()).cloned();
 
@@ -193,7 +189,7 @@ pub async fn start_rip(
             let config = state.config.read().await;
             config
                 .validate_for_ripping()
-                .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+                .map_err(WebError::BadRequest)?;
             config
                 .rip_output_directory
                 .clone()
@@ -221,7 +217,7 @@ pub async fn start_rip(
 
     let mut handle = backend
         .start_rip(index, &dest)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| WebError::Internal(e.to_string()))?;
 
     let sse = state.sse.clone();
     let state_clone = Arc::clone(&state);
@@ -262,12 +258,11 @@ pub async fn cancel_rip(
 pub async fn eject_disc(
     State(state): State<Arc<AppState>>,
     Path(index): Path<usize>,
-) -> Result<Json<ApiResponse<String>>, (StatusCode, String)> {
+) -> Result<Json<ApiResponse<String>>, WebError> {
     let backend = match &state.backend {
         Some(b) => Arc::clone(b),
         None => {
-            return Err((
-                StatusCode::SERVICE_UNAVAILABLE,
+            return Err(WebError::ServiceUnavailable(
                 "No ripping backend available".to_string(),
             ))
         }
@@ -275,33 +270,22 @@ pub async fn eject_disc(
 
     let drives = tokio::task::spawn_blocking(move || backend.detect_drives())
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Task failed: {}", e),
-            )
-        })?
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| WebError::Internal(format!("Task failed: {}", e)))?
+        .map_err(|e| WebError::Internal(e.to_string()))?;
 
     let device_path = drives
         .iter()
         .find(|d| d.index == index)
         .and_then(|d| d.device_path.clone())
-        .ok_or((
-            StatusCode::NOT_FOUND,
-            format!("Drive {} not found or has no device path", index),
-        ))?;
+        .ok_or_else(|| {
+            WebError::NotFound(format!("Drive {} not found or has no device path", index))
+        })?;
 
     let device_path_log = device_path.clone();
     tokio::task::spawn_blocking(move || infra::eject_disc(&device_path))
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Task failed: {}", e),
-            )
-        })?
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| WebError::Internal(format!("Task failed: {}", e)))?
+        .map_err(|e| WebError::Internal(e.to_string()))?;
 
     info!("Ejected disc from drive {} ({})", index, device_path_log);
     Ok(Json(ApiResponse::ok(format!(
@@ -317,7 +301,7 @@ pub async fn autorip_status(State(state): State<Arc<AppState>>) -> Json<ApiRespo
 
 pub async fn autorip_toggle(
     State(state): State<Arc<AppState>>,
-) -> Result<Json<ApiResponse<bool>>, (StatusCode, String)> {
+) -> Result<Json<ApiResponse<bool>>, WebError> {
     let mut handle = state.autorip_handle.write().await;
     if handle.is_some() {
         handle.take();

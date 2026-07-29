@@ -2,11 +2,12 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{extract::State, Json};
 use serde::Deserialize;
 use tracing::info;
 
 use crate::api::{ApiResponse, AppState, JobStartedResponse};
+use crate::error::WebError;
 
 #[derive(Debug, Deserialize)]
 pub struct ScanBody {
@@ -16,13 +17,13 @@ pub struct ScanBody {
 pub async fn start_scan(
     State(state): State<Arc<AppState>>,
     Json(body): Json<ScanBody>,
-) -> Result<Json<ApiResponse<JobStartedResponse>>, (StatusCode, String)> {
+) -> Result<Json<ApiResponse<JobStartedResponse>>, WebError> {
     let dir = PathBuf::from(&body.directory);
     if !dir.exists() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            format!("Directory does not exist: {}", body.directory),
-        ));
+        return Err(WebError::BadRequest(format!(
+            "Directory does not exist: {}",
+            body.directory
+        )));
     }
 
     let db = state.db.clone();
@@ -89,7 +90,7 @@ pub async fn start_scan(
             }
         })
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| WebError::Internal(e.to_string()))?;
 
     Ok(Json(ApiResponse::ok(JobStartedResponse {
         job_id,

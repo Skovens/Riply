@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{extract::State, Json};
 use tracing::info;
 
 use crate::api::{ApiResponse, AppState, JobStartedResponse};
+use crate::error::WebError;
 
 pub async fn start_analyze(
     State(state): State<Arc<AppState>>,
-) -> Result<Json<ApiResponse<JobStartedResponse>>, (StatusCode, String)> {
+) -> Result<Json<ApiResponse<JobStartedResponse>>, WebError> {
     let db = state.db.clone();
     let sse = state.sse.clone();
     let config = state.config.read().await.clone();
@@ -81,7 +82,7 @@ pub async fn start_analyze(
             }
         })
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| WebError::Internal(e.to_string()))?;
 
     Ok(Json(ApiResponse::ok(JobStartedResponse {
         job_id,
@@ -91,7 +92,7 @@ pub async fn start_analyze(
 
 pub async fn retry_failed(
     State(state): State<Arc<AppState>>,
-) -> Result<Json<ApiResponse<JobStartedResponse>>, (StatusCode, String)> {
+) -> Result<Json<ApiResponse<JobStartedResponse>>, WebError> {
     let db = state.db.clone();
     let sse = state.sse.clone();
     let config = state.config.read().await.clone();
@@ -99,7 +100,7 @@ pub async fn retry_failed(
     let failed_files = db
         .get_files_by_status("Failed")
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| WebError::Internal(e.to_string()))?;
 
     for file in &failed_files {
         let mut updated = file.clone();
@@ -174,7 +175,7 @@ pub async fn retry_failed(
             }
         })
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| WebError::Internal(e.to_string()))?;
 
     Ok(Json(ApiResponse::ok(JobStartedResponse {
         job_id,
