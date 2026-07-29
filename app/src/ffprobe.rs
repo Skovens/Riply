@@ -2,6 +2,7 @@ use std::path::Path;
 use std::process::Command;
 
 use serde::Deserialize;
+use tracing::instrument;
 
 #[derive(Debug, Deserialize)]
 struct FfprobeOutput {
@@ -31,6 +32,7 @@ pub struct FfprobeMetadata {
     pub content_type: Option<String>,
 }
 
+#[instrument]
 pub fn extract_metadata(path: &Path) -> Result<FfprobeMetadata, anyhow::Error> {
     let output = Command::new("ffprobe")
         .args([

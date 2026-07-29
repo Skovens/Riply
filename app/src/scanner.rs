@@ -2,6 +2,7 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Read;
 use std::path::Path;
+use tracing::instrument;
 use tracing::{debug, info, warn};
 
 /// Scanner service - orchestrates file scanning operations
@@ -15,12 +16,14 @@ impl Default for ScannerService {
 
 impl ScannerService {
     /// Create a new scanner service
+    #[instrument(skip_all)]
     pub fn new() -> Self {
         info!("Scanner service initialized");
         ScannerService
     }
 
     /// Scan a directory recursively for media files.
+    #[instrument(skip(self))]
     pub async fn scan_directory(
         &self,
         path: &Path,
@@ -100,6 +103,7 @@ impl ScannerService {
 
     /// Hash file contents with SHA-256.
     /// Uses spawn_blocking to avoid blocking the tokio runtime on large files.
+    #[instrument]
     pub async fn hash_file_async(path: &Path) -> Result<String, anyhow::Error> {
         let path = path.to_path_buf();
         tokio::task::spawn_blocking(move || hash_file(&path))

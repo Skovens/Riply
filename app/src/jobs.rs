@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
+use tracing::instrument;
 use tracing::{error, info};
 
 /// Cooperative cancellation token. The spawned task checks
@@ -12,10 +13,12 @@ use tracing::{error, info};
 pub struct CancellationToken(Arc<AtomicBool>);
 
 impl CancellationToken {
+    #[instrument(skip_all)]
     fn new() -> Self {
         Self(Arc::new(AtomicBool::new(false)))
     }
 
+    #[instrument(skip(self))]
     pub fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::Relaxed)
     }
@@ -40,10 +43,12 @@ impl ProgressHandle {
         }
     }
 
+    #[instrument(skip(self))]
     pub fn set_total(&self, total: usize) {
         self.total.store(total, Ordering::Relaxed);
     }
 
+    #[instrument(skip(self))]
     pub fn increment(&self) {
         self.processed.fetch_add(1, Ordering::Relaxed);
     }
@@ -137,6 +142,7 @@ impl Default for JobScheduler {
 }
 
 impl JobScheduler {
+    #[instrument(skip_all)]
     pub fn new() -> Self {
         info!("Job scheduler initialized");
         JobScheduler {
@@ -147,6 +153,7 @@ impl JobScheduler {
 
     /// Start a scan job. The closure receives a cancellation token and a
     /// progress handle and runs inside a spawned tokio task.
+    #[instrument(skip(self, work))]
     pub async fn start_scan_job<F, Fut>(
         &self,
         directory: &str,
@@ -163,6 +170,7 @@ impl JobScheduler {
     }
 
     /// Start an analyze job.
+    #[instrument(skip(self, work))]
     pub async fn start_analyze_job<F, Fut>(&self, work: F) -> Result<String, anyhow::Error>
     where
         F: FnOnce(CancellationToken, ProgressHandle) -> Fut + Send + 'static,
@@ -172,6 +180,7 @@ impl JobScheduler {
     }
 
     /// Start a move job.
+    #[instrument(skip(self, work))]
     pub async fn start_move_job<F, Fut>(
         &self,
         movies_dir: &str,
@@ -190,6 +199,7 @@ impl JobScheduler {
     }
 
     /// Start an arbitrary job.
+    #[instrument(skip(self, work))]
     pub async fn start_custom_job<F, Fut>(
         &self,
         name: &str,
@@ -207,6 +217,7 @@ impl JobScheduler {
 
     /// Cancel a running or queued job. The task is aborted and the
     /// cancellation flag is set so cooperative checks return early.
+    #[instrument(skip(self))]
     pub async fn cancel_job(&self, job_id: &str) -> Result<(), anyhow::Error> {
         let mut jobs = self.jobs.write().await;
         let job = jobs
@@ -235,6 +246,7 @@ impl JobScheduler {
     }
 
     /// Get info about a specific job.
+    #[instrument(skip(self))]
     pub async fn get_job_status(&self, job_id: &str) -> Result<JobInfo, anyhow::Error> {
         let jobs = self.jobs.read().await;
         let job = jobs
@@ -250,6 +262,7 @@ impl JobScheduler {
     }
 
     /// List all jobs.
+    #[instrument(skip(self))]
     pub async fn list_jobs(&self) -> Vec<JobInfo> {
         let jobs = self.jobs.read().await;
         jobs.iter()
@@ -263,6 +276,7 @@ impl JobScheduler {
     }
 
     /// Remove completed, failed, or cancelled jobs from the registry.
+    #[instrument(skip(self))]
     pub async fn cleanup_finished(&self) -> usize {
         let mut jobs = self.jobs.write().await;
         let before = jobs.len();

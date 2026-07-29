@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use tracing::instrument;
 use tracing::{info, warn};
 
 /// Mover service - orchestrates file moving operations
@@ -13,12 +14,14 @@ impl Default for MoverService {
 
 impl MoverService {
     /// Create a new mover service
+    #[instrument(skip_all)]
     pub fn new() -> Self {
         info!("Mover service initialized");
         MoverService
     }
 
     /// Move a confirmed file to its organized location
+    #[instrument(skip(self))]
     pub async fn move_file(
         &self,
         file: &riply_core::FileRecord,
@@ -130,6 +133,7 @@ impl MoverService {
     }
 
     /// Preview where files would be moved without actually moving them
+    #[instrument(skip(self))]
     pub async fn preview_move(
         &self,
         file: &riply_core::FileRecord,

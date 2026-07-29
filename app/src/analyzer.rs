@@ -29,12 +29,14 @@ pub struct AnalyzerService {
 }
 
 impl AnalyzerService {
+    #[tracing::instrument(skip(searcher))]
     pub fn new(searcher: Option<Box<dyn MetadataSearcher>>) -> Self {
         info!("Analyzer service initialized");
         AnalyzerService { searcher }
     }
 
     /// Analyze a file to identify media
+    #[tracing::instrument(skip(self))]
     pub async fn analyze_file(
         &self,
         file: &riply_core::FileRecord,
