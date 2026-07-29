@@ -1,11 +1,12 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     Json,
 };
-use riply_core::{DriveInfo, DriveState, RipEvent};
+use riply_core::{DriveInfo, DriveState, RipEvent, RipHandle};
 use serde::Deserialize;
 use tracing::info;
 
@@ -71,6 +72,109 @@ pub struct StartRipBody {
     pub destination: Option<String>,
 }
 
+fn calculate_eta(
+    pct: u32,
+    progress_start: &mut Option<Instant>,
+    last_update: &mut Option<Instant>,
+    current_pct: &mut f64,
+    rate: &mut Option<f64>,
+) -> Option<u64> {
+    if pct == 0 || pct >= 100 {
+        return None;
+    }
+
+    let now = Instant::now();
+    let start = *progress_start.get_or_insert(now);
+
+    if last_update.is_none() {
+        *last_update = Some(now);
+        *current_pct = pct as f64;
+        return None;
+    }
+
+    let elapsed = now.duration_since(start).as_secs_f64();
+    let new_pct = pct as f64;
+
+    if new_pct != *current_pct && new_pct > *current_pct {
+        let delta_time = now.duration_since(last_update.unwrap()).as_secs_f64();
+        if delta_time > 0.0 {
+            let pct_done = (new_pct - *current_pct) / 100.0;
+            *rate = Some(pct_done / delta_time);
+            *current_pct = new_pct;
+            *last_update = Some(now);
+        }
+    }
+
+    if let Some(r) = *rate {
+        if r > 0.0 {
+            let remaining = ((100.0 - new_pct) / 100.0) / r;
+            if remaining > 0.0 && elapsed >= 3.0 {
+                return Some(remaining.ceil() as u64);
+            }
+        }
+    }
+
+    None
+}
+
+/// Shared event loop that processes rip progress events and sends SSE updates.
+/// Extracted to avoid duplication between `start_rip` and `execute_rip`.
+async fn process_rip_events(
+    handle: &mut RipHandle,
+    sse: &crate::SseManager,
+    index: usize,
+) -> Result<(), String> {
+    let mut progress_start: Option<Instant> = None;
+    let mut last_update: Option<Instant> = None;
+    let mut current_pct: f64 = 0.0;
+    let mut rate: Option<f64> = None;
+
+    while let Some(event) = handle.next_event().await {
+        match event {
+            RipEvent::Progress {
+                current,
+                total,
+                max,
+            } => {
+                let pct = if total > 0 && max > 0 {
+                    (current as f64 / total as f64 * 100.0).clamp(0.0, 100.0) as u32
+                } else {
+                    0
+                };
+
+                let eta_secs = calculate_eta(
+                    pct,
+                    &mut progress_start,
+                    &mut last_update,
+                    &mut current_pct,
+                    &mut rate,
+                );
+
+                match eta_secs {
+                    Some(eta) => {
+                        sse.send_status(&format!("rip:progress:{}:{}:{}", index, pct, eta));
+                    }
+                    None => {
+                        sse.send_status(&format!("rip:progress:{}:{}", index, pct));
+                    }
+                }
+            }
+            RipEvent::Complete => {
+                sse.send_status(&format!("rip:complete:{}", index));
+                return Ok(());
+            }
+            RipEvent::Error(e) => {
+                sse.send_status(&format!("rip:error:{}:{}", index, e));
+                return Err(e);
+            }
+            RipEvent::Message(msg) => {
+                sse.send_status(&format!("rip:message:{}:{}", index, msg));
+            }
+        }
+    }
+    Ok(())
+}
+
 pub async fn start_rip(
     State(state): State<Arc<AppState>>,
     Path(index): Path<usize>,
@@ -120,84 +224,15 @@ pub async fn start_rip(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let sse = state.sse.clone();
+    let state_clone = Arc::clone(&state);
     let rip_handle = tokio::spawn(async move {
-        use std::time::Instant;
-
         sse.send_status(&format!("rip:starting:{}", index));
 
-        let mut progress_start: Option<Instant> = None;
-        let mut current_pct: f64 = 0.0;
-        let mut rate: Option<f64> = None;
-
-        while let Some(event) = handle.next_event().await {
-            match event {
-                RipEvent::Progress {
-                    current,
-                    total,
-                    max,
-                } => {
-                    let pct = if total > 0 && max > 0 {
-                        (current as f64 / total as f64 * 100.0).clamp(0.0, 100.0) as u32
-                    } else {
-                        0
-                    };
-
-                    // Calculate ETA with persisted rate across events
-                    let eta_secs = if pct > 0 && pct < 100 {
-                        let now = Instant::now();
-                        if let Some(start) = progress_start {
-                            let elapsed = now.duration_since(start).as_secs_f64();
-                            let new_pct = pct as f64;
-
-                            if new_pct != current_pct && new_pct > current_pct && elapsed > 0.0 {
-                                let pct_done = (new_pct - current_pct) / 100.0;
-                                if pct_done > 0.0 {
-                                    rate = Some(pct_done / elapsed);
-                                }
-                                current_pct = new_pct;
-                            }
-
-                            if let Some(r) = rate {
-                                let remaining = (1.0 - new_pct / 100.0) / r;
-                                if remaining > 0.0 && elapsed >= 3.0 {
-                                    Some(remaining as u64)
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
-                        } else {
-                            progress_start = Some(now);
-                            current_pct = pct as f64;
-                            None
-                        }
-                    } else {
-                        None
-                    };
-
-                    match eta_secs {
-                        Some(eta) => {
-                            sse.send_status(&format!("rip:progress:{}:{}:{}", index, pct, eta));
-                        }
-                        None => {
-                            sse.send_status(&format!("rip:progress:{}:{}", index, pct));
-                        }
-                    }
-                }
-                RipEvent::Complete => {
-                    sse.send_status(&format!("rip:complete:{}", index));
-                    break;
-                }
-                RipEvent::Error(e) => {
-                    sse.send_status(&format!("rip:error:{}:{}", index, e));
-                    break;
-                }
-                RipEvent::Message(msg) => {
-                    sse.send_status(&format!("rip:message:{}:{}", index, msg));
-                }
-            }
+        if let Err(e) = process_rip_events(&mut handle, &sse, index).await {
+            tracing::error!("Rip failed on drive {}: {}", index, e);
         }
+
+        state_clone.active_rips.write().await.remove(&index);
     });
 
     state.active_rips.write().await.insert(index, rip_handle);
@@ -350,7 +385,9 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
 
             // Push state changes to frontend via SSE
             if prev != Some(drive.state.clone()) {
-                state.sse.send_status(&format!("drive:changed:{}:{}", drive.index, drive.state));
+                state
+                    .sse
+                    .send_status(&format!("drive:changed:{}:{}", drive.index, drive.state));
             }
 
             // Detect Empty → Ready transition (disc inserted)
@@ -400,8 +437,6 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
 /// Execute a rip on a drive, handling progress events and optional eject.
 /// Used by both manual and auto-rip paths.
 async fn execute_rip(state: Arc<AppState>, index: usize, eject_after: bool) -> Result<(), String> {
-    use std::time::Instant;
-
     let backend = state.backend.as_ref().ok_or("No ripping backend")?;
 
     // Resolve destination
@@ -436,79 +471,12 @@ async fn execute_rip(state: Arc<AppState>, index: usize, eject_after: bool) -> R
     let sse = state.sse.clone();
     sse.send_status(&format!("rip:starting:{}", index));
 
-    let mut progress_start: Option<Instant> = None;
-    let mut current_pct: f64 = 0.0;
-    let mut rate: Option<f64> = None;
+    let result = process_rip_events(&mut handle, &sse, index).await;
 
-    while let Some(event) = handle.next_event().await {
-        match event {
-            riply_core::RipEvent::Progress {
-                current,
-                total,
-                max,
-            } => {
-                let pct = if total > 0 && max > 0 {
-                    (current as f64 / total as f64 * 100.0).clamp(0.0, 100.0) as u32
-                } else {
-                    0
-                };
-
-                let eta_secs = if pct > 0 && pct < 100 {
-                    let now = Instant::now();
-                    if let Some(start) = progress_start {
-                        let elapsed = now.duration_since(start).as_secs_f64();
-                        let new_pct = pct as f64;
-
-                        if new_pct != current_pct && new_pct > current_pct && elapsed > 0.0 {
-                            let pct_done = (new_pct - current_pct) / 100.0;
-                            if pct_done > 0.0 {
-                                rate = Some(pct_done / elapsed);
-                            }
-                            current_pct = new_pct;
-                        }
-
-                        if let Some(r) = rate {
-                            let remaining = (1.0 - new_pct / 100.0) / r;
-                            if remaining > 0.0 && elapsed >= 3.0 {
-                                Some(remaining as u64)
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        progress_start = Some(now);
-                        current_pct = pct as f64;
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                match eta_secs {
-                    Some(eta) => {
-                        sse.send_status(&format!("rip:progress:{}:{}:{}", index, pct, eta))
-                    }
-                    None => sse.send_status(&format!("rip:progress:{}:{}", index, pct)),
-                }
-            }
-            riply_core::RipEvent::Complete => {
-                sse.send_status(&format!("rip:complete:{}", index));
-                break;
-            }
-            riply_core::RipEvent::Error(e) => {
-                sse.send_status(&format!("rip:error:{}:{}", index, e));
-                return Err(e);
-            }
-            riply_core::RipEvent::Message(msg) => {
-                sse.send_status(&format!("rip:message:{}:{}", index, msg));
-            }
-        }
-    }
-
-    // Remove from active rips
+    // Remove from active rips (whether success or error)
     state.active_rips.write().await.remove(&index);
+
+    result?;
 
     // Eject if configured
     if eject_after {

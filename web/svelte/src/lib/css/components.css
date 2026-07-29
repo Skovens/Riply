@@ -385,17 +385,41 @@
 
 /* ── Progress Bar ─────────────────────────────────────── */
 .progress {
-  height: 6px;
+  height: 8px;
   background: var(--color-bg-tertiary);
   border-radius: var(--radius-full, 9999px);
   overflow: hidden;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .progress__bar {
   height: 100%;
-  background: var(--color-accent);
   border-radius: var(--radius-full, 9999px);
-  transition: width 0.3s ease;
+  background: var(--color-accent);
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 6px,
+    rgba(255, 255, 255, 0.12) 6px,
+    rgba(255, 255, 255, 0.12) 12px
+  );
+  background-size: 200% 100%;
+  animation: progress-stripes 0.8s linear infinite;
+  transition: width 0.4s ease;
+  box-shadow: 0 0 6px var(--color-accent-muted);
+}
+
+.progress__bar--done {
+  background: var(--color-success);
+  background-image: none;
+  animation: none;
+  box-shadow: 0 0 8px var(--color-success-muted);
+}
+
+@keyframes progress-stripes {
+  to {
+    background-position: 200% 0;
+  }
 }
 
 /* ── Job Card ─────────────────────────────────────────── */

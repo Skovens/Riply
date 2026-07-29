@@ -112,22 +112,26 @@
   }
 
   async function toggleAutoripDrive(index) {
-    if (excludedDrives.has(index)) {
-      excludedDrives.delete(index);
+    const updated = new Set(excludedDrives);
+    if (updated.has(index)) {
+      updated.delete(index);
     } else {
-      excludedDrives.add(index);
+      updated.add(index);
     }
+    excludedDrives = updated;
     try {
       await configApi.update({
         autorip_excluded_drives: [...excludedDrives],
       });
     } catch (e) {
       console.error('Failed to update autorip settings:', e);
-      if (excludedDrives.has(index)) {
-        excludedDrives.delete(index);
+      const revert = new Set(excludedDrives);
+      if (revert.has(index)) {
+        revert.delete(index);
       } else {
-        excludedDrives.add(index);
+        revert.add(index);
       }
+      excludedDrives = revert;
     }
   }
 
@@ -284,12 +288,16 @@
               <div class="drive__disc">{drive.disc_name || 'No disc inserted'}</div>
               {#if ripStatus[drive.index]}
                 <div class="progress" style="margin-top: var(--space-2);">
-                  <div class="progress__bar" style="width: {ripStatus[drive.index].progress}%"></div>
+                  <div
+                    class="progress__bar"
+                    class:progress__bar--done={ripStatus[drive.index].progress >= 100}
+                    style="width: {ripStatus[drive.index].progress}%"
+                  ></div>
                 </div>
                 <div class="text-sm text-muted" style="margin-top: var(--space-1);">
-                  {ripStatus[drive.index].progress}%
+                  <span class="text-accent">{ripStatus[drive.index].progress}%</span>
                   {#if formatRemaining(ripStatus[drive.index].eta)}
-                    — {formatRemaining(ripStatus[drive.index].eta)}
+                    — <span class="text-accent">{formatRemaining(ripStatus[drive.index].eta)}</span>
                   {/if}
                   {#if timeSince(lastProgressTime[drive.index])}
                     — {timeSince(lastProgressTime[drive.index])}
@@ -305,13 +313,15 @@
               {#if drive.state === 'Loading' || drive.state === 'Ripping'}
                 <button class="btn btn--danger btn--sm" onclick={() => handleCancel(drive.index)}>Cancel</button>
               {/if}
-              {#if autoripEnabled && drive.disc_name}
+              {#if autoripEnabled}
                 <button
                   class="btn btn--sm"
-                  style="background-color: {excludedDrives.has(drive.index) ? 'var(--color-muted)' : 'var(--color-primary)'}; color: white;"
+                  class:btn--primary={!excludedDrives.has(drive.index)}
+                  class:btn--secondary={excludedDrives.has(drive.index)}
                   onclick={() => toggleAutoripDrive(drive.index)}
+                  title={excludedDrives.has(drive.index) ? 'Autorip disabled for this drive - click to enable' : 'Autorip enabled for this drive - click to disable'}
                 >
-                  {excludedDrives.has(drive.index) ? '⊘' : '⊙'}
+                  {excludedDrives.has(drive.index) ? '⊘ Disabled' : '⊙ Enabled'}
                 </button>
               {/if}
             </div>

@@ -45,9 +45,9 @@
 | 37 | Rip progress with time-remaining estimate (15s stabilization) | DONE | — |
 | 38 | Auto-rip: background polling task detects disc insertion, starts rip | DONE | #33, #34, #36 |
 | 39 | Per-drive autorip toggle in settings + config | DONE | #38 |
-| 40 | Fix time estimation display (SSE ETA not rendering in UI) | PENDING | — |
-| 41 | Add per-drive autorip toggle UI (independent on/off per drive card) | PENDING | #39 |
-| 42 | Add progress bar with percentage display during rip | PENDING | — |
+| 40 | Fix time estimation display (SSE ETA not rendering in UI) | DONE | Fixed rate calculation: delta_pct/delta_time instead of delta_pct/total_elapsed |
+| 41 | Add per-drive autorip toggle UI (independent on/off per drive card) | DONE | #39 |
+| 42 | Add progress bar with percentage display during rip | DONE | Animated striped bar + `--done` state + accent-colored text |
 | 43 | Optimize dashboard loading during active rip (SSE polling blocking?) | DONE | — |
 
 ### Legacy (folded into above)
