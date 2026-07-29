@@ -17,9 +17,12 @@
   let rip_output_directory = $state('');
   let database_path = $state('');
   let verbose = $state(false);
+  let healthchecks_uuid = $state('');
+  let healthchecks_ping_interval_minutes = $state(5);
 
   let show_tmdb = $state(false);
   let show_omdb = $state(false);
+  let show_healthchecks = $state(false);
 
   onMount(async () => {
     try {
@@ -35,6 +38,8 @@
       rip_output_directory = currentConfig.rip_output_directory || '';
       database_path = currentConfig.database_path || 'riply.db';
       verbose = currentConfig.verbose || false;
+      healthchecks_uuid = currentConfig.healthchecks?.uuid || '';
+      healthchecks_ping_interval_minutes = currentConfig.healthchecks?.ping_interval_minutes || 5;
     } catch (e) {
       console.error('Failed to load config:', e);
     }
@@ -58,6 +63,8 @@
         rip_output_directory: rip_output_directory || '',
         database_path: database_path || 'riply.db',
         verbose,
+        healthchecks_uuid: healthchecks_uuid || '',
+        healthchecks_ping_interval_minutes: parseInt(healthchecks_ping_interval_minutes, 10) || 5,
       };
 
       const updated = await configApi.update(payload);
@@ -173,6 +180,27 @@
               <input class="settings__input" type="text" id="settings-rip_output_directory" bind:value={rip_output_directory} autocomplete="off" />
             </div>
             <div class="settings__hint">Where ripped disc content is saved. Falls back to scan directory if empty.</div>
+          </div>
+        </div>
+
+        <!-- Monitoring -->
+        <div class="settings__section">
+          <h3 class="settings__section-title">Monitoring</h3>
+
+          <div class="settings__field">
+            <label class="settings__label" for="settings-healthchecks_uuid">healthchecks.io UUID</label>
+            <div class="settings__input-wrap">
+              <input class="settings__input" type={show_healthchecks ? 'text' : 'password'} id="settings-healthchecks_uuid" bind:value={healthchecks_uuid} autocomplete="off" />
+              <button class="settings__toggle-vis" type="button" onclick={() => show_healthchecks = !show_healthchecks}>{show_healthchecks ? 'Hide' : 'Show'}</button>
+            </div>
+            <div class="settings__hint">Enables server heartbeat pings. Get one at healthchecks.io</div>
+          </div>
+
+          <div class="settings__field">
+            <label class="settings__label" for="settings-healthchecks_interval">Ping Interval (minutes)</label>
+            <div class="settings__input-wrap">
+              <input class="settings__input" type="number" id="settings-healthchecks_interval" bind:value={healthchecks_ping_interval_minutes} min="1" autocomplete="off" />
+            </div>
           </div>
         </div>
 

@@ -36,6 +36,8 @@ pub struct AppState {
     pub active_rips: RwLock<HashMap<usize, tokio::task::JoinHandle<()>>>,
     /// Handle for the autorip background polling task.
     pub autorip_handle: RwLock<Option<tokio::task::JoinHandle<()>>>,
+    /// Handle for the healthchecks.io heartbeat task.
+    pub healthchecks_handle: RwLock<Option<tokio::task::JoinHandle<()>>>,
 }
 
 #[derive(Debug, serde::Deserialize)]

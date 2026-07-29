@@ -34,6 +34,7 @@ pub async fn serve(
         scheduler: JobScheduler::new(),
         active_rips: RwLock::new(HashMap::new()),
         autorip_handle: RwLock::new(None),
+        healthchecks_handle: RwLock::new(None),
     });
 
     // Start autorip if enabled
@@ -44,6 +45,25 @@ pub async fn serve(
         });
         *state.autorip_handle.write().await = Some(handle);
         info!("Auto-rip enabled — polling for disc insertion");
+    }
+
+    // Start healthchecks.io heartbeat if configured
+    if let Some(hc) = infra::healthchecks::HealthchecksClient::from_config(&config.healthchecks) {
+        hc.start().await;
+        let interval =
+            std::time::Duration::from_secs(config.healthchecks.ping_interval_minutes * 60);
+        let mut timer = tokio::time::interval(interval);
+        timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        tokio::spawn(async move {
+            info!(
+                "healthchecks: heartbeat started (every {} min)",
+                config.healthchecks.ping_interval_minutes
+            );
+            loop {
+                timer.tick().await;
+                hc.ping().await;
+            }
+        });
     }
 
     let router = web::create_router(state);

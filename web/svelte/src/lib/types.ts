@@ -85,6 +85,11 @@ export interface RippingConfig {
   autorip_excluded_drives?: number[];
 }
 
+export interface HealthchecksConfig {
+  uuid: string;
+  ping_interval_minutes: number;
+}
+
 export interface Config {
   database_path: string;
   scan_directory?: string;
@@ -96,6 +101,7 @@ export interface Config {
   omdb_api_key?: string;
   makemkvcon_path?: string;
   ripping: RippingConfig;
+  healthchecks: HealthchecksConfig;
   host: string;
   port: number;
 }

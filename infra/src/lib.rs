@@ -1,6 +1,7 @@
 // Infrastructure layer - I/O heavy adapters (database, HTTP, MakeMKV)
 pub mod config;
 pub mod db;
+pub mod healthchecks;
 pub mod http;
 pub mod makemkv;
 

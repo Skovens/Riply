@@ -30,6 +30,7 @@ async fn setup() -> TestContext {
         scheduler: JobScheduler::new(),
         active_rips: RwLock::new(HashMap::new()),
         autorip_handle: RwLock::new(None),
+        healthchecks_handle: RwLock::new(None),
     });
 
     let router = create_router(state.clone());

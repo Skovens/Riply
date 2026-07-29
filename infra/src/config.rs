@@ -32,8 +32,32 @@ pub struct RippingConfig {
     pub autorip_excluded_drives: Option<Vec<usize>>,
 }
 
+/// healthchecks.io integration configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HealthchecksConfig {
+    /// UUID from healthchecks.io. Enables heartbeat pings when set.
+    #[serde(default)]
+    pub uuid: String,
+    /// Ping interval in minutes (default: 5).
+    #[serde(default = "default_ping_interval")]
+    pub ping_interval_minutes: u64,
+}
+
+impl Default for HealthchecksConfig {
+    fn default() -> Self {
+        Self {
+            uuid: String::new(),
+            ping_interval_minutes: 5,
+        }
+    }
+}
+
 fn default_true() -> bool {
     true
+}
+
+fn default_ping_interval() -> u64 {
+    5
 }
 
 impl RippingConfig {
@@ -68,6 +92,9 @@ pub struct Config {
     /// Ripping backend configuration
     #[serde(default)]
     pub ripping: RippingConfig,
+    /// healthchecks.io integration configuration
+    #[serde(default)]
+    pub healthchecks: HealthchecksConfig,
     /// Web server bind address
     #[serde(default = "default_host")]
     pub host: String,
@@ -97,6 +124,7 @@ impl Default for Config {
             omdb_api_key: None,
             makemkvcon_path: None,
             ripping: RippingConfig::default(),
+            healthchecks: HealthchecksConfig::default(),
             host: default_host(),
             port: default_port(),
         }
@@ -211,6 +239,7 @@ mod tests {
             omdb_api_key: None,
             makemkvcon_path: None,
             ripping: RippingConfig::default(),
+            healthchecks: HealthchecksConfig::default(),
             host: "127.0.0.1".to_string(),
             port: 8080,
         };

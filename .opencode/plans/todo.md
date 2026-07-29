@@ -34,7 +34,7 @@
 | 11 | ffprobe metadata extraction (duration, resolution, content_type) | DONE | `ffprobe-metadata.md` |
 | 12 | Duplicate detection (hash-based) | DONE | `duplicate-detection.md` |
 
-### Batch 6: Ripping Overhaul 🔄
+### Batch 6: Ripping Overhaul ✅
 
 | # | Task | Status | Depends On |
 |---|------|--------|------------|
@@ -78,7 +78,7 @@ Source: `improvements.md`
 | 22 | Robustness: Add `/ready` health/readiness endpoint | PENDING | `improvements.md` §2.5 |
 | 23 | Robustness: Add CORS and timeout middleware layers | PENDING | `improvements.md` §2.6 |
 | 24 | Serviceability: Add CLI progress bars (`indicatif` crate) | PENDING | `improvements.md` §3.2 |
-| 25 | Serviceability: Add Prometheus metrics endpoint | PENDING | `improvements.md` §3.4 |
+| 25 | Serviceability: healthchecks.io heartbeat integration | PENDING | Simple background task pings hc-ping.com/<uuid> on interval |
 | 26 | Serviceability: Add config validation with `config` crate | PENDING | `improvements.md` §3.6 |
 | 27 | Feature: Library scanning (`riply library scan` command) | PENDING | `improvements.md` §4.2 |
 | 28 | Feature: Watch directory / filesystem events (`notify` crate) | PENDING | `improvements.md` §4.4 |
