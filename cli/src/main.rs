@@ -59,7 +59,11 @@ enum Command {
         port: Option<u16>,
     },
     /// Show current pipeline status
-    Status,
+    Status {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Set up MakeMKV installation
     Setup(SetupArgs),
 }
@@ -116,8 +120,8 @@ async fn main() -> anyhow::Result<()> {
         Command::Serve { host, port } => {
             commands::serve(db, config, Some(cli.config), host, port).await?;
         }
-        Command::Status => {
-            show_status(&db).await?;
+        Command::Status { json } => {
+            show_status(&db, json).await?;
         }
         Command::Setup(args) => {
             run_setup(args)?;

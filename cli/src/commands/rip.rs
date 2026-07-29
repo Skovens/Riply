@@ -6,7 +6,11 @@ use tracing::info;
 #[derive(Subcommand, Debug)]
 pub enum RipCommand {
     /// List available drives
-    List,
+    List {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Start ripping on a drive
     Start {
         /// Drive index to rip
@@ -25,7 +29,7 @@ pub enum RipCommand {
 /// Execute rip commands
 pub async fn rip_command(command: RipCommand, config: &infra::Config) -> Result<(), anyhow::Error> {
     match command {
-        RipCommand::List => list_drives().await,
+        RipCommand::List { json } => list_drives(json).await,
         RipCommand::Start { index, destination } => {
             let dest = match destination {
                 Some(d) => d,
@@ -59,11 +63,16 @@ fn get_backend() -> Result<Box<dyn RipBackend>, anyhow::Error> {
 }
 
 /// List available MakeMKV drives
-async fn list_drives() -> Result<(), anyhow::Error> {
+async fn list_drives(json: bool) -> Result<(), anyhow::Error> {
     info!("Listing drives");
     let backend = get_backend()?;
 
     let drives = backend.detect_drives()?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&drives)?);
+        return Ok(());
+    }
 
     if drives.is_empty() {
         println!("No drives found");
