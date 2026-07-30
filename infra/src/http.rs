@@ -5,6 +5,8 @@ use reqwest::Client;
 use riply_core::{MediaType, MetadataMatch, MetadataSearcher};
 use tracing::info;
 
+use crate::rate_limiter::RateLimiter;
+
 /// HTTP client adapter - handles API requests with retry and rate limiting
 pub struct HttpClient {
     client: Client,
@@ -12,6 +14,8 @@ pub struct HttpClient {
     omdb_base_url: String,
     tmdb_api_key: Option<String>,
     omdb_api_key: Option<String>,
+    tmdb_limiter: Option<RateLimiter>,
+    omdb_limiter: Option<RateLimiter>,
 }
 
 /// TMDb search result
@@ -82,12 +86,17 @@ impl HttpClient {
             .build()
             .expect("Failed to build HTTP client");
 
+        let tmdb_limiter = tmdb_api_key.is_some().then(|| RateLimiter::new(40, 4.0));
+        let omdb_limiter = omdb_api_key.is_some().then(|| RateLimiter::new(10, 10.0));
+
         HttpClient {
             client,
             tmdb_base_url,
             omdb_base_url,
             tmdb_api_key,
             omdb_api_key,
+            tmdb_limiter,
+            omdb_limiter,
         }
     }
 
@@ -104,7 +113,11 @@ impl HttpClient {
         &self,
         url: &str,
         params: &HashMap<String, String>,
+        limiter: Option<&RateLimiter>,
     ) -> Result<T, anyhow::Error> {
+        if let Some(limiter) = limiter {
+            limiter.acquire().await;
+        }
         let url = url.to_string();
         let params = params.clone();
         let client = self.client.clone();
@@ -137,7 +150,7 @@ impl HttpClient {
         }
 
         let url = format!("{}/search/movie", self.tmdb_base_url);
-        let resp: TmdbSearchResponse = self.get_json(&url, &params).await?;
+        let resp: TmdbSearchResponse = self.get_json(&url, &params, self.tmdb_limiter.as_ref()).await?;
 
         let matches = resp
             .results
@@ -171,7 +184,7 @@ impl HttpClient {
         params.insert("query".to_string(), query.to_string());
 
         let url = format!("{}/search/tv", self.tmdb_base_url);
-        let resp: TmdbSearchResponse = self.get_json(&url, &params).await?;
+        let resp: TmdbSearchResponse = self.get_json(&url, &params, self.tmdb_limiter.as_ref()).await?;
 
         let matches = resp
             .results
@@ -212,7 +225,9 @@ impl HttpClient {
         }
 
         let url = format!("{}/", self.omdb_base_url);
-        let resp: OmdbResponse = self.get_json(&url, &params).await?;
+        let resp: OmdbResponse = self
+            .get_json(&url, &params, self.omdb_limiter.as_ref())
+            .await?;
 
         if resp.response.as_deref() == Some("True") {
             let year = resp.year.as_ref().and_then(|y| y.trim().parse().ok());
@@ -251,7 +266,9 @@ impl HttpClient {
         }
 
         let url = format!("{}/", self.omdb_base_url);
-        let resp: OmdbResponse = self.get_json(&url, &params).await?;
+        let resp: OmdbResponse = self
+            .get_json(&url, &params, self.omdb_limiter.as_ref())
+            .await?;
 
         if resp.response.as_deref() == Some("True") {
             let year = resp.year.as_ref().and_then(|y| y.trim().parse().ok());
@@ -282,6 +299,10 @@ impl HttpClient {
             Some(key) => key.clone(),
             None => return Ok(None),
         };
+
+        if let Some(limiter) = &self.tmdb_limiter {
+            limiter.acquire().await;
+        }
 
         let url = format!(
             "{}/tv/{}/season/{}/episode/{}",

@@ -4,6 +4,7 @@ pub mod db;
 pub mod healthchecks;
 pub mod http;
 pub mod makemkv;
+pub mod rate_limiter;
 
 pub use config::{Config, RippingConfig};
 pub use db::Database;
