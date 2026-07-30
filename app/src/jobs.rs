@@ -217,7 +217,7 @@ impl JobScheduler {
 
     /// Cancel a running or queued job. The task is aborted and the
     /// cancellation flag is set so cooperative checks return early.
-    #[instrument(skip(self))]
+    #[instrument(skip(self), fields(job_id = %job_id))]
     pub async fn cancel_job(&self, job_id: &str) -> Result<(), anyhow::Error> {
         let mut jobs = self.jobs.write().await;
         let job = jobs
@@ -241,7 +241,7 @@ impl JobScheduler {
             processed: 0,
         };
 
-        info!("Cancelled job: {}", job_id);
+        info!("Cancelled job");
         Ok(())
     }
 
@@ -338,7 +338,7 @@ impl JobScheduler {
                         job.status = match result {
                             Ok(()) => JobStatus::Complete,
                             Err(e) => {
-                                error!("Job {} failed: {}", id_clone, e);
+                                error!(job_id = %id_clone, error = %e, "Job failed");
                                 JobStatus::Failed
                             }
                         };
@@ -355,7 +355,7 @@ impl JobScheduler {
             }
         }
 
-        info!("Started {}: {}", id, kind);
+        info!(job_id = %id, kind = %kind, "Started job");
         Ok(id)
     }
 }

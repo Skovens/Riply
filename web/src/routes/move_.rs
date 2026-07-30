@@ -104,7 +104,7 @@ pub async fn start_move(
                 }
 
                 sse.send_status(&format!("move:complete:moved={},errors={}", moved, errors));
-                info!("Move complete: {} moved, {} errors", moved, errors);
+                info!(moved, errors, "Move complete");
                 Ok(())
             }
         })
@@ -168,7 +168,7 @@ pub async fn preview_move(
                 media_type: file.media_type.to_string(),
             }),
             Err(e) => {
-                tracing::warn!("Failed to preview move for {}: {}", file.filename, e);
+                tracing::warn!(file = %file.filename, error = %e, "Failed to preview move");
             }
         }
     }

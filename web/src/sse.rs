@@ -14,7 +14,7 @@ pub struct SseManager {
 impl SseManager {
     /// Create a new SSE manager with a broadcast channel
     pub fn new(capacity: usize) -> Self {
-        info!("Creating SSE manager with capacity {}", capacity);
+        info!(capacity, "Creating SSE manager");
         let (tx, _) = broadcast::channel(capacity);
         SseManager { tx }
     }

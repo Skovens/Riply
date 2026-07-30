@@ -1,7 +1,7 @@
 use regex::Regex;
 use riply_core::{MediaType, MetadataSearcher};
 use std::sync::LazyLock;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::ffprobe;
 
@@ -29,19 +29,19 @@ pub struct AnalyzerService {
 }
 
 impl AnalyzerService {
-    #[tracing::instrument(skip(searcher))]
+    #[tracing::instrument(skip_all)]
     pub fn new(searcher: Option<Box<dyn MetadataSearcher>>) -> Self {
         info!("Analyzer service initialized");
         AnalyzerService { searcher }
     }
 
     /// Analyze a file to identify media
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), fields(file = %file.filename))]
     pub async fn analyze_file(
         &self,
         file: &riply_core::FileRecord,
     ) -> Result<riply_core::FileRecord, anyhow::Error> {
-        info!("Analyzing file: {}", file.filename);
+        info!("Analyzing file");
 
         let mut record = file.clone();
 
@@ -76,9 +76,9 @@ impl AnalyzerService {
                 Ok(results) => {
                     if let Some(best) = results.into_iter().next() {
                         info!(
-                            "TMDb match: '{}' ({})",
-                            best.title,
-                            best.year.map_or("n/a".to_string(), |y| y.to_string())
+                            title = %best.title,
+                            year = %best.year.map_or("n/a".to_string(), |y| y.to_string()),
+                            "TMDb match"
                         );
                         record.suggested_title = Some(best.title);
                         record.suggested_year = best.year;
@@ -107,9 +107,9 @@ impl AnalyzerService {
                     }
                 }
                 Err(e) => {
-                    info!(
-                        "Metadata search failed, falling back to filename parsing: {}",
-                        e
+                    warn!(
+                        error = %e,
+                        "Metadata search failed, falling back to filename parsing"
                     );
                 }
             }

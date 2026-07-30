@@ -5,7 +5,7 @@ use tracing::info;
 
 /// Execute the scan command
 pub async fn scan_directory(directory: &str, config: &Config) -> Result<(), anyhow::Error> {
-    info!("Scanning directory: {}", directory);
+    info!(dir = %directory, "Scanning directory");
 
     let path = Path::new(directory);
     if !path.exists() {

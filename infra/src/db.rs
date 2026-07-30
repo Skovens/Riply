@@ -11,7 +11,7 @@ pub struct Database {
 impl Database {
     /// Create a new database connection
     pub async fn new(path: &str) -> Result<Self, anyhow::Error> {
-        info!("Initializing database at: {}", path);
+        info!(path = %path, "Initializing database");
 
         let url = format!("sqlite:{}", path);
         let pool = SqlitePoolOptions::new()
@@ -50,7 +50,7 @@ impl Database {
     /// fields (path, filename, size, hash) while preserving pipeline status,
     /// canonical titles, and review decisions.
     pub async fn save_file(&self, file: &riply_core::FileRecord) -> Result<(), anyhow::Error> {
-        info!("Saving file record: {}", file.filename);
+        info!(file = %file.filename, "Saving file record");
 
         // Check if file already exists
         let existing = sqlx::query_scalar::<_, String>("SELECT id FROM files WHERE id = ?")
@@ -137,7 +137,7 @@ impl Database {
         &self,
         status: &str,
     ) -> Result<Vec<riply_core::FileRecord>, anyhow::Error> {
-        info!("Getting files with status: {}", status);
+        info!(status = %status, "Getting files by status");
 
         let rows = sqlx::query(
             r#"
@@ -197,7 +197,7 @@ impl Database {
 
     /// Update a file record
     pub async fn update_file(&self, file: &riply_core::FileRecord) -> Result<(), anyhow::Error> {
-        info!("Updating file record: {}", file.filename);
+        info!(file = %file.filename, "Updating file record");
 
         sqlx::query(
             r#"

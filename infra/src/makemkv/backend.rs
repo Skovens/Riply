@@ -45,7 +45,7 @@ impl MakemkvBackend {
             if output.status.success() {
                 let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 if !path.is_empty() {
-                    info!("Found makemkvcon at: {}", path);
+                    info!(path = %path, "Found makemkvcon");
                     return Ok(Self::new(vec![path]));
                 }
             }
@@ -54,7 +54,7 @@ impl MakemkvBackend {
         // Try common paths
         for path in &["/usr/bin/makemkvcon", "/usr/local/bin/makemkvcon"] {
             if Path::new(path).exists() {
-                info!("Found makemkvcon at: {}", path);
+                info!(path = %path, "Found makemkvcon");
                 return Ok(Self::new(vec![path.to_string()]));
             }
         }
@@ -82,7 +82,7 @@ impl MakemkvBackend {
     pub fn from_config_or_detect(command: Option<&str>) -> Result<Self, RipError> {
         match command {
             Some(cmd) if !cmd.is_empty() => {
-                info!("Using configured ripping command: {}", cmd);
+                info!(command = %cmd, "Using configured ripping command");
                 Ok(Self::from_config(cmd))
             }
             _ => Self::auto_detect(),
@@ -91,7 +91,7 @@ impl MakemkvBackend {
 
     /// Run `makemkvcon` with the given args and return stdout.
     fn run_command(&self, args: &[&str]) -> Result<String, RipError> {
-        debug!("Running: {} {}", self.command.join(" "), args.join(" "));
+        debug!(command = %self.command.join(" "), args = %args.join(" "), "Running command");
 
         let output = StdCommand::new(&self.command[0])
             .args(&self.command[1..])
@@ -109,7 +109,7 @@ impl MakemkvBackend {
 
 impl RipBackend for MakemkvBackend {
     fn detect_drives(&self) -> Result<Vec<DriveInfo>, RipError> {
-        info!("Detecting drives via {}", self.command.join(" "));
+        info!(command = %self.command.join(" "), "Detecting drives");
 
         let stdout = self.run_command(&["-r", "--cache=1", "info", "disc:9999"])?;
         let mut drives = Vec::new();
@@ -136,7 +136,7 @@ impl RipBackend for MakemkvBackend {
             }
         }
 
-        debug!("Found {} drives", drives.len());
+        debug!(count = drives.len(), "Found drives");
         Ok(drives)
     }
 
@@ -146,7 +146,7 @@ impl RipBackend for MakemkvBackend {
             std::fs::create_dir_all(dest_path)?;
         }
 
-        info!("Starting rip: drive {} → {}", drive, dest);
+        info!(drive, dest = %dest, "Starting rip");
 
         let child = tokio::process::Command::new(&self.command[0])
             .args(&self.command[1..])

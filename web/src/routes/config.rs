@@ -91,7 +91,7 @@ pub async fn update_config(
 
     if let Some(ref path) = state.config_path.clone() {
         if let Err(e) = updated.save(path) {
-            tracing::warn!("Failed to save config to {}: {}", path, e);
+            tracing::warn!(path = %path, error = %e, "Failed to save config");
         }
     }
 

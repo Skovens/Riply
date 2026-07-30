@@ -21,14 +21,14 @@ impl MoverService {
     }
 
     /// Move a confirmed file to its organized location
-    #[instrument(skip(self))]
+    #[instrument(skip(self), fields(file = %file.filename))]
     pub async fn move_file(
         &self,
         file: &riply_core::FileRecord,
         movies_dir: &Path,
         tv_dir: &Path,
     ) -> Result<riply_core::FileRecord, anyhow::Error> {
-        info!("Moving file: {}", file.filename);
+        info!("Moving file");
 
         if !file.is_ready_to_move() {
             return Err(anyhow::anyhow!(
@@ -47,7 +47,7 @@ impl MoverService {
 
         // Check if destination already exists
         if dest_path.exists() {
-            warn!("Destination already exists: {:?}", dest_path);
+            warn!(dest = ?dest_path, "Destination already exists");
             return Err(anyhow::anyhow!(
                 "Destination already exists: {:?}",
                 dest_path
@@ -79,7 +79,7 @@ impl MoverService {
         let mut record = file.clone();
         record.update_status(riply_core::PipelineStatus::Moved);
 
-        info!("Successfully moved {} to {:?}", file.filename, dest_path);
+        info!(dest = ?dest_path, "Successfully moved file");
         Ok(record)
     }
 

@@ -6,7 +6,7 @@ use tracing::info;
 
 /// Execute the review command
 pub async fn review_files(yolo: bool, db: &Database) -> Result<(), anyhow::Error> {
-    info!("Reviewing files (yolo={})", yolo);
+    info!(yolo, "Reviewing files");
 
     // Load files that need review from database
     let records = db.get_files_by_status("Needs Review").await?;
@@ -107,7 +107,7 @@ pub async fn review_files(yolo: bool, db: &Database) -> Result<(), anyhow::Error
                     updated.update_status(PipelineStatus::Confirmed);
                     db.update_file(&updated).await?;
                     confirmed[idx] = true;
-                    info!("Confirmed: {}", record.filename);
+                    info!(file = %record.filename, "Confirmed");
                 }
 
                 println!("{} file(s) confirmed.", to_confirm.len());
@@ -123,13 +123,13 @@ async fn confirm_all(
     records: &[riply_core::FileRecord],
     db: &Database,
 ) -> Result<(), anyhow::Error> {
-    info!("Confirming all {} files", records.len());
+    info!(count = records.len(), "Confirming all files");
 
     for record in records {
         let mut updated = record.clone();
         updated.update_status(PipelineStatus::Confirmed);
         db.update_file(&updated).await?;
-        info!("Confirmed: {}", record.filename);
+        info!(file = %record.filename, "Confirmed");
     }
 
     println!("All {} files confirmed", records.len());
@@ -145,7 +145,7 @@ async fn confirm_remaining(
         let mut updated = record.clone();
         updated.update_status(PipelineStatus::Confirmed);
         db.update_file(&updated).await?;
-        info!("Confirmed: {}", record.filename);
+        info!(file = %record.filename, "Confirmed");
     }
     Ok(())
 }

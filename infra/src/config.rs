@@ -134,7 +134,7 @@ impl Default for Config {
 impl Config {
     /// Load configuration from a TOML file
     pub fn load(path: &str) -> Result<Self, anyhow::Error> {
-        info!("Loading configuration from: {}", path);
+        info!(path = %path, "Loading configuration");
 
         let content = std::fs::read_to_string(path)?;
         let config: Config = toml::from_str(&content)?;
@@ -145,7 +145,7 @@ impl Config {
 
     /// Save configuration to a TOML file
     pub fn save(&self, path: &str) -> Result<(), anyhow::Error> {
-        info!("Saving configuration to: {}", path);
+        info!(path = %path, "Saving configuration");
 
         let content = toml::to_string_pretty(self)?;
         std::fs::write(path, content)?;

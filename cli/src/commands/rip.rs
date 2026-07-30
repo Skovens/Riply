@@ -92,7 +92,7 @@ async fn list_drives(json: bool) -> Result<(), anyhow::Error> {
 
 /// Start ripping on a drive
 async fn start_rip(index: usize, destination: &str) -> Result<(), anyhow::Error> {
-    info!("Starting rip on drive: {}", index);
+    info!(drive = index, "Starting rip");
     let backend = get_backend()?;
 
     // Look up disc name and create subdirectory if applicable
@@ -147,7 +147,7 @@ async fn start_rip(index: usize, destination: &str) -> Result<(), anyhow::Error>
 
 /// Eject disc from a drive
 async fn eject_disc(index: usize) -> Result<(), anyhow::Error> {
-    info!("Ejecting disc from drive: {}", index);
+    info!(drive = index, "Ejecting disc");
 
     let backend = get_backend()?;
     let drives = backend.detect_drives()?;

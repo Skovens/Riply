@@ -7,7 +7,7 @@ use axum::{
 };
 use riply_core::{DriveInfo, DriveState, RipEvent, RipHandle};
 use serde::Deserialize;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::api::{ApiResponse, AppState};
 use crate::error::WebError;
@@ -16,7 +16,7 @@ pub async fn ripper_status() -> Json<ApiResponse<infra::InstallationStatus>> {
     let status = tokio::task::spawn_blocking(infra::check_installation)
         .await
         .unwrap_or_else(|e| {
-            tracing::error!("check_installation panicked: {}", e);
+            tracing::error!(error = %e, "check_installation panicked");
             infra::InstallationStatus {
                 installed: false,
                 method: infra::DetectionMethod::None,
@@ -53,7 +53,7 @@ pub async fn list_drives(
             Ok(Json(ApiResponse::ok(drives)))
         }
         Err(e) => {
-            info!("Failed to detect drives: {}", e);
+            warn!(error = %e, "Failed to detect drives");
             Err(WebError::Internal(format!(
                 "Failed to detect drives: {}",
                 e
@@ -225,7 +225,7 @@ pub async fn start_rip(
         sse.send_status(&format!("rip:starting:{}", index));
 
         if let Err(e) = process_rip_events(&mut handle, &sse, index).await {
-            tracing::error!("Rip failed on drive {}: {}", index, e);
+            tracing::error!(drive = index, error = %e, "Rip failed");
         }
 
         state_clone.active_rips.write().await.remove(&index);
@@ -247,10 +247,10 @@ pub async fn cancel_rip(
     if let Some(handle) = rips.remove(&index) {
         handle.abort();
         state.sse.send_status(&format!("rip:cancelled:{}", index));
-        info!("Cancelled rip on drive {}", index);
+        info!(drive = index, "Cancelled rip");
         Json(ApiResponse::ok(format!("Drive {} rip cancelled", index)))
     } else {
-        info!("No active rip found for drive {}", index);
+        info!(drive = index, "No active rip found");
         Json(ApiResponse::ok(format!("No active rip on drive {}", index)))
     }
 }
@@ -287,7 +287,7 @@ pub async fn eject_disc(
         .map_err(|e| WebError::Internal(format!("Task failed: {}", e)))?
         .map_err(|e| WebError::Internal(e.to_string()))?;
 
-    info!("Ejected disc from drive {} ({})", index, device_path_log);
+    info!(drive = index, device = %device_path_log, "Ejected disc");
     Ok(Json(ApiResponse::ok(format!(
         "Ejected disc from drive {}",
         index
@@ -395,9 +395,9 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
             }
 
             info!(
-                "Auto-rip: disc detected on drive {} ({})",
-                drive.index,
-                drive.disc_name.as_deref().unwrap_or("unknown")
+                drive = drive.index,
+                disc = %drive.disc_name.as_deref().unwrap_or("unknown"),
+                "Auto-rip: disc detected"
             );
 
             // Start the rip in a background task
@@ -407,7 +407,7 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
 
             let handle = tokio::spawn(async move {
                 if let Err(e) = execute_rip(state_clone.clone(), drive_index, eject_after).await {
-                    tracing::error!("Auto-rip failed on drive {}: {}", drive_index, e);
+                    tracing::error!(drive = drive_index, error = %e, "Auto-rip failed");
                 }
             });
 
@@ -475,7 +475,7 @@ async fn execute_rip(state: Arc<AppState>, index: usize, eject_after: bool) -> R
                 let path = device_path.clone();
                 let _ = tokio::task::spawn_blocking(move || infra::eject_disc(&path)).await;
                 sse.send_status(&format!("autorip:ejected:{}", index));
-                info!("Auto-rip: ejected disc from drive {}", index);
+                info!(drive = index, "Auto-rip ejected disc");
             }
         }
     }

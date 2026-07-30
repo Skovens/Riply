@@ -2,6 +2,7 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Read;
 use std::path::Path;
+
 use tracing::instrument;
 use tracing::{debug, info, warn};
 
@@ -23,12 +24,12 @@ impl ScannerService {
     }
 
     /// Scan a directory recursively for media files.
-    #[instrument(skip(self))]
+    #[instrument(skip(self), fields(dir = ?path))]
     pub async fn scan_directory(
         &self,
         path: &Path,
     ) -> Result<Vec<riply_core::FileRecord>, anyhow::Error> {
-        info!("Scanning directory: {:?}", path);
+        info!("Scanning directory");
 
         if !path.exists() {
             return Err(anyhow::anyhow!("Directory does not exist: {:?}", path));
@@ -37,7 +38,7 @@ impl ScannerService {
         let mut records = Vec::new();
         self.walk_directory(path, &mut records)?;
 
-        info!("Found {} media files in {:?}", records.len(), path);
+        info!(count = records.len(), "Found media files");
         Ok(records)
     }
 
@@ -50,7 +51,7 @@ impl ScannerService {
         let entries = match fs::read_dir(dir) {
             Ok(e) => e,
             Err(e) => {
-                warn!("Cannot read directory {:?}: {}", dir, e);
+                warn!(dir = ?dir, error = %e, "Cannot read directory");
                 return Ok(());
             }
         };
@@ -67,7 +68,7 @@ impl ScannerService {
                         match self.process_file(&file_path) {
                             Ok(record) => records.push(record),
                             Err(e) => {
-                                warn!("Failed to process {:?}: {}", file_path, e);
+                                warn!(file = ?file_path, error = %e, "Failed to process file");
                             }
                         }
                     }
@@ -97,13 +98,13 @@ impl ScannerService {
         let mut record = record;
         record.size = Some(size);
 
-        debug!("Scanned {:?} ({} bytes)", path, size);
+        debug!(file = ?path, size, "Scanned file");
         Ok(record)
     }
 
     /// Hash file contents with SHA-256.
     /// Uses spawn_blocking to avoid blocking the tokio runtime on large files.
-    #[instrument]
+    #[instrument(fields(path = ?path))]
     pub async fn hash_file_async(path: &Path) -> Result<String, anyhow::Error> {
         let path = path.to_path_buf();
         tokio::task::spawn_blocking(move || hash_file(&path))

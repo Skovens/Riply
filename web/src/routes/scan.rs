@@ -85,7 +85,7 @@ pub async fn start_scan(
                 }
 
                 sse.send_status(&format!("scan:complete:{}", records.len()));
-                info!("Scan complete: {} files from {}", records.len(), directory);
+                info!(count = records.len(), dir = %directory, "Scan complete");
                 Ok(())
             }
         })

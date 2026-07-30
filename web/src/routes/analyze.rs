@@ -74,10 +74,7 @@ pub async fn start_analyze(
                     "analyze:complete:matched={},review={}",
                     matched, review
                 ));
-                info!(
-                    "Analysis complete: {} matched, {} need review",
-                    matched, review
-                );
+                info!(matched, review, "Analysis complete");
                 Ok(())
             }
         })
@@ -167,10 +164,7 @@ pub async fn retry_failed(
                 }
 
                 sse.send_status(&format!("analyze:complete:{}", records.len()));
-                info!(
-                    "Analysis complete (retry): {} matched, {} need review",
-                    matched, review
-                );
+                info!(matched, review, "Analysis complete (retry)");
                 Ok(())
             }
         })

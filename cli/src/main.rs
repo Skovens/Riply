@@ -1,11 +1,11 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use commands::{
     analyze_files, move_files, review_files, rip_command as do_rip, run_setup, scan_directory,
     show_status, RipCommand, SetupArgs,
 };
 use infra::{Config, Database};
-use tracing::{info, Level};
-use tracing_subscriber::FmtSubscriber;
+use tracing::info;
+use tracing_subscriber::{fmt, EnvFilter};
 
 mod commands;
 
@@ -17,13 +17,27 @@ struct Cli {
     #[arg(short, long, default_value = "config.toml")]
     config: String,
 
-    /// Enable verbose logging
+    /// Enable verbose logging (sets log level to DEBUG)
     #[arg(short, long)]
     verbose: bool,
+
+    /// Log output format
+    #[arg(long, value_enum, default_value_t = LogFormat::Compact)]
+    log_format: LogFormat,
 
     /// Subcommand to execute
     #[command(subcommand)]
     command: Command,
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+enum LogFormat {
+    /// Compact, single-line log output (default)
+    Compact,
+    /// Multi-line, colorized log output
+    Pretty,
+    /// Structured JSON log output
+    Json,
 }
 
 #[derive(Subcommand, Debug)]
@@ -73,14 +87,19 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     // Initialize logging
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(if cli.verbose {
-            Level::DEBUG
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        if cli.verbose {
+            EnvFilter::new("debug")
         } else {
-            Level::INFO
-        })
-        .finish();
-    tracing::subscriber::set_global_default(subscriber)?;
+            EnvFilter::new("info")
+        }
+    });
+
+    match cli.log_format {
+        LogFormat::Json => fmt().json().with_env_filter(env_filter).init(),
+        LogFormat::Pretty => fmt().pretty().with_env_filter(env_filter).init(),
+        LogFormat::Compact => fmt().compact().with_env_filter(env_filter).init(),
+    }
 
     // Load configuration
     let config = match Config::load(&cli.config) {
@@ -93,8 +112,8 @@ async fn main() -> anyhow::Result<()> {
     };
 
     info!("Riply starting");
-    info!("Config file: {}", cli.config);
-    info!("Database: {}", config.database_path);
+    info!(config = %cli.config, "Config file");
+    info!(path = %config.database_path, "Database");
 
     // Initialize database
     let db = Database::new(&config.database_path).await?;

@@ -144,6 +144,63 @@ This ensures the next session can pick up without guessing.
 - API client in `web/static/js/api.js`
 - CSS custom properties for theming (dark/light)
 
+### Structured Logging
+
+Logging uses `tracing` crate with structured key=value fields — never string
+interpolation. Every log line carries parseable fields so AI agents can consume
+them directly without human interpretation.
+
+**Flag placement:** `--log-format` is a top-level clap flag on `Cli`. It must
+come **before** the subcommand:
+
+```bash
+riply --log-format json status       # correct
+riply status --log-format json       # error
+```
+
+**Formats:** `compact` (default), `pretty` (multi-line, colored), `json` (one
+JSON object per line, for programmatic ingestion). Set via `--log-format`.
+
+**Runtime level control:** Use `RUST_LOG` env var (`RUST_LOG=warn`,
+`RUST_LOG=debug`). When `--verbose` is passed, defaults to `debug` level.
+
+**Structured field rules:**
+
+| Type | Syntax | Example |
+|------|--------|---------|
+| `Display` (String, i64, &str) | `%value` | `info!(file = %file.filename, "Moved")` |
+| `Debug`-only (Path, PathBuf) | `?value` | `warn!(dir = ?path, error = %e, "Cannot read")` |
+| Errors | `%error` | `warn!(error = %e, "Failed")` |
+
+Never use `format!`-style interpolation like `"Failed: {}", val`. Always use
+structured fields — the human-readable message is a static string.
+
+**Level conventions:**
+
+| Level | When |
+|-------|------|
+| `info!` | Normal progress (scan complete, config loaded) |
+| `warn!` | Expected failures (unreadable dir, dest exists) |
+| `error!` | Unexpected failures (job crash, rip failure, IO error) |
+
+**`#[instrument]` spans:** Use `skip(self)` and capture key args as explicit
+fields. Never `skip(self)` without adding fields — that loses context for child
+spans:
+
+```rust
+// Good — child spans inherit `file`
+#[instrument(skip(self), fields(file = %file.filename))]
+pub async fn move_file(&self, file: &FileRecord, ...) { ... }
+
+// Bad — no context propagated to child spans
+#[instrument(skip(self))]
+pub async fn move_file(&self, file: &FileRecord, ...) { ... }
+```
+
+**Prefix conventions:** Don't prefix messages with module names (e.g. avoid
+`"healthchecks: ping failed"`). The span's `target` field already identifies
+the module. Write `warn!(error = %e, "Ping failed")` instead.
+
 ### What NOT to Commit
 
 - `riply.db*` (SQLite files)

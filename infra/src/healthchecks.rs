@@ -1,6 +1,6 @@
 use crate::config::HealthchecksConfig;
 use reqwest::Client;
-use tracing::info;
+use tracing::{info, warn};
 
 const BASE_URL: &str = "https://hc-ping.com";
 
@@ -30,10 +30,10 @@ impl HealthchecksClient {
             Ok(resp) => {
                 let status = resp.status();
                 if !status.is_success() {
-                    info!("healthchecks: start ping returned {}", status);
+                    info!(status = %status, "healthchecks start ping");
                 }
             }
-            Err(e) => info!("healthchecks: start ping failed: {}", e),
+            Err(e) => warn!(error = %e, "healthchecks start ping failed"),
         }
     }
 
@@ -43,10 +43,10 @@ impl HealthchecksClient {
             Ok(resp) => {
                 let status = resp.status();
                 if !status.is_success() {
-                    info!("healthchecks: ping returned {}", status);
+                    info!(status = %status, "healthchecks ping");
                 }
             }
-            Err(e) => info!("healthchecks: ping failed: {}", e),
+            Err(e) => warn!(error = %e, "healthchecks ping failed"),
         }
     }
 }

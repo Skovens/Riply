@@ -99,7 +99,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
     info!("Creating API router");
 
     let build_dir = svelte_build_dir();
-    info!("Serving SvelteKit from: {:?}", build_dir);
+    info!(dir = ?build_dir, "Serving frontend");
 
     let spa_fallback = ServeFile::new(build_dir.join("index.html"));
     let static_service = ServeDir::new(&build_dir).not_found_service(spa_fallback);

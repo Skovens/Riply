@@ -32,7 +32,7 @@ impl MakemkvSession {
                 let mut lines = reader.lines();
 
                 while let Ok(Some(line)) = lines.next_line().await {
-                    debug!("makemkvcon stdout: {}", line);
+                    debug!(line = %line, "makemkvcon stdout");
 
                     if let Some(prog) = parser::parse_progress_line(&line) {
                         let _ = tx.send(RipEvent::Progress {
@@ -62,7 +62,7 @@ impl MakemkvSession {
                 let mut lines = reader.lines();
 
                 while let Ok(Some(line)) = lines.next_line().await {
-                    debug!("makemkvcon stderr: {}", line);
+                    debug!(line = %line, "makemkvcon stderr");
                 }
             });
         }

@@ -19,7 +19,7 @@ pub async fn serve(
     let port = port.unwrap_or(config.port);
     let addr = format!("{}:{}", host, port);
 
-    info!("Starting web server on {}", addr);
+    info!(addr = %addr, "Starting web server");
 
     let backend = infra::MakemkvBackend::from_config_or_detect(config.ripping_command())
         .ok()
@@ -44,7 +44,7 @@ pub async fn serve(
             web::autorip_poll_loop(state_clone).await;
         });
         *state.autorip_handle.write().await = Some(handle);
-        info!("Auto-rip enabled — polling for disc insertion");
+        info!("Auto-rip polling started");
     }
 
     // Start healthchecks.io heartbeat if configured
@@ -52,12 +52,13 @@ pub async fn serve(
         hc.start().await;
         let interval =
             std::time::Duration::from_secs(config.healthchecks.ping_interval_minutes * 60);
+        let interval_mins = config.healthchecks.ping_interval_minutes;
         let mut timer = tokio::time::interval(interval);
         timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         tokio::spawn(async move {
             info!(
-                "healthchecks: heartbeat started (every {} min)",
-                config.healthchecks.ping_interval_minutes
+                interval_min = interval_mins,
+                "Healthchecks heartbeat started"
             );
             loop {
                 timer.tick().await;
@@ -69,7 +70,7 @@ pub async fn serve(
     let router = web::create_router(state);
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    info!("Listening on {}", addr);
+    info!(addr = %addr, "Listening");
 
     axum::serve(listener, router)
         .with_graceful_shutdown(shutdown_signal())
