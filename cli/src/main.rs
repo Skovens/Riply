@@ -4,6 +4,7 @@ use commands::{
     show_status, RipCommand, SetupArgs,
 };
 use infra::{Config, Database};
+use riply_core::MetadataSearcher;
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
 
@@ -122,7 +123,17 @@ async fn main() -> anyhow::Result<()> {
     // Execute command
     match cli.command {
         Command::Scan { directory } => {
-            scan_directory(&directory, &config).await?;
+            let searcher: Option<Box<dyn MetadataSearcher>> =
+                if config.tmdb_api_key.is_some() || config.omdb_api_key.is_some() {
+                    let client = infra::HttpClient::new(
+                        config.tmdb_api_key.clone(),
+                        config.omdb_api_key.clone(),
+                    );
+                    Some(Box::new(client))
+                } else {
+                    None
+                };
+            scan_directory(&directory, &config, searcher.as_deref()).await?;
         }
         Command::Analyze => {
             analyze_files(&db, &config).await?;

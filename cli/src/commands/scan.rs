@@ -1,10 +1,15 @@
 use app::ScannerService;
 use infra::{Config, Database};
+use riply_core::MetadataSearcher;
 use std::path::Path;
 use tracing::info;
 
 /// Execute the scan command
-pub async fn scan_directory(directory: &str, config: &Config) -> Result<(), anyhow::Error> {
+pub async fn scan_directory(
+    directory: &str,
+    config: &Config,
+    searcher: Option<&dyn MetadataSearcher>,
+) -> Result<(), anyhow::Error> {
     info!(dir = %directory, "Scanning directory");
 
     let path = Path::new(directory);
@@ -17,18 +22,32 @@ pub async fn scan_directory(directory: &str, config: &Config) -> Result<(), anyh
     db.migrate().await?;
 
     let scanner = ScannerService::new();
-    let records = scanner.scan_directory(path).await?;
+    let result = scanner.scan_directory(path, searcher).await?;
 
-    if records.is_empty() {
+    // Save title groups
+    for group in &result.title_groups {
+        db.save_title_group(group).await?;
+    }
+
+    if result.records.is_empty() {
         println!("No media files found in {}", directory);
         return Ok(());
     }
 
-    println!("Found {} media files:", records.len());
+    let group_count = result.title_groups.len();
+    if group_count > 0 {
+        println!("Found {} title group(s):", group_count);
+        for g in &result.title_groups {
+            println!("  [{}] {}", g.id, g.title);
+        }
+        println!();
+    }
+
+    println!("Found {} media files:", result.records.len());
     println!();
 
     // Save each file record to database
-    for record in &records {
+    for record in &result.records {
         db.save_file(record).await?;
         println!("  {} [{}]", record.filename, record.id);
         println!("    Status: {}", record.status);
@@ -36,7 +55,7 @@ pub async fn scan_directory(directory: &str, config: &Config) -> Result<(), anyh
     }
 
     println!();
-    println!("{} records saved to database", records.len());
+    println!("{} records saved to database", result.records.len());
 
     Ok(())
 }

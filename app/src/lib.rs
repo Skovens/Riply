@@ -11,4 +11,4 @@ pub use jobs::{
     CancellationToken, JobInfo, JobKind, JobProgress, JobScheduler, JobStatus, ProgressHandle,
 };
 pub use mover::MoverService;
-pub use scanner::ScannerService;
+pub use scanner::{ScanResult, ScannerService};

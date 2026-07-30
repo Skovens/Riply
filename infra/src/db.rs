@@ -37,9 +37,21 @@ impl Database {
     pub async fn migrate(&self) -> Result<(), anyhow::Error> {
         info!("Applying database migrations");
 
-        // Read and execute the migration file
         let migration = include_str!("../migrations/001_create_files_table.sql");
         sqlx::query(migration).execute(&self.pool).await?;
+
+        // Check if migration 002 has been applied by checking for title_group_id column
+        let has_col = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM pragma_table_info('files') WHERE name = 'title_group_id'",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        if has_col == 0 {
+            let migration2 = include_str!("../migrations/002_create_title_groups.sql");
+            sqlx::query(migration2).execute(&self.pool).await?;
+            info!("Migration 002 applied (title_groups table)");
+        }
 
         info!("Migrations applied successfully");
         Ok(())
@@ -90,9 +102,10 @@ impl Database {
                     content_type, media_type, series_name,
                     season_number, episode_number, episode_title,
                     source, subtitle_text, duplicate_path,
+                    title_group_id,
                     reviewed, created_at, updated_at
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 "#,
             )
@@ -122,6 +135,7 @@ impl Database {
                     .as_ref()
                     .map(|p| p.to_string_lossy().to_string()),
             )
+            .bind(&file.title_group_id)
             .bind(file.reviewed)
             .bind(&file.created_at)
             .bind(&file.updated_at)
@@ -148,6 +162,7 @@ impl Database {
                 content_type, media_type, series_name,
                 season_number, episode_number, episode_title,
                 source, subtitle_text, duplicate_path,
+                title_group_id,
                 reviewed, created_at, updated_at
             FROM files
             WHERE status = ?
@@ -179,6 +194,7 @@ impl Database {
                 content_type, media_type, series_name,
                 season_number, episode_number, episode_title,
                 source, subtitle_text, duplicate_path,
+                title_group_id,
                 reviewed, created_at, updated_at
             FROM files
             "#,
@@ -223,6 +239,7 @@ impl Database {
                 source = ?,
                 subtitle_text = ?,
                 duplicate_path = ?,
+                title_group_id = ?,
                 reviewed = ?,
                 created_at = ?,
                 updated_at = ?
@@ -254,6 +271,7 @@ impl Database {
                 .as_ref()
                 .map(|p| p.to_string_lossy().to_string()),
         )
+        .bind(&file.title_group_id)
         .bind(file.reviewed)
         .bind(&file.created_at)
         .bind(&file.updated_at)
@@ -297,6 +315,7 @@ impl Database {
                 .try_get("duplicate_path")
                 .ok()
                 .map(|p: String| PathBuf::from(p)),
+            title_group_id: row.try_get("title_group_id").ok(),
             reviewed: row.try_get("reviewed")?,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
@@ -339,6 +358,7 @@ impl Database {
                 content_type, media_type, series_name,
                 season_number, episode_number, episode_title,
                 source, subtitle_text, duplicate_path,
+                title_group_id,
                 reviewed, created_at, updated_at
             FROM files
             WHERE id = ?
@@ -426,6 +446,7 @@ impl Database {
                 content_type, media_type, series_name,
                 season_number, episode_number, episode_title,
                 source, subtitle_text, duplicate_path,
+                title_group_id,
                 reviewed, created_at, updated_at
             FROM files
         "#;
@@ -527,6 +548,103 @@ impl Database {
         Ok(counts)
     }
 
+    /// Save a title group
+    pub async fn save_title_group(
+        &self,
+        group: &riply_core::TitleGroup,
+    ) -> Result<(), anyhow::Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO title_groups (id, source_directory, title, year, tmdb_id, media_type, series_name, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                source_directory = excluded.source_directory,
+                title = excluded.title,
+                year = excluded.year,
+                tmdb_id = excluded.tmdb_id,
+                media_type = excluded.media_type,
+                series_name = excluded.series_name,
+                status = excluded.status
+            "#,
+        )
+        .bind(&group.id)
+        .bind(group.source_directory.to_string_lossy().to_string())
+        .bind(&group.title)
+        .bind(group.year.map(|y| y as i32))
+        .bind(group.tmdb_id)
+        .bind(group.media_type.to_string())
+        .bind(&group.series_name)
+        .bind(group.status.to_string())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Get a title group by ID
+    pub async fn get_title_group(
+        &self,
+        id: &str,
+    ) -> Result<Option<riply_core::TitleGroup>, anyhow::Error> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, source_directory, title, year, tmdb_id, media_type, series_name, status
+            FROM title_groups
+            WHERE id = ?
+            "#,
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|r| self.row_to_title_group(&r)).transpose()
+    }
+
+    /// Get all title groups
+    pub async fn get_all_title_groups(
+        &self,
+    ) -> Result<Vec<riply_core::TitleGroup>, anyhow::Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, source_directory, title, year, tmdb_id, media_type, series_name, status
+            FROM title_groups
+            ORDER BY title
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut groups = Vec::new();
+        for row in rows {
+            groups.push(self.row_to_title_group(&row)?);
+        }
+        Ok(groups)
+    }
+
+    fn row_to_title_group(
+        &self,
+        row: &sqlx::sqlite::SqliteRow,
+    ) -> Result<riply_core::TitleGroup, anyhow::Error> {
+        use riply_core::TitleGroupStatus;
+
+        Ok(riply_core::TitleGroup {
+            id: row.try_get("id")?,
+            source_directory: std::path::PathBuf::from(row.try_get::<String, _>("source_directory")?),
+            title: row.try_get("title")?,
+            year: row.try_get::<Option<i32>, _>("year")?.map(|y| y as u16),
+            tmdb_id: row.try_get("tmdb_id")?,
+            media_type: self.parse_media_type(row.try_get::<String, _>("media_type")?),
+            series_name: row.try_get("series_name")?,
+            status: row.try_get::<String, _>("status")
+                .map(|s| match s.as_str() {
+                    "Matched" => TitleGroupStatus::Matched,
+                    "Confirmed" => TitleGroupStatus::Confirmed,
+                    "Moved" => TitleGroupStatus::Moved,
+                    _ => TitleGroupStatus::New,
+                })?,
+        })
+    }
+
     /// Find a file record by its hash
     pub async fn find_file_by_hash(
         &self,
@@ -541,6 +659,7 @@ impl Database {
                 content_type, media_type, series_name,
                 season_number, episode_number, episode_title,
                 source, subtitle_text, duplicate_path,
+                title_group_id,
                 reviewed, created_at, updated_at
             FROM files
             WHERE hash = ?

@@ -28,6 +28,7 @@ pub async fn start_scan(
 
     let db = state.db.clone();
     let sse = state.sse.clone();
+    let searcher = state.searcher.clone();
     let directory = body.directory.clone();
 
     let job_id = state
@@ -35,10 +36,22 @@ pub async fn start_scan(
         .start_scan_job(&body.directory, move |cancel, progress| {
             let db = db.clone();
             let sse = sse.clone();
+            let searcher = searcher.clone();
             let directory = directory.clone();
             async move {
                 let scanner = app::ScannerService::new();
-                let records = scanner.scan_directory(&dir).await?;
+                let result = scanner
+                    .scan_directory(&dir, searcher.as_deref())
+                    .await?;
+                let records = result.records;
+                let groups = result.title_groups;
+
+                // Save title groups
+                for group in &groups {
+                    if let Err(e) = db.save_title_group(group).await {
+                        sse.send_log("warn", &format!("Failed to save title group: {}", e));
+                    }
+                }
 
                 let mut duplicates = HashMap::new();
                 for record in &records {

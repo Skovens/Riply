@@ -53,6 +53,8 @@ pub struct FileRecord {
     pub subtitle_text: Option<String>,
     /// Path to a duplicate file (if detected).
     pub duplicate_path: Option<PathBuf>,
+    /// ID of the TitleGroup this file belongs to, if any.
+    pub title_group_id: Option<String>,
     /// Whether the file has been reviewed.
     pub reviewed: bool,
     /// Timestamp when the record was created.
@@ -90,6 +92,7 @@ impl FileRecord {
             source: None,
             subtitle_text: None,
             duplicate_path: None,
+            title_group_id: None,
             reviewed: false,
             created_at: now.clone(),
             updated_at: now,
