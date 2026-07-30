@@ -191,7 +191,8 @@ pub fn is_completion_line(line: &str) -> bool {
 ///
 /// MakeMKV disc names follow patterns like `INCEPTION_2010`, `THE_DARK_KNIGHT`,
 /// or `BRAVEHEART`. This function replaces underscores with spaces, extracts
-/// a trailing 4-digit year if present, and title-cases the result.
+/// a trailing 4-digit year if present, and delegates title-casing to
+/// [`riply_core::NameCleaner`].
 ///
 /// # Examples
 /// ```
@@ -210,7 +211,6 @@ pub fn parse_disc_name(name: &str) -> (String, Option<u16>) {
         let last_4 = &trimmed[trimmed.len() - 4..];
         if let Ok(y) = last_4.parse::<u16>() {
             if (1900..=2100).contains(&y) {
-                // Look for " YYYY" at the end (space + year)
                 let space_year = &trimmed[trimmed.len() - 5..];
                 if space_year.starts_with(' ') {
                     let title = trimmed[..trimmed.len() - 5].trim();
@@ -228,23 +228,7 @@ pub fn parse_disc_name(name: &str) -> (String, Option<u16>) {
         (trimmed, None)
     };
 
-    // Title-case the result
-    let title = title_part
-        .split_whitespace()
-        .map(|word| {
-            let mut chars = word.chars();
-            match chars.next() {
-                None => String::new(),
-                Some(first) => {
-                    let upper: String = chars.collect::<String>().to_uppercase();
-                    format!("{}{}", first.to_uppercase(), upper.to_lowercase())
-                }
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
-
-    (title, year)
+    (riply_core::NameCleaner::clean_name(title_part), year)
 }
 
 #[cfg(test)]
