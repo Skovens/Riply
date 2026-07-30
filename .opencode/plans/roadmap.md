@@ -4,12 +4,12 @@
 
 | # | Item | Status |
 |---|------|--------|
-| 1 | Name cleaning module (`core/src/name_cleaner.rs`) | **In progress** |
-| 2 | Frontend tests (Vitest + Svelte testing) | Pending |
-| 3 | Rip-time metadata search | Pending |
-| 4 | Rate limiting for metadata APIs | Pending |
-| 5 | Folder-based scanning + TitleGroup | Pending |
-| 6 | TV show extras / Jellyfin layout | Pending |
+| 1 | Name cleaning module (`core/src/name_cleaner.rs`) | **Done** |
+| 2 | Frontend tests (Vitest + Svelte testing) | **Done** |
+| 3 | Rip-time metadata search | **Done** |
+| 4 | Rate limiting for metadata APIs | **Done** |
+| 5 | Folder-based scanning + TitleGroup | **Done** |
+| 6 | TV show extras / Jellyfin layout | **Done** |
 
 ---
 

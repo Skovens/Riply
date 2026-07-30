@@ -98,36 +98,50 @@ impl MoverService {
 
         let year = file.canonical_year.or(file.suggested_year);
 
-        let mut dest_path = if file.media_type.is_tv() {
+        // Build base path with year if available
+        let base_path = if file.media_type.is_tv() {
             let series_name = file.series_name.clone().unwrap_or_else(|| title.clone());
-
             let season = file.season_number.unwrap_or(1);
-
-            // TV Show directory: tv_dir/Series Name/Season XX/
             let season_dir = format!("Season {:02}", season);
-            tv_dir.join(&series_name).join(season_dir)
+            let mut base = tv_dir.join(&series_name).join(season_dir);
+
+            // Add year to series name if available
+            if let Some(year) = year {
+                let parent = base.parent().unwrap_or(&base).to_path_buf();
+                let base_name = base.file_name().unwrap_or_default().to_string_lossy().to_string();
+                if !base_name.contains(&year.to_string()) {
+                    base = parent.join(format!("{} ({})", base_name, year));
+                }
+            }
+
+            // Extras go into an extras/ subdirectory within the season
+            if file.is_extra() {
+                base.join("extras")
+            } else {
+                base
+            }
         } else {
-            // Movie directory: movies_dir/Title/
-            movies_dir.join(&title)
+            let mut base = movies_dir.join(&title);
+
+            // Add year to title directory if available
+            if let Some(year) = year {
+                let parent = base.parent().unwrap_or(&base).to_path_buf();
+                let base_name = base.file_name().unwrap_or_default().to_string_lossy().to_string();
+                if !base_name.contains(&year.to_string()) {
+                    base = parent.join(format!("{} ({})", base_name, year));
+                }
+            }
+
+            // Movie extras go into an extras/ subdirectory
+            if file.is_extra() {
+                base.join("extras")
+            } else {
+                base
+            }
         };
 
-        // Add year to directory name if available
-        if let Some(year) = year {
-            let parent = dest_path.parent().unwrap_or(&dest_path).to_path_buf();
-            let base = dest_path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-
-            // Check if directory already has year in name
-            if !base.contains(&year.to_string()) {
-                dest_path = parent.join(format!("{} ({})", base, year));
-            }
-        }
-
         // Add filename
-        dest_path = dest_path.join(&file.filename);
+        let dest_path = base_path.join(&file.filename);
 
         Ok(dest_path)
     }
@@ -238,5 +252,104 @@ mod tests {
             .join("test.mkv")
             .exists());
         assert_eq!(result.status, PipelineStatus::Moved);
+    }
+
+    #[test]
+    fn test_calculate_destination_movie_extra() {
+        let dir = tempdir().unwrap();
+        let movies_dir = dir.path().join("movies");
+        let tv_dir = dir.path().join("tv");
+
+        let mut file = riply_core::FileRecord::new(
+            "test".to_string(),
+            std::path::PathBuf::from("/test/behind_scenes.mkv"),
+            "behind_scenes.mkv".to_string(),
+            "hash".to_string(),
+        );
+        file.canonical_title = Some("Test Movie".to_string());
+        file.canonical_year = Some(2023);
+        file.content_type = "extra".to_string();
+        file.status = PipelineStatus::Confirmed;
+
+        let mover = MoverService::new();
+        let dest = mover
+            .calculate_destination(&file, &movies_dir, &tv_dir)
+            .unwrap();
+
+        assert_eq!(
+            dest,
+            movies_dir
+                .join("Test Movie (2023)")
+                .join("extras")
+                .join("behind_scenes.mkv")
+        );
+    }
+
+    #[test]
+    fn test_calculate_destination_tv_extra() {
+        let dir = tempdir().unwrap();
+        let movies_dir = dir.path().join("movies");
+        let tv_dir = dir.path().join("tv");
+
+        let mut file = riply_core::FileRecord::new(
+            "test".to_string(),
+            std::path::PathBuf::from("/test/commentary.mkv"),
+            "commentary.mkv".to_string(),
+            "hash".to_string(),
+        );
+        file.media_type = MediaType::Tv;
+        file.canonical_title = Some("Test Show".to_string());
+        file.series_name = Some("Test Show".to_string());
+        file.season_number = Some(1);
+        file.content_type = "extra".to_string();
+        file.status = PipelineStatus::Confirmed;
+
+        let mover = MoverService::new();
+        let dest = mover
+            .calculate_destination(&file, &movies_dir, &tv_dir)
+            .unwrap();
+
+        assert_eq!(
+            dest,
+            tv_dir
+                .join("Test Show")
+                .join("Season 01")
+                .join("extras")
+                .join("commentary.mkv")
+        );
+    }
+
+    #[test]
+    fn test_calculate_destination_tv_episode_not_extra() {
+        let dir = tempdir().unwrap();
+        let movies_dir = dir.path().join("movies");
+        let tv_dir = dir.path().join("tv");
+
+        let mut file = riply_core::FileRecord::new(
+            "test".to_string(),
+            std::path::PathBuf::from("/test/show.s01e01.mkv"),
+            "show.s01e01.mkv".to_string(),
+            "hash".to_string(),
+        );
+        file.media_type = MediaType::Tv;
+        file.canonical_title = Some("Test Show".to_string());
+        file.series_name = Some("Test Show".to_string());
+        file.season_number = Some(1);
+        file.episode_number = Some(1);
+        file.content_type = "main".to_string();
+        file.status = PipelineStatus::Confirmed;
+
+        let mover = MoverService::new();
+        let dest = mover
+            .calculate_destination(&file, &movies_dir, &tv_dir)
+            .unwrap();
+
+        assert_eq!(
+            dest,
+            tv_dir
+                .join("Test Show")
+                .join("Season 01")
+                .join("show.s01e01.mkv")
+        );
     }
 }

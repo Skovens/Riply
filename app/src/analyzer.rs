@@ -67,52 +67,59 @@ impl AnalyzerService {
         let search_title = parsed.title.clone();
         let search_year = parsed.year;
 
+        // Skip metadata search for extras - they don't need title matching
+        let skip_metadata_search = record.content_type == "extra";
+
         // Try external metadata search if available
-        if let Some(ref searcher) = self.searcher {
-            match searcher
-                .search(&search_title, search_year, &record.media_type)
-                .await
-            {
-                Ok(results) => {
-                    if let Some(best) = results.into_iter().next() {
-                        info!(
-                            title = %best.title,
-                            year = %best.year.map_or("n/a".to_string(), |y| y.to_string()),
-                            "TMDb match"
-                        );
-                        record.suggested_title = Some(best.title);
-                        record.suggested_year = best.year;
-                        record.tmdb_id = best.tmdb_id;
-                        if best.is_tv {
-                            record.media_type = MediaType::Tv;
-                            // Use series name from API if available, otherwise keep search title
-                            if let Some(ref series) = best.series_name {
-                                record.series_name = Some(series.clone());
-                            } else {
-                                record.series_name = Some(search_title.clone());
+        if !skip_metadata_search {
+            if let Some(ref searcher) = self.searcher {
+                match searcher
+                    .search(&search_title, search_year, &record.media_type)
+                    .await
+                {
+                    Ok(results) => {
+                        if let Some(best) = results.into_iter().next() {
+                            info!(
+                                title = %best.title,
+                                year = %best.year.map_or("n/a".to_string(), |y| y.to_string()),
+                                "TMDb match"
+                            );
+                            record.suggested_title = Some(best.title);
+                            record.suggested_year = best.year;
+                            record.tmdb_id = best.tmdb_id;
+                            if best.is_tv {
+                                record.media_type = MediaType::Tv;
+                                // Use series name from API if available, otherwise keep search title
+                                if let Some(ref series) = best.series_name {
+                                    record.series_name = Some(series.clone());
+                                } else {
+                                    record.series_name = Some(search_title.clone());
+                                }
+                                // Season/episode from filename take precedence
+                                if record.season_number.is_none() {
+                                    record.season_number = best.season_number;
+                                }
+                                if record.episode_number.is_none() {
+                                    record.episode_number = best.episode_number;
+                                }
+                                record.episode_title = best.episode_title;
                             }
-                            // Season/episode from filename take precedence
-                            if record.season_number.is_none() {
-                                record.season_number = best.season_number;
-                            }
-                            if record.episode_number.is_none() {
-                                record.episode_number = best.episode_number;
-                            }
-                            record.episode_title = best.episode_title;
+                            record.confidence = Some(0.95);
+                            record.source = Some("tmdb".to_string());
+                            record.update_status(riply_core::PipelineStatus::Matched);
+                            return Ok(record);
                         }
-                        record.confidence = Some(0.95);
-                        record.source = Some("tmdb".to_string());
-                        record.update_status(riply_core::PipelineStatus::Matched);
-                        return Ok(record);
+                    }
+                    Err(e) => {
+                        warn!(
+                            error = %e,
+                            "Metadata search failed, falling back to filename parsing"
+                        );
                     }
                 }
-                Err(e) => {
-                    warn!(
-                        error = %e,
-                        "Metadata search failed, falling back to filename parsing"
-                    );
-                }
             }
+        } else {
+            info!("Skipping metadata search for extra file");
         }
 
         // Fallback: filename-only heuristic
@@ -495,5 +502,72 @@ mod tests {
         assert_eq!(result.confidence, Some(0.95));
         assert_eq!(result.source, Some("tmdb".to_string()));
         assert_eq!(result.status, PipelineStatus::Matched);
+    }
+
+    /// Test analyzer skips metadata search for extras
+    #[tokio::test]
+    async fn test_analyze_extra_skips_metadata_search() {
+        struct MockSearcher;
+
+        impl riply_core::MetadataSearcher for MockSearcher {
+            fn search_movies(
+                &self,
+                _query: &str,
+                _year: Option<u32>,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<Vec<riply_core::MetadataMatch>, anyhow::Error>,
+                        > + Send
+                        + '_,
+                >,
+            > {
+                Box::pin(async move {
+                    Ok(vec![riply_core::MetadataMatch {
+                        title: "Should Not Appear".to_string(),
+                        year: Some(2020),
+                        tmdb_id: Some(999),
+                        is_tv: false,
+                        series_name: None,
+                        season_number: None,
+                        episode_number: None,
+                        episode_title: None,
+                    }])
+                })
+            }
+
+            fn search_tv(
+                &self,
+                _query: &str,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<Vec<riply_core::MetadataMatch>, anyhow::Error>,
+                        > + Send
+                        + '_,
+                >,
+            > {
+                Box::pin(async move { Ok(vec![]) })
+            }
+        }
+
+        let file = riply_core::FileRecord::new(
+            "test".to_string(),
+            std::path::PathBuf::from("/test/commentary.mkv"),
+            "commentary.mkv".to_string(),
+            "hash".to_string(),
+        );
+        let mut file = file;
+        file.content_type = "extra".to_string();
+
+        let analyzer = AnalyzerService::new(Some(Box::new(MockSearcher)));
+        let result = analyzer.analyze_file(&file).await.unwrap();
+
+        // Should NOT have metadata from the searcher
+        assert_eq!(result.suggested_title, Some("commentary".to_string()));
+        assert_eq!(result.tmdb_id, None);
+        assert_eq!(result.source, None);
+        // Extras get moderate confidence from filename
+        assert!(result.confidence.unwrap() >= 0.5);
     }
 }
