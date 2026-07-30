@@ -109,7 +109,8 @@ Scope options: `core`, `app`, `infra`, `web`, `cli`, `scanner`, `metadata`,
 
 | Information | Location |
 |-------------|----------|
-| Long-running plans | `.opencode/plans/<name>.md` |
+| Task board / project plan | `.opencode/plans/todo.md` (always update this first) |
+| Detailed plan files | `.opencode/plans/<name>.md` |
 | Architecture decisions | `docs/adr/` |
 | Project overview | `README.md` |
 
@@ -137,12 +138,15 @@ This ensures the next session can pick up without guessing.
 - Use `anyhow::Result` in app/infra/cli, `thiserror` for domain errors in `core`
 - Binary: `riply` (defined in `cli/Cargo.toml`)
 
-### TypeScript/JavaScript (web frontend)
+### TypeScript/JavaScript (web frontend — SvelteKit)
 
-- ES modules (no bundler)
-- Components in `web/static/js/components/`
-- API client in `web/static/js/api.js`
-- CSS custom properties for theming (dark/light)
+- SvelteKit SPA (`web/svelte/`), static adapter, no SSR
+- Pages in `web/svelte/src/routes/`, components in `web/svelte/src/lib/components/`
+- API client in `web/svelte/src/lib/api/`
+- CSS design system: custom properties in `web/svelte/src/lib/css/` (variables, base, layout, components, utilities)
+- Dark mode default, light mode via `prefers-color-scheme`
+- SSE for real-time updates (`web/svelte/src/lib/api/sse.ts`)
+- Current UI plan: `.opencode/plans/todo.md` Batch 7 (web UI redesign — dashboard layout, detail drawer, per-panel loading)
 
 ### Structured Logging
 

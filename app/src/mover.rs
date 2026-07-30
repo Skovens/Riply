@@ -108,7 +108,11 @@ impl MoverService {
             // Add year to series name if available
             if let Some(year) = year {
                 let parent = base.parent().unwrap_or(&base).to_path_buf();
-                let base_name = base.file_name().unwrap_or_default().to_string_lossy().to_string();
+                let base_name = base
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
                 if !base_name.contains(&year.to_string()) {
                     base = parent.join(format!("{} ({})", base_name, year));
                 }
@@ -126,7 +130,11 @@ impl MoverService {
             // Add year to title directory if available
             if let Some(year) = year {
                 let parent = base.parent().unwrap_or(&base).to_path_buf();
-                let base_name = base.file_name().unwrap_or_default().to_string_lossy().to_string();
+                let base_name = base
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
                 if !base_name.contains(&year.to_string()) {
                     base = parent.join(format!("{} ({})", base_name, year));
                 }

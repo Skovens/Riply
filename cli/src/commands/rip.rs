@@ -27,16 +27,11 @@ pub enum RipCommand {
 }
 
 /// Execute rip commands
-pub async fn rip_command(
-    command: RipCommand,
-    config: &infra::Config,
-) -> Result<(), anyhow::Error> {
+pub async fn rip_command(command: RipCommand, config: &infra::Config) -> Result<(), anyhow::Error> {
     let searcher: Option<Box<dyn MetadataSearcher>> =
         if config.tmdb_api_key.is_some() || config.omdb_api_key.is_some() {
-            let client = infra::HttpClient::new(
-                config.tmdb_api_key.clone(),
-                config.omdb_api_key.clone(),
-            );
+            let client =
+                infra::HttpClient::new(config.tmdb_api_key.clone(), config.omdb_api_key.clone());
             Some(Box::new(client))
         } else {
             None

@@ -60,19 +60,54 @@
 | MakeMKV abstraction | DONE | — |
 | Migrate to SvelteKit | DONE | — |
 
+### Batch 7: Web UI Redesign 🔄
+
+**Goal:** Simplify the web UI from 6 pages to 3, with a command-center dashboard layout.
+The file list should be the main content area that expands. Per-panel loading (no global loading gate).
+Detail drawer with confidence-aware prefilling. TMDb/OMDb search in drawer. Mobile-responsive.
+
+**Design Decisions:**
+- 3 nav links: Dashboard, Files, Settings (removed Review, Ripper, Jobs)
+- Dashboard = command center with sidebar (Drives, Review, Jobs panels) + main area (pipeline bar, file list)
+- Files = focused data view with search/filter, DetailDrawer, quick accept, move preview
+- DetailDrawer: confidence-aware prefilling (matched → pre-filled, needs review → suggested, failed → empty)
+- Search: TMDb + OMDb, 300ms debounce in drawer
+- Auto-scan: when rip starts, auto-scan the rip output directory (not the configured scan directory)
+- Quick accept threshold: confidence >= 0.8 (revisit later)
+- Move preview: moved to Files page (not Dashboard)
+- No global loading gate — each panel loads independently with its own "Loading..." state
+- Mobile-first considerations: CSS grid with responsive breakpoints, touch targets >= 44px, drawer full-screen on mobile
+
+**Implementation Order:**
+1. Backend: search endpoint → 2. Frontend: search API + types → 3. DetailDrawer component → 4. Layout shell → 5. Dashboard page → 6. Sidebar panels → 7. PipelineProgress component → 8. Files page → 9. Remove old pages → 10. Mobile CSS → 11. Test + lint
+
+| # | Task | Status | Depends On |
+|---|------|--------|------------|
+| 44 | Backend: add `GET /api/search?q=...&type=movie|tv` endpoint | DONE | — |
+| 45 | Frontend: add `search.ts` API client + update `types.ts` | DONE | 44 |
+| 46 | Frontend: create `DetailDrawer.svelte` component | DONE | 45 |
+| 47 | Frontend: update `+layout.svelte` with new nav (Dashboard, Files, Settings) and header buttons (Scan, Move) | DONE | — |
+| 48 | Frontend: rewrite `+page.svelte` (Dashboard) with sidebar grid, per-panel loading, SSE, auto-scan on rip | DONE | 46, 47 |
+| 49 | Frontend: create sidebar panel components (`DrivePanel.svelte`, `ReviewPanel.svelte`, `JobPanel.svelte`) | DONE | 48 |
+| 50 | Frontend: create `PipelineProgress.svelte` component | DONE | 48 |
+| 51 | Frontend: refactor `files/+page.svelte` with DetailDrawer, quick accept, search/filter, Move Preview button | DONE | 46, 48, 49, 50 |
+| 52 | Remove old pages: `review/+page.svelte`, `ripper/+page.svelte`, `jobs/+page.svelte` | DONE | 48, 49, 51 |
+| 53 | Mobile CSS: responsive styles for sidebar layout, file list cards, drawer, touch targets | DONE | 48, 49, 51 |
+| 54 | Test + lint: `cargo fmt && cargo clippy --all && cargo build --all && cargo test --all` | DONE | All above |
+
 ### Batch 5: Architecture & Robustness Improvements 🔄
 
 Source: `improvements.md`
 
 | # | Task | Status | Plan File |
 |---|------|--------|-----------|
-| 13 | Quick win: Add `#[instrument]` to public functions in `app/src/*.rs` | PENDING | `improvements.md` §2.1 |
-| 14 | Quick win: Add `TraceLayer` to HTTP router in `web/src/api.rs` | PENDING | `improvements.md` §2.1 |
-| 15 | Quick win: Add retry logic to HTTP client (`backon` crate) | PENDING | `improvements.md` §2.4 |
-| 16 | Quick win: Add graceful shutdown to server in `cli/src/main.rs` | PENDING | `improvements.md` §2.2 |
-| 17 | Quick win: Add `--json` flags to `riply status` and `riply rip list` | PENDING | `improvements.md` §3.3 |
+| 13 | Quick win: Add `#[instrument]` to public functions in `app/src/*.rs` | DONE | `improvements.md` §2.1 |
+| 14 | Quick win: Add `TraceLayer` to HTTP router in `web/src/api.rs` | DONE | `improvements.md` §2.1 |
+| 15 | Quick win: Add retry logic to HTTP client (`backon` crate) | DONE | `improvements.md` §2.4 |
+| 16 | Quick win: Add graceful shutdown to server in `cli/src/main.rs` | DONE | `improvements.md` §2.2 |
+| 17 | Quick win: Add `--json` flags to `riply status` and `riply rip list` | DONE | `improvements.md` §3.3 |
 | 18 | Structure: Split monolithic router into per-domain modules | DONE | `improvements.md` §1.2 |
-| 19 | Structure: Add typed `WebError` type implementing `IntoResponse` | PENDING | `improvements.md` §1.3 |
+| 19 | Structure: Add typed `WebError` type implementing `IntoResponse` | DONE | `improvements.md` §1.3 |
 | 20 | Structure: Add versioned database migrations with `sqlx::migrate!()` | PENDING | `improvements.md` §1.4 |
 | 21 | Robustness: Add CHECK constraints and indexes to database | PENDING | `improvements.md` §2.3 |
 | 22 | Robustness: Add `/ready` health/readiness endpoint | PENDING | `improvements.md` §2.5 |

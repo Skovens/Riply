@@ -601,9 +601,7 @@ impl Database {
     }
 
     /// Get all title groups
-    pub async fn get_all_title_groups(
-        &self,
-    ) -> Result<Vec<riply_core::TitleGroup>, anyhow::Error> {
+    pub async fn get_all_title_groups(&self) -> Result<Vec<riply_core::TitleGroup>, anyhow::Error> {
         let rows = sqlx::query(
             r#"
             SELECT id, source_directory, title, year, tmdb_id, media_type, series_name, status
@@ -629,13 +627,16 @@ impl Database {
 
         Ok(riply_core::TitleGroup {
             id: row.try_get("id")?,
-            source_directory: std::path::PathBuf::from(row.try_get::<String, _>("source_directory")?),
+            source_directory: std::path::PathBuf::from(
+                row.try_get::<String, _>("source_directory")?,
+            ),
             title: row.try_get("title")?,
             year: row.try_get::<Option<i32>, _>("year")?.map(|y| y as u16),
             tmdb_id: row.try_get("tmdb_id")?,
             media_type: self.parse_media_type(row.try_get::<String, _>("media_type")?),
             series_name: row.try_get("series_name")?,
-            status: row.try_get::<String, _>("status")
+            status: row
+                .try_get::<String, _>("status")
                 .map(|s| match s.as_str() {
                     "Matched" => TitleGroupStatus::Matched,
                     "Confirmed" => TitleGroupStatus::Confirmed,

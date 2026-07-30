@@ -1,10 +1,12 @@
 use std::future::Future;
 use std::pin::Pin;
 
+use serde::{Deserialize, Serialize};
+
 use crate::MediaType;
 
 /// Metadata found from a search
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetadataMatch {
     pub title: String,
     pub year: Option<u32>,

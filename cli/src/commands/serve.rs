@@ -28,10 +28,8 @@ pub async fn serve(
 
     let searcher: Option<Arc<dyn MetadataSearcher>> =
         if config.tmdb_api_key.is_some() || config.omdb_api_key.is_some() {
-            let client = infra::HttpClient::new(
-                config.tmdb_api_key.clone(),
-                config.omdb_api_key.clone(),
-            );
+            let client =
+                infra::HttpClient::new(config.tmdb_api_key.clone(), config.omdb_api_key.clone());
             Some(Arc::new(client))
         } else {
             None

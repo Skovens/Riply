@@ -23,6 +23,7 @@ use crate::routes::move_ as mover_routes;
 use crate::routes::review;
 use crate::routes::ripper;
 use crate::routes::scan;
+use crate::routes::search;
 use crate::routes::sse_handler;
 
 /// Shared application state
@@ -142,6 +143,8 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/ripper/autorip/toggle", post(ripper::autorip_toggle))
         // Config
         .route("/api/config", get(cfg::get_config).put(cfg::update_config))
+        // Search
+        .route("/api/search", get(search::search_metadata))
         // SSE
         .route("/api/sse", get(sse_handler::sse_endpoint))
         // Static files

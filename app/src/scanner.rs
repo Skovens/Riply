@@ -101,11 +101,7 @@ impl ScannerService {
             // Optionally resolve with metadata searcher
             let (title, year, tmdb_id) = if let Some(searcher) = searcher {
                 match searcher
-                    .search(
-                        &search_query,
-                        None,
-                        &riply_core::MediaType::Movie,
-                    )
+                    .search(&search_query, None, &riply_core::MediaType::Movie)
                     .await
                 {
                     Ok(results) => {
@@ -386,12 +382,25 @@ mod tests {
         assert_eq!(result.records.len(), 4);
         assert!(result.records.iter().any(|r| r.filename == "ep01.mkv"));
         assert!(result.records.iter().any(|r| r.filename == "ep02.mp4"));
-        assert!(result.records.iter().any(|r| r.filename == "behind_scenes.mkv"));
+        assert!(result
+            .records
+            .iter()
+            .any(|r| r.filename == "behind_scenes.mkv"));
 
         // Root-level file has no group; files in subdirectory have group set
-        assert!(result.records.iter().any(|rec| rec.filename == "top.mkv" && rec.title_group_id.is_none()));
-        for rec in result.records.iter().filter(|rec| rec.filename != "top.mkv") {
-            assert_eq!(rec.title_group_id.as_deref(), Some(result.title_groups[0].id.as_str()));
+        assert!(result
+            .records
+            .iter()
+            .any(|rec| rec.filename == "top.mkv" && rec.title_group_id.is_none()));
+        for rec in result
+            .records
+            .iter()
+            .filter(|rec| rec.filename != "top.mkv")
+        {
+            assert_eq!(
+                rec.title_group_id.as_deref(),
+                Some(result.title_groups[0].id.as_str())
+            );
         }
     }
 
@@ -434,7 +443,9 @@ mod tests {
     #[tokio::test]
     async fn test_scan_nonexistent_dir() {
         let scanner = ScannerService::new();
-        let result = scanner.scan_directory(Path::new("/nonexistent/path"), None).await;
+        let result = scanner
+            .scan_directory(Path::new("/nonexistent/path"), None)
+            .await;
         assert!(result.is_err());
     }
 
@@ -463,7 +474,10 @@ mod tests {
         assert_eq!(result.title_groups[0].title, "Inception 2010");
         assert_eq!(result.records.len(), 2);
         for r in &result.records {
-            assert_eq!(r.title_group_id.as_deref(), Some(result.title_groups[0].id.as_str()));
+            assert_eq!(
+                r.title_group_id.as_deref(),
+                Some(result.title_groups[0].id.as_str())
+            );
         }
     }
 }

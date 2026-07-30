@@ -40,9 +40,7 @@ pub async fn start_scan(
             let directory = directory.clone();
             async move {
                 let scanner = app::ScannerService::new();
-                let result = scanner
-                    .scan_directory(&dir, searcher.as_deref())
-                    .await?;
+                let result = scanner.scan_directory(&dir, searcher.as_deref()).await?;
                 let records = result.records;
                 let groups = result.title_groups;
 

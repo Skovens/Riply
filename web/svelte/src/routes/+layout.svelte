@@ -1,18 +1,19 @@
 <script>
   import { page } from '$app/stores';
+  import { onMount } from 'svelte';
+  import { connectSSE } from '$lib/api/sse';
+  import { jobsApi } from '$lib/api';
   import '../app.css';
 
   let { children } = $props();
 
   const navItems = [
-    { href: '/', label: 'Dashboard', view: 'dashboard' },
-    { href: '/files', label: 'Files', view: 'files' },
-    { href: '/review', label: 'Review', view: 'review' },
-    { href: '/ripper', label: 'Ripper', view: 'ripper' },
-    { href: '/jobs', label: 'Jobs', view: 'jobs' },
-    { href: '/settings', label: 'Settings', view: 'settings' }
+    { href: '/', label: 'Dashboard' },
+    { href: '/files', label: 'Files' },
+    { href: '/settings', label: 'Settings' }
   ];
 
+  /** @param {string} href */
   function isActive(href) {
     if (href === '/') return $page.url.pathname === '/';
     return $page.url.pathname.startsWith(href);
@@ -34,9 +35,44 @@
 
   loadConfig();
 
+  /** @type {string | null} */
+  let activeJob = $state(null);
+  let scanLoading = $state(false);
+  let moveLoading = $state(false);
+
+  /** @param {string} data */
+  function parseEvent(data) {
+    const parts = data.split(':');
+    if (parts.length < 2) return null;
+    return { kind: parts[0], action: parts[1], detail: parts.slice(2).join(':') };
+  }
+
+  /** @param {string} data */
+  function handleSSEEvent(data) {
+    const event = parseEvent(data);
+    if (!event) return;
+
+    const { kind, action } = event;
+
+    if (action === 'starting' || action === 'progress') {
+      if (kind === 'scan') activeJob = 'scan';
+      else if (kind === 'analyze') activeJob = 'analyze';
+      else if (kind === 'move') activeJob = 'move';
+    }
+
+    if (action === 'complete' || action === 'cancelled') {
+      if (kind === 'scan' || kind === 'analyze') activeJob = null;
+      if (kind === 'move') activeJob = null;
+    }
+  }
+
+  onMount(() => connectSSE(handleSSEEvent));
+
   async function handleScan() {
+    if (activeJob) return;
     const dir = window.prompt('Directory to scan:', defaultDir);
     if (!dir) return;
+    scanLoading = true;
     try {
       const res = await fetch('/api/scan', {
         method: 'POST',
@@ -46,45 +82,38 @@
       if (!res.ok) throw new Error(`Scan failed: ${res.status}`);
     } catch (e) {
       console.error('Scan error:', e);
-    }
-  }
-
-  async function handleAnalyze() {
-    try {
-      const res = await fetch('/api/analyze', { method: 'POST' });
-      if (!res.ok) throw new Error(`Analyze failed: ${res.status}`);
-    } catch (e) {
-      console.error('Analyze error:', e);
-    }
-  }
-
-  let previewOpen = $state(false);
-  let previewItems = $state([]);
-  let previewLoading = $state(false);
-
-  async function handlePreview() {
-    previewLoading = true;
-    previewOpen = true;
-    try {
-      const res = await fetch('/api/move/preview');
-      if (res.ok) {
-        const data = await res.json();
-        previewItems = data.data || [];
-      }
-    } catch (e) {
-      console.error('Preview error:', e);
     } finally {
-      previewLoading = false;
+      scanLoading = false;
     }
   }
 
   async function handleMove() {
+    if (activeJob) return;
+    moveLoading = true;
     try {
       const res = await fetch('/api/move', { method: 'POST' });
       if (!res.ok) throw new Error(`Move failed: ${res.status}`);
     } catch (e) {
       console.error('Move error:', e);
+    } finally {
+      moveLoading = false;
     }
+  }
+
+  async function handleCancel() {
+    if (!activeJob) return;
+    try {
+      const jobs = await jobsApi.list();
+      const running = jobs.find(j => j.status === 'Running');
+      if (running) {
+        await jobsApi.cancel(running.id);
+      }
+    } catch (e) {
+      console.error('Cancel error:', e);
+    }
+    activeJob = null;
+    scanLoading = false;
+    moveLoading = false;
   }
 </script>
 
@@ -106,18 +135,25 @@
           </a>
         {/each}
         <span class="header__nav-divider"></span>
-        <button class="btn btn--secondary btn--sm" onclick={handleScan}>
-          Scan
+        <button class="btn btn--secondary btn--sm" onclick={handleScan} disabled={scanLoading || moveLoading}>
+          {#if scanLoading}
+            Scan...
+          {:else}
+            Scan
+          {/if}
         </button>
-        <button class="btn btn--secondary btn--sm" onclick={handleAnalyze}>
-          Analyze
+        <button class="btn btn--primary btn--sm" onclick={handleMove} disabled={scanLoading || moveLoading}>
+          {#if moveLoading}
+            Move...
+          {:else}
+            Move
+          {/if}
         </button>
-        <button class="btn btn--secondary btn--sm" onclick={handlePreview}>
-          Preview
-        </button>
-        <button class="btn btn--primary btn--sm" onclick={handleMove}>
-          Move
-        </button>
+        {#if activeJob}
+          <button class="btn btn--danger btn--sm" onclick={handleCancel}>
+            Cancel
+          </button>
+        {/if}
       </nav>
     </div>
   </header>
@@ -130,52 +166,3 @@
     Riply &mdash; Media Management
   </footer>
 </div>
-
-{#if previewOpen}
-  <div class="modal-overlay" onclick={() => previewOpen = false}>
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <div class="modal__header">
-        <h3 class="modal__title">Move Preview</h3>
-        <button class="modal__close" onclick={() => previewOpen = false}>&times;</button>
-      </div>
-      <div class="modal__body">
-        {#if previewLoading}
-          <div class="empty"><div class="spinner"></div></div>
-        {:else if previewItems.length === 0}
-          <div class="empty">
-            <div class="empty__icon">&#128193;</div>
-            <div class="empty__title">No files to move</div>
-            <div class="empty__description">No confirmed files found</div>
-          </div>
-        {:else}
-          <div class="table" style="overflow-x: auto;">
-            <table>
-              <thead>
-                <tr>
-                  <th>File</th>
-                  <th>Source</th>
-                  <th>Destination</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each previewItems as item}
-                  <tr>
-                    <td class="truncate" style="max-width: 150px;">{item.filename}</td>
-                    <td class="truncate" style="max-width: 200px;" title={item.source_path}>{item.source_path}</td>
-                    <td class="truncate" style="max-width: 250px;" title={item.dest_path}>{item.dest_path}</td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
-          <div class="text-sm text-muted" style="margin-top: var(--space-2);">
-            {previewItems.length} file(s) will be moved
-          </div>
-        {/if}
-      </div>
-      <div class="modal__footer">
-        <button class="btn btn--secondary" onclick={() => previewOpen = false}>Close</button>
-      </div>
-    </div>
-  </div>
-{/if}

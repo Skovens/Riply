@@ -86,10 +86,7 @@ mod tests {
 
     #[test]
     fn test_clean_name_with_year() {
-        assert_eq!(
-            NameCleaner::clean_name("INCEPTION_2010"),
-            "Inception 2010"
-        );
+        assert_eq!(NameCleaner::clean_name("INCEPTION_2010"), "Inception 2010");
         assert_eq!(
             NameCleaner::clean_name("The Dark Knight 2008"),
             "The Dark Knight 2008"

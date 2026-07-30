@@ -6,4 +6,5 @@ pub mod move_;
 pub mod review;
 pub mod ripper;
 pub mod scan;
+pub mod search;
 pub mod sse_handler;

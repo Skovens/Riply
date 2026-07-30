@@ -238,8 +238,7 @@ pub async fn start_rip(
 
         if let Some(drive) = drives.iter().find(|d| d.index == index) {
             if let Some(ref disc_name) = drive.disc_name {
-                let (title, year) =
-                    resolve_rip_title(disc_name, state.searcher.as_deref()).await;
+                let (title, year) = resolve_rip_title(disc_name, state.searcher.as_deref()).await;
                 if !title.is_empty() {
                     dest = match year {
                         Some(y) => format!("{}/{} ({})", dest, title, y),
@@ -476,8 +475,7 @@ async fn execute_rip(state: Arc<AppState>, index: usize, eject_after: bool) -> R
 
         if let Some(drive) = drives.iter().find(|d| d.index == index) {
             if let Some(ref disc_name) = drive.disc_name {
-                let (title, year) =
-                    resolve_rip_title(disc_name, state.searcher.as_deref()).await;
+                let (title, year) = resolve_rip_title(disc_name, state.searcher.as_deref()).await;
                 if !title.is_empty() {
                     d = match year {
                         Some(y) => format!("{}/{} ({})", d, title, y),

@@ -7,3 +7,4 @@ export * from './ripper.js';
 export * from './config.js';
 export * from './move.js';
 export * from './sse.js';
+export * from './search.js';

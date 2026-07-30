@@ -139,6 +139,19 @@ export interface InstallationStatus {
   missing: MissingComponent[];
 }
 
+// ── Search Result ────────────────────────────────────────────
+
+export interface SearchResult {
+  title: string;
+  year?: number;
+  tmdb_id?: number;
+  is_tv: boolean;
+  series_name?: string;
+  season_number?: number;
+  episode_number?: number;
+  episode_title?: string;
+}
+
 // ── API Response Wrappers ────────────────────────────────────
 
 export interface ApiResponse<T> {

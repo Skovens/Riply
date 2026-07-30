@@ -150,7 +150,9 @@ impl HttpClient {
         }
 
         let url = format!("{}/search/movie", self.tmdb_base_url);
-        let resp: TmdbSearchResponse = self.get_json(&url, &params, self.tmdb_limiter.as_ref()).await?;
+        let resp: TmdbSearchResponse = self
+            .get_json(&url, &params, self.tmdb_limiter.as_ref())
+            .await?;
 
         let matches = resp
             .results
@@ -184,7 +186,9 @@ impl HttpClient {
         params.insert("query".to_string(), query.to_string());
 
         let url = format!("{}/search/tv", self.tmdb_base_url);
-        let resp: TmdbSearchResponse = self.get_json(&url, &params, self.tmdb_limiter.as_ref()).await?;
+        let resp: TmdbSearchResponse = self
+            .get_json(&url, &params, self.tmdb_limiter.as_ref())
+            .await?;
 
         let matches = resp
             .results

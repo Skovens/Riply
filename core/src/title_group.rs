@@ -72,11 +72,7 @@ mod tests {
     #[test]
     fn test_title_group_new() {
         let dir = PathBuf::from("/staging/Inception (2010)");
-        let group = TitleGroup::new(
-            "abc123".to_string(),
-            dir.clone(),
-            "Inception".to_string(),
-        );
+        let group = TitleGroup::new("abc123".to_string(), dir.clone(), "Inception".to_string());
         assert_eq!(group.id, "abc123");
         assert_eq!(group.source_directory, dir);
         assert_eq!(group.title, "Inception");
