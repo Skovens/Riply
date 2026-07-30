@@ -27,6 +27,7 @@ async fn setup() -> TestContext {
         config_path: None,
         sse: SseManager::new(16),
         backend: None,
+        searcher: None,
         scheduler: JobScheduler::new(),
         active_rips: RwLock::new(HashMap::new()),
         autorip_handle: RwLock::new(None),

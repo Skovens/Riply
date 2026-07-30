@@ -1,5 +1,5 @@
 use clap::Subcommand;
-use riply_core::{RipBackend, RipError};
+use riply_core::{MetadataSearcher, NameCleaner, RipBackend, RipError};
 use tracing::info;
 
 /// Subcommands for rip operations
@@ -27,7 +27,21 @@ pub enum RipCommand {
 }
 
 /// Execute rip commands
-pub async fn rip_command(command: RipCommand, config: &infra::Config) -> Result<(), anyhow::Error> {
+pub async fn rip_command(
+    command: RipCommand,
+    config: &infra::Config,
+) -> Result<(), anyhow::Error> {
+    let searcher: Option<Box<dyn MetadataSearcher>> =
+        if config.tmdb_api_key.is_some() || config.omdb_api_key.is_some() {
+            let client = infra::HttpClient::new(
+                config.tmdb_api_key.clone(),
+                config.omdb_api_key.clone(),
+            );
+            Some(Box::new(client))
+        } else {
+            None
+        };
+
     match command {
         RipCommand::List { json } => list_drives(json).await,
         RipCommand::Start { index, destination } => {
@@ -43,7 +57,7 @@ pub async fn rip_command(command: RipCommand, config: &infra::Config) -> Result<
                         .unwrap_or_else(|| ".".to_string())
                 }
             };
-            start_rip(index, &dest).await
+            start_rip(index, &dest, searcher.as_deref()).await
         }
         RipCommand::Eject { index } => eject_disc(index).await,
     }
@@ -90,19 +104,55 @@ async fn list_drives(json: bool) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
+/// Resolve a disc name to a title (+ year) by optionally searching metadata.
+async fn resolve_rip_title(
+    disc_name: &str,
+    searcher: Option<&dyn MetadataSearcher>,
+) -> (String, Option<u16>) {
+    let (title, year) = infra::makemkv::parser::parse_disc_name(disc_name);
+    if title.is_empty() {
+        return (title, year);
+    }
+
+    let Some(searcher) = searcher else {
+        return (title, year);
+    };
+
+    let search_title = NameCleaner::clean_name_for_search(&title);
+    let search_year = year.map(u32::from);
+
+    if let Ok(results) = searcher
+        .search(&search_title, search_year, &riply_core::MediaType::Movie)
+        .await
+    {
+        if let Some(m) = results.first() {
+            return (m.title.clone(), m.year.map(|y| y as u16));
+        }
+    }
+
+    (title, year)
+}
+
 /// Start ripping on a drive
-async fn start_rip(index: usize, destination: &str) -> Result<(), anyhow::Error> {
+async fn start_rip(
+    index: usize,
+    destination: &str,
+    searcher: Option<&dyn MetadataSearcher>,
+) -> Result<(), anyhow::Error> {
     info!(drive = index, "Starting rip");
     let backend = get_backend()?;
 
-    // Look up disc name and create subdirectory if applicable
+    // Look up disc name, search metadata, and create subdirectory if applicable
     let mut dest = destination.to_string();
     let drives = backend.detect_drives()?;
     if let Some(drive) = drives.iter().find(|d| d.index == index) {
         if let Some(ref disc_name) = drive.disc_name {
-            let (title, _year) = infra::makemkv::parser::parse_disc_name(disc_name);
+            let (title, year) = resolve_rip_title(disc_name, searcher).await;
             if !title.is_empty() {
-                dest = format!("{}/{}", dest, title);
+                dest = match year {
+                    Some(y) => format!("{}/{} ({})", dest, title, y),
+                    None => format!("{}/{}", dest, title),
+                };
             }
         }
     }

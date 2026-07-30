@@ -5,7 +5,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use riply_core::RipBackend;
+use riply_core::{MetadataSearcher, RipBackend};
 use tokio::sync::RwLock;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
@@ -32,6 +32,7 @@ pub struct AppState {
     pub config_path: Option<String>,
     pub sse: SseManager,
     pub backend: Option<Arc<dyn RipBackend>>,
+    pub searcher: Option<Arc<dyn MetadataSearcher>>,
     pub scheduler: JobScheduler,
     /// Active rip tasks keyed by drive index. Used for cancellation.
     pub active_rips: RwLock<HashMap<usize, tokio::task::JoinHandle<()>>>,

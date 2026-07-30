@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use app::JobScheduler;
 use infra::{Config, Database};
+use riply_core::MetadataSearcher;
 use tokio::sync::RwLock;
 use tracing::info;
 use web::{AppState, SseManager};
@@ -25,12 +26,24 @@ pub async fn serve(
         .ok()
         .map(|b| Arc::new(b) as Arc<dyn riply_core::RipBackend>);
 
+    let searcher: Option<Arc<dyn MetadataSearcher>> =
+        if config.tmdb_api_key.is_some() || config.omdb_api_key.is_some() {
+            let client = infra::HttpClient::new(
+                config.tmdb_api_key.clone(),
+                config.omdb_api_key.clone(),
+            );
+            Some(Arc::new(client))
+        } else {
+            None
+        };
+
     let state = Arc::new(AppState {
         db: Arc::new(db),
         config: Arc::new(RwLock::new(config.clone())),
         config_path,
         sse: SseManager::new(256),
         backend,
+        searcher,
         scheduler: JobScheduler::new(),
         active_rips: RwLock::new(HashMap::new()),
         autorip_handle: RwLock::new(None),

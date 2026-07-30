@@ -5,7 +5,7 @@ use axum::{
     extract::{Path, State},
     Json,
 };
-use riply_core::{DriveInfo, DriveState, RipEvent, RipHandle};
+use riply_core::{DriveInfo, DriveState, MetadataSearcher, RipEvent, RipHandle};
 use serde::Deserialize;
 use tracing::{info, warn};
 
@@ -170,6 +170,37 @@ async fn process_rip_events(
     Ok(())
 }
 
+/// Resolve a disc name to a title (+ year) for the output directory.
+/// If a metadata searcher is available, search TMDb/OMDb and use the
+/// matched title; otherwise fall back to the raw parsed disc name.
+async fn resolve_rip_title(
+    disc_name: &str,
+    searcher: Option<&dyn MetadataSearcher>,
+) -> (String, Option<u16>) {
+    let (title, year) = infra::makemkv::parser::parse_disc_name(disc_name);
+    if title.is_empty() {
+        return (title, year);
+    }
+
+    let Some(searcher) = searcher else {
+        return (title, year);
+    };
+
+    let search_title = riply_core::NameCleaner::clean_name_for_search(&title);
+    let search_year = year.map(u32::from);
+
+    if let Ok(results) = searcher
+        .search(&search_title, search_year, &riply_core::MediaType::Movie)
+        .await
+    {
+        if let Some(m) = results.first() {
+            return (m.title.clone(), m.year.map(|y| y as u16));
+        }
+    }
+
+    (title, year)
+}
+
 pub async fn start_rip(
     State(state): State<Arc<AppState>>,
     Path(index): Path<usize>,
@@ -197,7 +228,7 @@ pub async fn start_rip(
         }
     };
 
-    // If no explicit destination, look up disc name and create subdirectory
+    // If no explicit destination, look up disc name, search metadata, and create subdirectory
     if explicit_dest.is_none() {
         let backend_clone = Arc::clone(backend);
         let drives = tokio::task::spawn_blocking(move || backend_clone.detect_drives())
@@ -207,9 +238,13 @@ pub async fn start_rip(
 
         if let Some(drive) = drives.iter().find(|d| d.index == index) {
             if let Some(ref disc_name) = drive.disc_name {
-                let (title, _year) = infra::makemkv::parser::parse_disc_name(disc_name);
+                let (title, year) =
+                    resolve_rip_title(disc_name, state.searcher.as_deref()).await;
                 if !title.is_empty() {
-                    dest = format!("{}/{}", dest, title);
+                    dest = match year {
+                        Some(y) => format!("{}/{} ({})", dest, title, y),
+                        None => format!("{}/{}", dest, title),
+                    };
                 }
             }
         }
@@ -432,7 +467,7 @@ async fn execute_rip(state: Arc<AppState>, index: usize, eject_after: bool) -> R
             .clone()
             .unwrap_or_else(|| ".".to_string());
 
-        // Auto-subdirectory from disc name
+        // Auto-subdirectory from disc name with metadata search
         let backend_clone = Arc::clone(backend);
         let drives = tokio::task::spawn_blocking(move || backend_clone.detect_drives())
             .await
@@ -441,9 +476,13 @@ async fn execute_rip(state: Arc<AppState>, index: usize, eject_after: bool) -> R
 
         if let Some(drive) = drives.iter().find(|d| d.index == index) {
             if let Some(ref disc_name) = drive.disc_name {
-                let (title, _year) = infra::makemkv::parser::parse_disc_name(disc_name);
+                let (title, year) =
+                    resolve_rip_title(disc_name, state.searcher.as_deref()).await;
                 if !title.is_empty() {
-                    d = format!("{}/{}", d, title);
+                    d = match year {
+                        Some(y) => format!("{}/{} ({})", d, title, y),
+                        None => format!("{}/{}", d, title),
+                    };
                 }
             }
         }
