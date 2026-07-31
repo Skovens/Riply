@@ -219,8 +219,10 @@
       pipeline.review = Math.max(0, pipeline.review - 1);
       pipeline.confirmed = pipeline.confirmed + 1;
       pipeline.total = pipeline.total;
+      showToast('File accepted', 'success');
     } catch (e) {
       console.error('Failed to accept:', e);
+      showToast('Failed to accept', 'error');
     }
   }
 
@@ -229,8 +231,10 @@
       await reviewApi.reject(id);
       reviewQueue = reviewQueue.filter(r => r.id !== id);
       stats.review = Math.max(0, stats.review - 1);
+      showToast('File rejected', 'success');
     } catch (e) {
       console.error('Failed to reject:', e);
+      showToast('Failed to reject', 'error');
     }
   }
 
@@ -426,63 +430,7 @@
 
   <!-- Content Area -->
   <div class="content-area">
-    <!-- File List -->
-    <div class="file-list-panel">
-      <div class="panel-header">
-        <h3 class="panel-title">Files</h3>
-        <a href="/files" class="btn btn--secondary btn--sm">View All</a>
-      </div>
-      {#if filesLoading}
-        <div class="empty" style="padding-top: 40px;">
-          <div class="spinner" style="margin: 0 auto var(--space-3);"></div>
-          <div class="empty__title">Loading files...</div>
-        </div>
-      {:else if files.length === 0}
-        <div class="empty">
-          <div class="empty__icon">&#128193;</div>
-          <div class="empty__title">No files yet</div>
-          <div class="empty__description">Run a scan to get started</div>
-        </div>
-      {:else}
-        <div class="table-container">
-          <table class="table">
-            <thead>
-              <tr>
-                <th>Filename</th>
-                <th>Type</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each files as file}
-                <tr class="file-row" onclick={() => handleSelectFile(file)}>
-                  <td class="truncate" style="max-width: 250px;">{file.filename}</td>
-                  <td><span class="badge badge--default">{file.media_type}</span></td>
-                  <td>
-                    <span class="badge badge--{statusColor(file.status)}">{file.status}</span>
-                  </td>
-                  {#if file.status === 'NeedsReview' && file.confidence >= 0.8}
-                    <td>
-                      <button
-                        class="btn btn--primary btn--sm"
-                        onclick={(e) => {
-                          e.stopPropagation();
-                          handleAccept(file.id);
-                        }}
-                      >
-                        Accept
-                      </button>
-                    </td>
-                  {/if}
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      {/if}
-    </div>
-
-    <!-- Sidebar -->
+    <!-- Sidebar (left) -->
     <aside class="sidebar" class:sidebar--collapsed={sidebarCollapsed}>
       <!-- Sidebar Toggle -->
       <button class="sidebar-toggle" onclick={() => sidebarCollapsed = !sidebarCollapsed}>
@@ -639,6 +587,62 @@
         {/if}
       </div>
     </aside>
+
+    <!-- File List (right) -->
+    <div class="file-list-panel">
+      <div class="panel-header">
+        <h3 class="panel-title">Files</h3>
+        <a href="/files" class="btn btn--secondary btn--sm">View All</a>
+      </div>
+      {#if filesLoading}
+        <div class="empty" style="padding-top: 40px;">
+          <div class="spinner" style="margin: 0 auto var(--space-3);"></div>
+          <div class="empty__title">Loading files...</div>
+        </div>
+      {:else if files.length === 0}
+        <div class="empty">
+          <div class="empty__icon">&#128193;</div>
+          <div class="empty__title">No files yet</div>
+          <div class="empty__description">Run a scan to get started</div>
+        </div>
+      {:else}
+        <div class="table-container">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Filename</th>
+                <th>Type</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each files as file}
+                <tr class="file-row" onclick={() => handleSelectFile(file)}>
+                  <td class="truncate" style="max-width: 250px;">{file.filename}</td>
+                  <td><span class="badge badge--default">{file.media_type}</span></td>
+                  <td>
+                    <span class="badge badge--{statusColor(file.status)}">{file.status}</span>
+                  </td>
+                  {#if file.status === 'NeedsReview' && file.confidence >= 0.8}
+                    <td>
+                      <button
+                        class="btn btn--primary btn--sm"
+                        onclick={(e) => {
+                          e.stopPropagation();
+                          handleAccept(file.id);
+                        }}
+                      >
+                        Accept
+                      </button>
+                    </td>
+                  {/if}
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
+    </div>
   </div>
 </div>
 
