@@ -134,3 +134,19 @@ pub async fn delete_file(
 
     Ok(Json(ApiResponse::ok(id)))
 }
+
+pub async fn reset_db(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ApiResponse<usize>>, WebError> {
+    let deleted = state
+        .db
+        .clear_all()
+        .await
+        .map_err(|e| WebError::Internal(e.to_string()))?;
+
+    state
+        .sse
+        .send_status(&format!("db:reset:deleted={}", deleted));
+
+    Ok(Json(ApiResponse::ok(deleted)))
+}

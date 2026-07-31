@@ -379,6 +379,22 @@ impl Database {
         Ok(())
     }
 
+    /// Delete all file records and title groups (DB reset)
+    pub async fn clear_all(&self) -> Result<usize, anyhow::Error> {
+        let mut tx = self.pool.begin().await?;
+
+        let result = sqlx::query("DELETE FROM files").execute(&mut *tx).await?;
+        let files_deleted = result.rows_affected() as usize;
+
+        sqlx::query("DELETE FROM title_groups")
+            .execute(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
+
+        Ok(files_deleted)
+    }
+
     /// Count files with optional status and search filters
     pub async fn count_files(
         &self,

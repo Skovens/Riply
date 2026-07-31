@@ -95,6 +95,15 @@ Detail drawer with confidence-aware prefilling. TMDb/OMDb search in drawer. Mobi
 | 53 | Mobile CSS: responsive styles for sidebar layout, file list cards, drawer, touch targets | DONE | 48, 49, 51 |
 | 54 | Test + lint: `cargo fmt && cargo clippy --all && cargo build --all && cargo test --all` | DONE | All above |
 
+### Batch 8: Post-Redesign Fixes + Reset Controls ✅
+
+| # | Task | Status |
+|---|------|--------|
+| 55 | Fix: dashboard sidebar on LEFT, file list on right | DONE |
+| 56 | Fix: Reject button fails (FK violation — NULL columns decoded as `""`) | DONE |
+| 57 | Reset DB button on Files page (`DELETE /api/files`) | DONE |
+| 58 | Reset to default settings button on Settings page (`POST /api/config/reset`) | DONE |
+
 ### Batch 5: Architecture & Robustness Improvements 🔄
 
 Source: `improvements.md`

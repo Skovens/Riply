@@ -12,4 +12,10 @@ export const configApi = {
       body: JSON.stringify(data),
     });
   },
+
+  reset() {
+    return request<Config>('/api/config/reset', {
+      method: 'POST',
+    });
+  },
 };

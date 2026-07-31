@@ -109,7 +109,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/health", get(|| async { "OK" }))
         // Files
-        .route("/api/files", get(files::list_files))
+        .route("/api/files", get(files::list_files).delete(files::reset_db))
         .route(
             "/api/files/:id",
             get(files::get_file)
@@ -143,6 +143,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/ripper/autorip/toggle", post(ripper::autorip_toggle))
         // Config
         .route("/api/config", get(cfg::get_config).put(cfg::update_config))
+        .route("/api/config/reset", post(cfg::reset_config))
         // Search
         .route("/api/search", get(search::search_metadata))
         // SSE

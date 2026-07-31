@@ -228,5 +228,10 @@ the module. Write `warn!(error = %e, "Ping failed")` instead.
 4. **Database auto-creation**: Uses `SqlitePoolOptions` with
    `create_if_missing(true)` + WAL journal mode.
 
-5. **`web` is library-only**: The binary is in `cli` (`riply`). Running
+5. **Database is ephemeral**: The SQLite DB is treated as disposable — it holds
+   no data that can't be rebuilt on a new scan. Don't write migrations or spend
+   time preserving/upgrading existing DB state; just recreate it when schema
+   changes.
+
+6. **`web` is library-only**: The binary is in `cli` (`riply`). Running
    `cargo run -p web` does nothing — use `cargo run -p cli -- serve` instead.

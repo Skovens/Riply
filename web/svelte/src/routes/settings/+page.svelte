@@ -4,6 +4,7 @@
 
   let currentConfig = $state(null);
   let saving = $state(false);
+  let resetting = $state(false);
   let saveStatus = $state({ message: '', type: '' });
 
   let scan_directory = $state('');
@@ -24,22 +25,26 @@
   let show_omdb = $state(false);
   let show_healthchecks = $state(false);
 
+  function applyConfig(config) {
+    scan_directory = config.scan_directory || '';
+    movies_directory = config.movies_directory || '';
+    tv_directory = config.tv_directory || '';
+    tmdb_api_key = config.tmdb_api_key || '';
+    omdb_api_key = config.omdb_api_key || '';
+    host = config.host || '0.0.0.0';
+    port = config.port || 3000;
+    ripping_command = config.ripping?.command || '';
+    rip_output_directory = config.rip_output_directory || '';
+    database_path = config.database_path || 'riply.db';
+    verbose = config.verbose || false;
+    healthchecks_uuid = config.healthchecks?.uuid || '';
+    healthchecks_ping_interval_minutes = config.healthchecks?.ping_interval_minutes || 5;
+  }
+
   onMount(async () => {
     try {
       currentConfig = await configApi.get();
-      scan_directory = currentConfig.scan_directory || '';
-      movies_directory = currentConfig.movies_directory || '';
-      tv_directory = currentConfig.tv_directory || '';
-      tmdb_api_key = currentConfig.tmdb_api_key || '';
-      omdb_api_key = currentConfig.omdb_api_key || '';
-      host = currentConfig.host || '0.0.0.0';
-      port = currentConfig.port || 3000;
-      ripping_command = currentConfig.ripping?.command || '';
-      rip_output_directory = currentConfig.rip_output_directory || '';
-      database_path = currentConfig.database_path || 'riply.db';
-      verbose = currentConfig.verbose || false;
-      healthchecks_uuid = currentConfig.healthchecks?.uuid || '';
-      healthchecks_ping_interval_minutes = currentConfig.healthchecks?.ping_interval_minutes || 5;
+      applyConfig(currentConfig);
     } catch (e) {
       console.error('Failed to load config:', e);
     }
@@ -75,6 +80,28 @@
       saveStatus = { message: 'Failed to save: ' + e.message, type: 'error' };
     } finally {
       saving = false;
+    }
+  }
+
+  async function handleResetDefaults() {
+    if (!window.confirm('Reset all settings to defaults? This will overwrite your current configuration.')) {
+      return;
+    }
+    if (!window.confirm('This cannot be undone. Are you sure?')) {
+      return;
+    }
+    resetting = true;
+    saveStatus = { message: '', type: '' };
+    try {
+      const updated = await configApi.reset();
+      currentConfig = updated;
+      applyConfig(updated);
+      saveStatus = { message: 'Settings reset to defaults', type: 'success' };
+    } catch (e) {
+      console.error('Failed to reset config:', e);
+      saveStatus = { message: 'Failed to reset: ' + e.message, type: 'error' };
+    } finally {
+      resetting = false;
     }
   }
 </script>
@@ -226,6 +253,9 @@
 
         <div class="settings__actions">
           <button type="submit" class="btn btn--primary" disabled={saving}>Save Settings</button>
+          <button type="button" class="btn btn--danger" onclick={handleResetDefaults} disabled={resetting}>
+            {#if resetting}Resetting...{:else}Reset to Defaults{/if}
+          </button>
           <span class="settings__status settings__status--{saveStatus.type}">{saveStatus.message}</span>
         </div>
       </form>

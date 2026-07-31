@@ -12,6 +12,27 @@ pub async fn get_config(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
     Json(ApiResponse::ok(config.clone()))
 }
 
+pub async fn reset_config(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ApiResponse<Config>>, WebError> {
+    // Stop any running healthchecks heartbeat, since config is being replaced
+    if let Some(handle) = state.healthchecks_handle.write().await.take() {
+        handle.abort();
+    }
+
+    *state.config.write().await = Config::default();
+
+    let updated = state.config.read().await.clone();
+
+    if let Some(ref path) = state.config_path.clone() {
+        if let Err(e) = updated.save(path) {
+            tracing::warn!(path = %path, error = %e, "Failed to save config");
+        }
+    }
+
+    Ok(Json(ApiResponse::ok(updated)))
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ConfigUpdateBody {
     pub database_path: Option<String>,

@@ -29,4 +29,10 @@ export const filesApi = {
       method: 'DELETE',
     });
   },
+
+  reset() {
+    return request<number>('/api/files', {
+      method: 'DELETE',
+    });
+  },
 };

@@ -304,6 +304,53 @@ async fn test_reject_file_not_found() {
     assert_eq!(status, 404);
 }
 
+#[tokio::test]
+async fn test_reset_db() {
+    let ctx = setup().await;
+    seed_file(&ctx, "f1", "a.mkv", riply_core::PipelineStatus::NeedsReview).await;
+    seed_file(&ctx, "f2", "b.mp4", riply_core::PipelineStatus::Confirmed).await;
+
+    let (status, _) = get(&ctx, "/api/files").await;
+    assert_eq!(status, 200);
+
+    let (status, body) = delete(&ctx, "/api/files").await;
+    assert_eq!(status, 200);
+    assert_eq!(body["success"], true);
+    assert_eq!(body["data"], 2);
+
+    let (status, body) = get(&ctx, "/api/files").await;
+    assert_eq!(status, 200);
+    assert_eq!(body["data"]["total"], 0);
+}
+
+#[tokio::test]
+async fn test_reset_config() {
+    let ctx = setup().await;
+
+    let (status, _) = put(
+        &ctx,
+        "/api/config",
+        serde_json::json!({
+            "host": "127.0.0.1",
+            "port": 8080,
+            "movies_directory": "custom_movies"
+        }),
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    let (status, body) = get(&ctx, "/api/config").await;
+    assert_eq!(status, 200);
+    assert_eq!(body["data"]["host"], "127.0.0.1");
+
+    let (status, body) = post(&ctx, "/api/config/reset", serde_json::json!({})).await;
+    assert_eq!(status, 200);
+    assert_eq!(body["success"], true);
+    assert_eq!(body["data"]["host"], "0.0.0.0");
+    assert_eq!(body["data"]["port"], 3000);
+    assert_eq!(body["data"]["movies_directory"], "movies");
+}
+
 // ===== Move Status =====
 
 #[tokio::test]

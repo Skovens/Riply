@@ -35,6 +35,9 @@
   let scanDir = $state('');
   let scanning = $state(false);
 
+  // ── Reset state ────────────────────────────────────────────
+  let resetting = $state(false);
+
   // ── Analyze state ──────────────────────────────────────────
   let analyzing = $state(false);
 
@@ -208,6 +211,27 @@
     }
   }
 
+  // ── Reset ──────────────────────────────────────────────────
+  async function handleResetDb() {
+    if (!window.confirm('Reset the database? This will permanently delete all file records and title groups.')) {
+      return;
+    }
+    if (!window.confirm('This cannot be undone. Are you sure?')) {
+      return;
+    }
+    resetting = true;
+    try {
+      const deleted = await filesApi.reset();
+      showToast(`Database reset (${deleted} files removed)`, 'success');
+      loadFiles();
+    } catch (e) {
+      console.error('Reset failed:', e);
+      showToast('Reset failed', 'error');
+    } finally {
+      resetting = false;
+    }
+  }
+
   // ── Analyze ────────────────────────────────────────────────
   async function handleAnalyze() {
     analyzing = true;
@@ -297,6 +321,9 @@
           {#if retrying}Retrying...{:else}Retry All Failed{/if}
         </button>
       {/if}
+      <button class="btn btn--danger btn--sm" onclick={handleResetDb} disabled={resetting || loading}>
+        {#if resetting}Resetting...{:else}Reset DB{/if}
+      </button>
     </div>
   </div>
 
