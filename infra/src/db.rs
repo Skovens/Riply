@@ -312,10 +312,9 @@ impl Database {
             source: row.try_get("source")?,
             subtitle_text: row.try_get("subtitle_text")?,
             duplicate_path: row
-                .try_get("duplicate_path")
-                .ok()
-                .map(|p: String| PathBuf::from(p)),
-            title_group_id: row.try_get("title_group_id").ok(),
+                .try_get::<Option<String>, _>("duplicate_path")?
+                .map(PathBuf::from),
+            title_group_id: row.try_get::<Option<String>, _>("title_group_id")?,
             reviewed: row.try_get("reviewed")?,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
@@ -704,5 +703,27 @@ mod tests {
         let files = db.get_files_by_status("Scanned").await.unwrap();
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].filename, "movie.mkv");
+    }
+
+    #[tokio::test]
+    async fn test_null_optional_fields_round_trip() {
+        let db = Database::new(":memory:").await.unwrap();
+        db.migrate().await.unwrap();
+
+        let file = riply_core::FileRecord::new(
+            "test123".to_string(),
+            std::path::PathBuf::from("/test/movie.mkv"),
+            "movie.mkv".to_string(),
+            "hash123".to_string(),
+        );
+
+        db.save_file(&file).await.unwrap();
+
+        let files = db.get_all_files().await.unwrap();
+        assert_eq!(files.len(), 1);
+        assert!(files[0].title_group_id.is_none());
+        assert!(files[0].duplicate_path.is_none());
+
+        db.update_file(&files[0]).await.unwrap();
     }
 }
