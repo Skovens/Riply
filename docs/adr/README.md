@@ -11,6 +11,14 @@ This directory contains Architecture Decision Records (ADRs) for Riply. An ADR c
 | **Deprecated** | The decision is no longer recommended for new work |
 | **Superseded** | A newer ADR has replaced this decision |
 
+## Review Process
+
+- **Authors** propose ADRs with status **Proposed**
+- **Maintainers** review and discuss Proposed ADRs (at least one approval required)
+- Once accepted, status changes to **Accepted**
+- If a better alternative emerges, create a new ADR that supersedes the old one
+- For minor clarifications (typos, added consequences), update in place without a new number
+
 ## ADR Template
 
 When creating a new ADR, copy this template:
@@ -36,18 +44,18 @@ What becomes easier or more difficult to do?
 
 | ADR | Title | Status | Date |
 |-----|-------|--------|------|
-| [001](001-workspace-architecture.md) | Workspace Crate Architecture | Accepted | 2024-01-XX |
-| [002](002-database-technology.md) | Database Technology Choice | Accepted | 2024-01-XX |
-| [003](003-frontend-approach.md) | Frontend Approach | Accepted | 2024-01-XX |
-| [004](004-error-handling.md) | Error Handling Strategy | Accepted | 2024-01-XX |
-| [005](005-async-runtime.md) | Async Runtime Selection | Accepted | 2024-01-XX |
-| [006](006-http-framework.md) | HTTP Framework Selection | Accepted | 2024-01-XX |
-| [007](007-cli-framework.md) | CLI Framework Selection | Accepted | 2024-01-XX |
-| [008](008-logging-observability.md) | Logging and Observability | Accepted | 2024-01-XX |
-| [009](009-disc-ripping-abstraction.md) | Disc Ripping Backend Abstraction | Accepted | 2024-01-XX |
-| [010](010-job-scheduler.md) | Background Job System | Accepted | 2024-01-XX |
-| [011](011-real-time-updates.md) | Real-Time Web Updates | Accepted | 2024-01-XX |
-| [012](012-testing-strategy.md) | Testing Strategy | Accepted | 2024-01-XX |
+| [001](001-workspace-architecture.md) | Workspace Crate Architecture | Accepted | 2026-07-26 |
+| [002](002-database-technology.md) | Database Technology Choice | Accepted | 2026-08-02 |
+| [003](003-frontend-approach.md) | Frontend Approach | Accepted | 2026-08-02 |
+| [004](004-error-handling.md) | Error Handling Strategy | Accepted | 2026-08-02 |
+| [005](005-async-runtime.md) | Async Runtime Selection | Accepted | 2026-08-02 |
+| [006](006-http-framework.md) | HTTP Framework Selection | Accepted | 2026-08-02 |
+| [007](007-cli-framework.md) | CLI Framework Selection | Accepted | 2026-08-02 |
+| [008](008-logging-observability.md) | Logging and Observability | Accepted | 2026-08-02 |
+| [009](009-disc-ripping-abstraction.md) | Disc Ripping Backend Abstraction | Accepted | 2026-08-02 |
+| [010](010-job-scheduler.md) | Background Job System | Accepted | 2026-08-02 |
+| [011](011-real-time-updates.md) | Real-Time Web Updates | Accepted | 2026-08-02 |
+| [012](012-testing-strategy.md) | Testing Strategy | Accepted | 2026-08-02 |
 
 ## Creating a New ADR
 
@@ -57,3 +65,21 @@ What becomes easier or more difficult to do?
 4. Discuss and update to **Accepted** when agreed upon
 5. Update this index
 6. Reference the ADR in relevant code comments and documentation
+
+## Planned ADRs
+
+These decisions are identified as needing formal ADRs before or during implementation:
+
+| # | Topic | Source | Priority |
+|---|-------|--------|----------|
+| 013 | Router Splitting (per-domain modules) | improvements.md §1.2 | Medium |
+| 014 | Typed Web Error Type | improvements.md §1.3 | Medium |
+| 015 | SQLx Migration System | improvements.md §1.4 | Medium |
+| 016 | API Versioning | improvements.md §4.6 | Low |
+| 017 | Graceful Shutdown | improvements.md §2.2 | Low |
+
+## Documentation Note
+
+`docs/frontend-architecture.md` contains detailed frontend system design documentation.
+It is not an ADR — it describes *how* the frontend works rather than *why* a decision was made.
+Keep it in `docs/` alongside ADRs for discoverability, but do not number it as an ADR.

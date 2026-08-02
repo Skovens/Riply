@@ -1,3 +1,6 @@
+// ADR-001: Workspace Crate Architecture — core is the domain layer with zero infra deps
+// ADR-004: Error Handling Strategy — thiserror for domain errors in core
+
 pub mod file_record;
 pub mod media_type;
 pub mod metadata;
