@@ -54,7 +54,7 @@ Before completing any Rust changes, run:
 
 ```bash
 cargo fmt
-cargo clippy --all
+cargo clippy --all-targets --all-features -- -D warnings
 cargo build --all
 cargo test --all
 ```
