@@ -56,6 +56,7 @@ What becomes easier or more difficult to do?
 | [010](010-job-scheduler.md) | Background Job System | Accepted | 2026-08-02 |
 | [011](011-real-time-updates.md) | Real-Time Web Updates | Accepted | 2026-08-02 |
 | [012](012-testing-strategy.md) | Testing Strategy | Accepted | 2026-08-02 |
+| [013](013-progress-tracking.md) | Progress Tracking System | Accepted | 2026-08-02 |
 
 ## Creating a New ADR
 
@@ -68,15 +69,15 @@ What becomes easier or more difficult to do?
 
 ## Planned ADRs
 
-These decisions are identified as needing formal ADRs before or during implementation:
+These code-level decisions are identified as needing formal ADRs before or during implementation:
 
 | # | Topic | Source | Priority |
 |---|-------|--------|----------|
-| 013 | Router Splitting (per-domain modules) | improvements.md §1.2 | Medium |
-| 014 | Typed Web Error Type | improvements.md §1.3 | Medium |
-| 015 | SQLx Migration System | improvements.md §1.4 | Medium |
-| 016 | API Versioning | improvements.md §4.6 | Low |
-| 017 | Graceful Shutdown | improvements.md §2.2 | Low |
+| 014 | Router Splitting (per-domain modules) | improvements.md §1.2 | Medium |
+| 015 | Typed Web Error Type | improvements.md §1.3 | Medium |
+| 016 | SQLx Migration System | improvements.md §1.4 | Medium |
+| 017 | API Versioning | improvements.md §4.6 | Low |
+| 018 | Graceful Shutdown | improvements.md §2.2 | Low |
 
 ## Documentation Note
 
