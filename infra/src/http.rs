@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use reqwest::Client;
-use riply_core::{MediaType, MetadataMatch, MetadataSearcher};
+use riply_core::{MediaType, MetadataError, MetadataMatch, MetadataSearcher};
 use tracing::info;
 
 /// HTTP client adapter - handles API requests with retry and rate limiting
@@ -315,11 +315,15 @@ impl MetadataSearcher for HttpClient {
         year: Option<u32>,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<Output = Result<Vec<MetadataMatch>, anyhow::Error>> + Send + '_,
+            dyn std::future::Future<Output = Result<Vec<MetadataMatch>, MetadataError>> + Send + '_,
         >,
     > {
         let query = query.to_string();
-        Box::pin(async move { self.search_tmdb_movies(&query, year).await })
+        Box::pin(async move {
+            self.search_tmdb_movies(&query, year)
+                .await
+                .map_err(|e| MetadataError::ApiError(e.to_string()))
+        })
     }
 
     fn search_tv(
@@ -327,11 +331,15 @@ impl MetadataSearcher for HttpClient {
         query: &str,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<Output = Result<Vec<MetadataMatch>, anyhow::Error>> + Send + '_,
+            dyn std::future::Future<Output = Result<Vec<MetadataMatch>, MetadataError>> + Send + '_,
         >,
     > {
         let query = query.to_string();
-        Box::pin(async move { self.search_tmdb_tv(&query).await })
+        Box::pin(async move {
+            self.search_tmdb_tv(&query)
+                .await
+                .map_err(|e| MetadataError::ApiError(e.to_string()))
+        })
     }
 
     fn search(
@@ -341,7 +349,7 @@ impl MetadataSearcher for HttpClient {
         media_type: &MediaType,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<Output = Result<Vec<MetadataMatch>, anyhow::Error>> + Send + '_,
+            dyn std::future::Future<Output = Result<Vec<MetadataMatch>, MetadataError>> + Send + '_,
         >,
     > {
         let query = query.to_string();
