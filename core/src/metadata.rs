@@ -22,6 +22,17 @@ pub struct MetadataMatch {
     pub episode_title: Option<String>,
 }
 
+/// Errors that can occur during metadata search operations.
+#[derive(Debug, thiserror::Error)]
+pub enum MetadataError {
+    #[error("API error: {0}")]
+    ApiError(String),
+    #[error("Invalid response: {0}")]
+    InvalidResponse(String),
+    #[error("Rate limited")]
+    RateLimited,
+}
+
 /// Port for searching external metadata APIs (TMDb, OMDb, etc.)
 ///
 /// Implemented by infra adapters, consumed by app services.
@@ -30,19 +41,19 @@ pub trait MetadataSearcher: Send + Sync {
         &self,
         query: &str,
         year: Option<u32>,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<MetadataMatch>, anyhow::Error>> + Send + '_>>;
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<MetadataMatch>, MetadataError>> + Send + '_>>;
 
     fn search_tv(
         &self,
         query: &str,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<MetadataMatch>, anyhow::Error>> + Send + '_>>;
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<MetadataMatch>, MetadataError>> + Send + '_>>;
 
     fn search(
         &self,
         query: &str,
         year: Option<u32>,
         media_type: &MediaType,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<MetadataMatch>, anyhow::Error>> + Send + '_>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<MetadataMatch>, MetadataError>> + Send + '_>> {
         let media_type = media_type.clone();
         let query = query.to_string();
         Box::pin(async move {

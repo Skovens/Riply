@@ -1,3 +1,6 @@
+// ADR-006: HTTP Framework — Axum router and state management
+// ADR-011: Real-Time Updates — SSE endpoint and manager
+
 // Web layer - HTTP API and SSE endpoints
 pub mod api;
 pub mod error;

@@ -1,3 +1,8 @@
+// ADR-001: Workspace Crate Architecture — cli is the interface layer
+// ADR-005: Async Runtime — #[tokio::main]
+// ADR-007: CLI Framework — Clap derive macros
+// ADR-008: Logging — tracing + tracing-subscriber
+
 use clap::{Parser, Subcommand, ValueEnum};
 use commands::{
     analyze_files, move_files, review_files, rip_command as do_rip, run_setup, scan_directory,

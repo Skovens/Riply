@@ -1,3 +1,6 @@
+// ADR-001: Workspace Crate Architecture — app is the orchestration layer
+// ADR-010: Job Scheduler — JobScheduler with CancellationToken and ProgressHandle
+
 // Application layer - orchestration of core logic with infrastructure
 pub mod analyzer;
 pub mod ffprobe;

@@ -1,6 +1,5 @@
 # Rust
 /target/
-Cargo.lock
 
 # Local cargo config (mold linker, sccache)
 .cargo/

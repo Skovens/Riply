@@ -14,7 +14,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 chrono = { version = "0.4", features = ["serde"] }
-anyhow = { workspace = true }
 unidecode = "0.3"
 
 [dev-dependencies]

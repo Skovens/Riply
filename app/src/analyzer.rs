@@ -40,7 +40,7 @@ impl AnalyzerService {
     pub async fn analyze_file(
         &self,
         file: &riply_core::FileRecord,
-    ) -> Result<riply_core::FileRecord, anyhow::Error> {
+    ) -> Result<riply_core::FileRecord, riply_core::MetadataError> {
         info!("Analyzing file");
 
         let mut record = file.clone();
@@ -383,7 +383,10 @@ mod tests {
             ) -> std::pin::Pin<
                 Box<
                     dyn std::future::Future<
-                            Output = Result<Vec<riply_core::MetadataMatch>, anyhow::Error>,
+                            Output = Result<
+                                Vec<riply_core::MetadataMatch>,
+                                riply_core::MetadataError,
+                            >,
                         > + Send
                         + '_,
                 >,
@@ -408,7 +411,10 @@ mod tests {
             ) -> std::pin::Pin<
                 Box<
                     dyn std::future::Future<
-                            Output = Result<Vec<riply_core::MetadataMatch>, anyhow::Error>,
+                            Output = Result<
+                                Vec<riply_core::MetadataMatch>,
+                                riply_core::MetadataError,
+                            >,
                         > + Send
                         + '_,
                 >,
@@ -448,7 +454,10 @@ mod tests {
             ) -> std::pin::Pin<
                 Box<
                     dyn std::future::Future<
-                            Output = Result<Vec<riply_core::MetadataMatch>, anyhow::Error>,
+                            Output = Result<
+                                Vec<riply_core::MetadataMatch>,
+                                riply_core::MetadataError,
+                            >,
                         > + Send
                         + '_,
                 >,
@@ -462,7 +471,10 @@ mod tests {
             ) -> std::pin::Pin<
                 Box<
                     dyn std::future::Future<
-                            Output = Result<Vec<riply_core::MetadataMatch>, anyhow::Error>,
+                            Output = Result<
+                                Vec<riply_core::MetadataMatch>,
+                                riply_core::MetadataError,
+                            >,
                         > + Send
                         + '_,
                 >,
@@ -517,7 +529,7 @@ mod tests {
             ) -> std::pin::Pin<
                 Box<
                     dyn std::future::Future<
-                            Output = Result<Vec<riply_core::MetadataMatch>, anyhow::Error>,
+                            Output = Result<Vec<riply_core::MetadataMatch>, riply_core::MetadataError>,
                         > + Send
                         + '_,
                 >,
@@ -542,7 +554,7 @@ mod tests {
             ) -> std::pin::Pin<
                 Box<
                     dyn std::future::Future<
-                            Output = Result<Vec<riply_core::MetadataMatch>, anyhow::Error>,
+                            Output = Result<Vec<riply_core::MetadataMatch>, riply_core::MetadataError>,
                         > + Send
                         + '_,
                 >,

@@ -1,3 +1,7 @@
+// ADR-001: Workspace Crate Architecture — infra is the I/O adapter layer
+// ADR-002: Database Technology — SQLite + SQLx
+// ADR-009: Disc Ripping Abstraction — trait-based backend (MakemkvBackend, DryRunBackend)
+
 // Infrastructure layer - I/O heavy adapters (database, HTTP, MakeMKV)
 pub mod config;
 pub mod db;

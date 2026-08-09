@@ -54,7 +54,7 @@ Before completing any Rust changes, run:
 
 ```bash
 cargo fmt
-cargo clippy --all
+cargo clippy --all-targets --all-features -- -D warnings
 cargo build --all
 cargo test --all
 ```
@@ -113,16 +113,27 @@ Scope options: `core`, `app`, `infra`, `web`, `cli`, `scanner`, `metadata`,
 | Detailed plan files | `.opencode/plans/<name>.md` |
 | Architecture decisions | `docs/adr/` |
 | Project overview | `README.md` |
+| Improvement roadmap | `improvements.md` |
+
+### How to Track Progress
+
+Always start by reading `.opencode/plans/todo.md`. The "Next Up" callout
+tells you what to work on. Update task status as you go:
+`PENDING` → `IN_PROGRESS` → `DONE`.
+
+See `docs/adr/013-progress-tracking.md` for the full tracking system.
 
 ### Before Compaction or Session End
 
-If you've made significant progress or discovered important information,
-update the relevant plan file (`.opencode/plans/`) with:
+If you've made significant progress or discovered important information:
 
-- What was changed and why
-- Important decisions made
-- Remaining work
-- Any blockers or gotchas
+1. Update the task status in `.opencode/plans/todo.md`
+2. Update the relevant plan file (`.opencode/plans/`) with:
+   - What was changed and why
+   - Important decisions made
+   - Remaining work
+   - Any blockers or gotchas
+3. If a new architectural decision was made, create an ADR in `docs/adr/`
 
 This ensures the next session can pick up without guessing.
 

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use backon::{ExponentialBuilder, Retryable};
 use reqwest::Client;
-use riply_core::{MediaType, MetadataMatch, MetadataSearcher};
+use riply_core::{MediaType, MetadataError, MetadataMatch, MetadataSearcher};
 use tracing::info;
 
 use crate::rate_limiter::RateLimiter;
@@ -344,11 +344,15 @@ impl MetadataSearcher for HttpClient {
         year: Option<u32>,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<Output = Result<Vec<MetadataMatch>, anyhow::Error>> + Send + '_,
+            dyn std::future::Future<Output = Result<Vec<MetadataMatch>, MetadataError>> + Send + '_,
         >,
     > {
         let query = query.to_string();
-        Box::pin(async move { self.search_tmdb_movies(&query, year).await })
+        Box::pin(async move {
+            self.search_tmdb_movies(&query, year)
+                .await
+                .map_err(|e| MetadataError::ApiError(e.to_string()))
+        })
     }
 
     fn search_tv(
@@ -356,11 +360,15 @@ impl MetadataSearcher for HttpClient {
         query: &str,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<Output = Result<Vec<MetadataMatch>, anyhow::Error>> + Send + '_,
+            dyn std::future::Future<Output = Result<Vec<MetadataMatch>, MetadataError>> + Send + '_,
         >,
     > {
         let query = query.to_string();
-        Box::pin(async move { self.search_tmdb_tv(&query).await })
+        Box::pin(async move {
+            self.search_tmdb_tv(&query)
+                .await
+                .map_err(|e| MetadataError::ApiError(e.to_string()))
+        })
     }
 
     fn search(
@@ -370,7 +378,7 @@ impl MetadataSearcher for HttpClient {
         media_type: &MediaType,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<Output = Result<Vec<MetadataMatch>, anyhow::Error>> + Send + '_,
+            dyn std::future::Future<Output = Result<Vec<MetadataMatch>, MetadataError>> + Send + '_,
         >,
     > {
         let query = query.to_string();
@@ -378,16 +386,28 @@ impl MetadataSearcher for HttpClient {
         Box::pin(async move {
             let mut results = match media_type {
                 MediaType::Tv => {
-                    let mut tv = self.search_tmdb_tv(&query).await?;
+                    let mut tv = self
+                        .search_tmdb_tv(&query)
+                        .await
+                        .map_err(|e| MetadataError::ApiError(e.to_string()))?;
                     if tv.is_empty() {
-                        tv = self.search_omdb_tv(&query, year).await?;
+                        tv = self
+                            .search_omdb_tv(&query, year)
+                            .await
+                            .map_err(|e| MetadataError::ApiError(e.to_string()))?;
                     }
                     tv
                 }
                 MediaType::Movie => {
-                    let mut movies = self.search_tmdb_movies(&query, year).await?;
+                    let mut movies = self
+                        .search_tmdb_movies(&query, year)
+                        .await
+                        .map_err(|e| MetadataError::ApiError(e.to_string()))?;
                     if movies.is_empty() {
-                        movies = self.search_omdb(&query, year).await?;
+                        movies = self
+                            .search_omdb(&query, year)
+                            .await
+                            .map_err(|e| MetadataError::ApiError(e.to_string()))?;
                     }
                     movies
                 }
