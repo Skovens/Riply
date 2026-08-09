@@ -61,6 +61,13 @@ cargo test --all
 
 Expected: **0 clippy warnings**, **131+ tests passing**.
 
+The SvelteKit frontend is embedded into the binary at build time via
+`web/build.rs` + `rust-embed` (folder `web/svelte/build`). `cargo build` fails
+with a clear error if that folder is missing. **Frontend changes require
+`npm run build` in `web/svelte` before the Rust build** — the embedded files
+are baked in at compile time. The release binary (`target/release/riply`) is
+fully self-contained and runs from any directory.
+
 Quick iteration: `cargo check` (fast compile check).
 
 To run a single test:

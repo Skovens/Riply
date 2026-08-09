@@ -46,9 +46,7 @@ pub struct ConfigUpdateBody {
     pub tmdb_api_key: Option<String>,
     pub omdb_api_key: Option<String>,
     pub ripping_command: Option<String>,
-    pub autorip_enabled: Option<bool>,
     pub autorip_eject_after: Option<bool>,
-    pub autorip_excluded_drives: Option<Vec<usize>>,
     pub healthchecks_uuid: Option<String>,
     pub healthchecks_ping_interval_minutes: Option<u64>,
 }
@@ -92,14 +90,8 @@ pub async fn update_config(
     if let Some(v) = body.ripping_command {
         config.ripping.command = Some(v);
     }
-    if let Some(v) = body.autorip_enabled {
-        config.ripping.autorip_enabled = v;
-    }
     if let Some(v) = body.autorip_eject_after {
         config.ripping.autorip_eject_after = v;
-    }
-    if let Some(v) = body.autorip_excluded_drives {
-        config.ripping.autorip_excluded_drives = Some(v);
     }
     if let Some(ref v) = body.healthchecks_uuid {
         config.healthchecks.uuid = v.clone();

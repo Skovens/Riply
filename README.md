@@ -79,15 +79,30 @@ media-atlas/
 
 ### Build
 
+> **Single binary:** the compiled SvelteKit frontend is embedded into `riply`
+> at build time (see `web/build.rs`). The release binary is fully
+> self-contained — copy `target/release/riply` anywhere and run it. A frontend
+> change requires `npm run build` (in `web/svelte`) before rebuilding.
+
+### Install to `~/.local/bin`
+
+```bash
+make            # builds frontend + release, symlinks ~/.local/bin/riply -> target/release/riply
+make install    # same, explicit
+```
+
+Run `make install` once; every subsequent `make` refreshes the binary in
+place. (After `cargo clean` the symlink dangles until the next `make`.)
+
 ```bash
 # Build the entire workspace
 cargo build --release
 
-# Build only the CLI
-cargo build --release -p riply_cli
+# Build only the CLI (binary is named `riply`)
+cargo build --release -p cli
 
-# Build only the web server
-cargo build --release -p riply_web
+# Check the web crate (library-only; `cargo run -p web` does nothing)
+cargo check -p web
 ```
 
 ### Run the CLI
@@ -116,11 +131,11 @@ cargo run -- rip
 
 ```bash
 # Start the Axum API + serve SvelteKit frontend
-cargo run --bin riply-web
+cargo run -p cli -- serve
 
-# Or build and run separately
-cargo build --release -p riply_web
-./target/release/riply-web
+# Or build and run the binary
+cargo build --release -p cli
+./target/release/riply
 ```
 
 The web UI will be available at `http://localhost:3000` (or the port configured in your settings).

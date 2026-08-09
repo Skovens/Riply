@@ -1,5 +1,5 @@
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tempfile::NamedTempFile;
 use tokio::sync::RwLock;
@@ -30,6 +30,7 @@ async fn setup() -> TestContext {
         searcher: None,
         scheduler: JobScheduler::new(),
         active_rips: RwLock::new(HashMap::new()),
+        autorip_drives: RwLock::new(HashSet::new()),
         autorip_handle: RwLock::new(None),
         healthchecks_handle: RwLock::new(None),
     });
@@ -428,6 +429,58 @@ async fn test_cancel_rip_no_active() {
     assert!(body["data"].as_str().unwrap().contains("No active rip"));
 }
 
+// ===== Auto-rip (per-drive, session-only) =====
+
+#[tokio::test]
+async fn test_autorip_status_default_off() {
+    let ctx = setup().await;
+    let (status, body) = get(&ctx, "/api/ripper/autorip").await;
+    assert_eq!(status, 200);
+    assert_eq!(body["data"], serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn test_autorip_toggle_session_only() {
+    let ctx = setup().await;
+
+    let (status, body) = post(&ctx, "/api/ripper/autorip/0/toggle", serde_json::json!({})).await;
+    assert_eq!(status, 200);
+    assert_eq!(body["data"], serde_json::json!([0]));
+
+    let (status, body) = get(&ctx, "/api/ripper/autorip").await;
+    assert_eq!(status, 200);
+    assert_eq!(body["data"], serde_json::json!([0]));
+
+    let (status, body) = post(&ctx, "/api/ripper/autorip/0/toggle", serde_json::json!({})).await;
+    assert_eq!(status, 200);
+    assert_eq!(body["data"], serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn test_autorip_toggle_multiple_drives() {
+    let ctx = setup().await;
+    post(&ctx, "/api/ripper/autorip/0/toggle", serde_json::json!({})).await;
+    post(&ctx, "/api/ripper/autorip/2/toggle", serde_json::json!({})).await;
+
+    let (status, body) = get(&ctx, "/api/ripper/autorip").await;
+    assert_eq!(status, 200);
+    assert_eq!(body["data"], serde_json::json!([0, 2]));
+}
+
+#[tokio::test]
+async fn test_config_ignores_autorip_enabled() {
+    let ctx = setup().await;
+
+    let (status, resp) = put(
+        &ctx,
+        "/api/config",
+        serde_json::json!({ "autorip_enabled": true }),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert!(resp["data"]["ripping"].get("autorip_enabled").is_none());
+}
+
 // ===== Pagination =====
 
 #[tokio::test]
@@ -462,6 +515,86 @@ async fn test_api_response_success_format() {
     assert!(body.is_object());
     assert!(body.get("success").is_some());
     assert!(body.get("data").is_some());
+}
+
+// ===== Frontend (embedded SPA) =====
+
+#[tokio::test]
+async fn test_frontend_served() {
+    let ctx = setup().await;
+    let url = format!("http://{}/", ctx.addr);
+    let resp = reqwest::get(&url).await.unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+    let content_type = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    assert!(
+        content_type.starts_with("text/html"),
+        "expected text/html, got {}",
+        content_type
+    );
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("<!doctype html>") || body.contains("<html"));
+}
+
+#[tokio::test]
+async fn test_frontend_spa_fallback() {
+    let ctx = setup().await;
+    let url = format!("http://{}/some/client/route", ctx.addr);
+    let resp = reqwest::get(&url).await.unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+    let content_type = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    assert!(
+        content_type.starts_with("text/html"),
+        "expected SPA fallback to serve index.html, got {}",
+        content_type
+    );
+}
+
+#[tokio::test]
+async fn test_frontend_immutable_asset_cached() {
+    let ctx = setup().await;
+    let base = format!("http://{}", ctx.addr);
+
+    let index = reqwest::get(&format!("{}/", base))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let asset = index
+        .split("import(\"/_app/")
+        .nth(1)
+        .and_then(|s| s.split('"').next())
+        .expect("index.html should reference a script asset");
+    let asset = format!("/_app/{}", asset);
+    assert!(
+        asset.starts_with("/_app/"),
+        "unexpected asset path {}",
+        asset
+    );
+
+    let resp = reqwest::get(&format!("{}{}", base, asset)).await.unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+    let cache = resp
+        .headers()
+        .get(reqwest::header::CACHE_CONTROL)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    assert!(
+        cache.contains("immutable"),
+        "expected immutable cache for _app assets, got {:?}",
+        cache
+    );
 }
 
 // ===== Debug routing =====

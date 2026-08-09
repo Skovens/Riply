@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use app::JobScheduler;
@@ -44,19 +44,19 @@ pub async fn serve(
         searcher,
         scheduler: JobScheduler::new(),
         active_rips: RwLock::new(HashMap::new()),
+        autorip_drives: RwLock::new(HashSet::new()),
         autorip_handle: RwLock::new(None),
         healthchecks_handle: RwLock::new(None),
     });
 
-    // Start autorip if enabled
-    if config.ripping.autorip_enabled {
-        let state_clone = Arc::clone(&state);
-        let handle = tokio::spawn(async move {
-            web::autorip_poll_loop(state_clone).await;
-        });
-        *state.autorip_handle.write().await = Some(handle);
-        info!("Auto-rip polling started");
-    }
+    // Start the auto-rip monitor. It watches drives that have auto-rip enabled
+    // per drive and does no work otherwise.
+    let state_clone = Arc::clone(&state);
+    let handle = tokio::spawn(async move {
+        web::autorip_poll_loop(state_clone).await;
+    });
+    *state.autorip_handle.write().await = Some(handle);
+    info!("Auto-rip monitor started");
 
     // Start healthchecks.io heartbeat if configured
     if let Some(hc) = infra::healthchecks::HealthchecksClient::from_config(&config.healthchecks) {
@@ -78,7 +78,7 @@ pub async fn serve(
         });
     }
 
-    let router = web::create_router(state);
+    let router = web::create_router(Arc::clone(&state));
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     info!(addr = %addr, "Listening");
@@ -86,6 +86,11 @@ pub async fn serve(
     axum::serve(listener, router)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
+
+    // Stop the auto-rip monitor so the process exits promptly
+    if let Some(handle) = state.autorip_handle.write().await.take() {
+        handle.abort();
+    }
 
     info!("Server shut down gracefully");
     Ok(())

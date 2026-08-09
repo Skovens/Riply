@@ -50,6 +50,29 @@
 | 42 | Add progress bar with percentage display during rip | DONE | Animated striped bar + `--done` state + accent-colored text |
 | 43 | Optimize dashboard loading during active rip (SSE polling blocking?) | DONE | — |
 
+### Batch 6a: Auto-rip lifecycle rework ✅
+
+**Date:** 2026-08-04 — Changed autorip from a persisted, on-by-default config setting to a
+**per-drive, session-only** toggle (never auto-rips at startup).
+
+**Changes:**
+- `infra/src/config.rs` — removed `RippingConfig.autorip_enabled` and `.autorip_excluded_drives`;
+  kept `autorip_eject_after`. Old `config.toml` keys are ignored (serde) — no migration.
+- `web/src/api.rs` — added `AppState.autorip_drives: RwLock<HashSet<usize>>` (in-memory, empty at
+  startup). Routes: `GET /api/ripper/autorip` → `Vec<usize>`; `POST /api/ripper/autorip/:index/toggle`.
+- `web/src/routes/ripper.rs` — `autorip_poll_loop` now runs for the server lifetime but does zero
+  `detect_drives` calls while a rip is active or when no drive has autorip enabled. Only drives in
+  the enabled set are tracked (`prev_states` pruned each tick), so enabling a drive with a disc
+  present starts the rip, and re-rips are prevented via `prev_states` (Empty/None → Ready trigger).
+  Disabling autorip mid-rip does not cancel the running rip.
+- `cli/src/commands/serve.rs` — always spawns the monitor; aborts it on graceful shutdown so
+  Ctrl+C exits promptly.
+- Frontend — `DrivePanel.svelte`: single Rip/Cancel button per drive (swaps while ripping) + a
+  per-drive auto-rip toggle. `types.ts`/`ripper.ts` updated.
+
+**Tests:** `web/tests/api.rs` — default-off, toggle on/off session-only, multi-drive, config
+ignores `autorip_enabled`.
+
 ### Legacy (folded into above)
 
 | Task | Status | Folded Into |
@@ -103,6 +126,24 @@ Detail drawer with confidence-aware prefilling. TMDb/OMDb search in drawer. Mobi
 | 56 | Fix: Reject button fails (FK violation — NULL columns decoded as `""`) | DONE |
 | 57 | Reset DB button on Files page (`DELETE /api/files`) | DONE |
 | 58 | Reset to default settings button on Settings page (`POST /api/config/reset`) | DONE |
+
+### Batch 9: Single Binary Deployment ✅
+
+**Goal:** Make the deployable artifact one self-contained binary — the SvelteKit
+frontend is embedded at compile time so the server no longer reads
+`web/svelte/build` from disk at runtime.
+
+**Decisions:** Always-embed (single code path, simpler mental model), accepted
+tradeoff that every frontend change requires `npm run build` + Rust rebuild.
+
+| # | Task | Status |
+|---|------|--------|
+| 59 | Embed frontend in binary (`rust-embed` + custom axum fallback handler) | DONE |
+| 60 | `web/build.rs`: clear error if `web/svelte/build/index.html` missing; `rerun-if-changed` per file | DONE |
+| 61 | Frontend serving tests (SPA root, SPA fallback route, immutable cache for `_app/*`) | DONE |
+| 62 | Docs: README quick start/deploy + AGENTS.md note | DONE |
+| 63 | Verify: full test suite + release build + single-file smoke test | DONE |
+| 64 | `make` / `make install`: build release + symlink to `~/.local/bin/riply` | DONE |
 
 ### Batch 5: Architecture & Robustness Improvements 🔄
 

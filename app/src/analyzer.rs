@@ -529,7 +529,10 @@ mod tests {
             ) -> std::pin::Pin<
                 Box<
                     dyn std::future::Future<
-                            Output = Result<Vec<riply_core::MetadataMatch>, riply_core::MetadataError>,
+                            Output = Result<
+                                Vec<riply_core::MetadataMatch>,
+                                riply_core::MetadataError,
+                            >,
                         > + Send
                         + '_,
                 >,
@@ -554,7 +557,10 @@ mod tests {
             ) -> std::pin::Pin<
                 Box<
                     dyn std::future::Future<
-                            Output = Result<Vec<riply_core::MetadataMatch>, riply_core::MetadataError>,
+                            Output = Result<
+                                Vec<riply_core::MetadataMatch>,
+                                riply_core::MetadataError,
+                            >,
                         > + Send
                         + '_,
                 >,

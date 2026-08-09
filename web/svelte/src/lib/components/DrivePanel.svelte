@@ -8,7 +8,7 @@
   let error = $state(null);
   let drives = $state([]);
   let loading = $state(false);
-  let autoripEnabled = $state(false);
+  let autoripDrives = $state([]);
   let rippingDriveIndex = $state(null);
 
   async function fetchDrives() {
@@ -20,13 +20,22 @@
         ripperApi.getAutoripStatus(),
       ]);
       drives = drivesData;
-      autoripEnabled = autorip;
+      autoripDrives = autorip;
     } catch (e) {
       const msg = e && typeof e === 'object' && 'message' in e ? e.message : 'Failed to load drives';
       error = /** @type {string} */ (msg);
       console.error('Failed to load drives:', e);
     } finally {
       loading = false;
+    }
+  }
+
+  /** @param {number} index */
+  async function toggleAutorip(index) {
+    try {
+      autoripDrives = await ripperApi.toggleAutorip(index);
+    } catch (e) {
+      console.error('Failed to toggle auto-rip:', e);
     }
   }
 
@@ -139,24 +148,32 @@
                 </div>
                 <span class="badge badge--{driveBadgeState(drive.state)}">{drive.state}</span>
               </div>
-              <div class="drive__actions" style="margin-top: var(--space-3);">
-                {#if canRip(drive)}
-                  <button
-                    class="btn btn--primary btn--sm"
-                    disabled={driving(drive)}
-                    onclick={() => startRip(drive.index)}
-                  >
-                    {#if driving(drive)}Ripping...{:else}Rip{/if}
-                  </button>
-                {/if}
-                {#if isDriving(drive)}
-                  <button
-                    class="btn btn--danger btn--sm"
-                    onclick={() => cancelRip(drive.index)}
-                  >
-                    Cancel
-                  </button>
-                {/if}
+              <div class="drive__actions">
+                <div class="drive__action-row">
+                  {#if isDriving(drive)}
+                    <button
+                      class="btn btn--danger btn--sm"
+                      onclick={() => cancelRip(drive.index)}
+                    >
+                      Cancel
+                    </button>
+                  {:else if canRip(drive)}
+                    <button
+                      class="btn btn--primary btn--sm"
+                      onclick={() => startRip(drive.index)}
+                    >
+                      Rip
+                    </button>
+                  {/if}
+                </div>
+                <label class="toggle autorip-toggle" title="Auto-rip discs inserted in this drive">
+                  <input
+                    type="checkbox"
+                    checked={autoripDrives.includes(drive.index)}
+                    onclick={() => toggleAutorip(drive.index)}
+                  />
+                  <span class="toggle__track"></span>
+                </label>
               </div>
             </div>
           {/each}
@@ -240,6 +257,23 @@
 
   .drive-card:last-child {
     margin-bottom: 0;
+  }
+
+  .drive__actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: var(--space-3);
+    gap: var(--space-3);
+  }
+
+  .drive__action-row {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  .autorip-toggle {
+    margin: 0;
   }
 
   @media (max-width: 768px) {

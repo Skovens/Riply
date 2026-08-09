@@ -24,11 +24,11 @@ export const ripperApi = {
   },
 
   getAutoripStatus() {
-    return request<boolean>('/api/ripper/autorip');
+    return request<number[]>('/api/ripper/autorip');
   },
 
-  toggleAutorip() {
-    return request<boolean>('/api/ripper/autorip/toggle', {
+  toggleAutorip(index: number) {
+    return request<number[]>(`/api/ripper/autorip/${index}/toggle`, {
       method: 'POST',
     });
   },

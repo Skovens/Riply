@@ -328,46 +328,53 @@ pub async fn eject_disc(
     ))))
 }
 
-pub async fn autorip_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<bool>> {
-    let handle = state.autorip_handle.read().await;
-    Json(ApiResponse::ok(handle.is_some()))
+pub async fn autorip_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Vec<usize>>> {
+    let drives = state.autorip_drives.read().await;
+    let mut enabled: Vec<usize> = drives.iter().copied().collect();
+    enabled.sort_unstable();
+    Json(ApiResponse::ok(enabled))
 }
 
 pub async fn autorip_toggle(
     State(state): State<Arc<AppState>>,
-) -> Result<Json<ApiResponse<bool>>, WebError> {
-    let mut handle = state.autorip_handle.write().await;
-    if handle.is_some() {
-        handle.take();
-        info!("Auto-rip disabled");
-        Ok(Json(ApiResponse::ok(false)))
+    Path(index): Path<usize>,
+) -> Result<Json<ApiResponse<Vec<usize>>>, WebError> {
+    let mut drives = state.autorip_drives.write().await;
+    if drives.contains(&index) {
+        drives.remove(&index);
+        info!(drive = index, "Auto-rip disabled for drive");
     } else {
-        let state_clone = Arc::clone(&state);
-        let new_handle = tokio::spawn(async move {
-            autorip_poll_loop(state_clone).await;
-        });
-        *handle = Some(new_handle);
-        info!("Auto-rip enabled");
-        Ok(Json(ApiResponse::ok(true)))
+        drives.insert(index);
+        info!(drive = index, "Auto-rip enabled for drive");
     }
+    let mut enabled: Vec<usize> = drives.iter().copied().collect();
+    enabled.sort_unstable();
+    Ok(Json(ApiResponse::ok(enabled)))
 }
 
-/// Background polling loop that detects disc insertion and auto-starts ripping.
+/// Background polling loop that detects disc insertion on drives with auto-rip
+/// enabled and starts ripping them. Runs for the lifetime of the server but
+/// does no work (no `detect_drives` calls) while a rip is active or when no
+/// drive has auto-rip enabled.
 pub async fn autorip_poll_loop(state: Arc<AppState>) {
     use riply_core::DriveState;
     use std::collections::HashMap;
     use std::time::Duration;
 
     let mut prev_states: HashMap<usize, DriveState> = HashMap::new();
-    let mut interval = tokio::time::interval(Duration::from_secs(5));
 
     loop {
-        interval.tick().await;
+        tokio::time::sleep(Duration::from_secs(5)).await;
 
-        // Check if we should stop
-        if state.autorip_handle.read().await.is_none() {
-            info!("Auto-rip polling stopped");
-            break;
+        // Pause detection while a rip is active: the current rip is never
+        // interrupted, and other drives are picked up once it finishes.
+        if !state.active_rips.read().await.is_empty() {
+            continue;
+        }
+
+        // Nothing to watch if no drive has auto-rip enabled.
+        if state.autorip_drives.read().await.is_empty() {
+            continue;
         }
 
         let backend = match &state.backend {
@@ -381,34 +388,23 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
             _ => continue,
         };
 
-        // Check for config on each iteration (in case it changed)
-        let (autorip_enabled, autorip_eject, excluded) = {
-            let config = state.config.read().await;
-            (
-                config.ripping.autorip_enabled,
-                config.ripping.autorip_eject_after,
-                config.ripping.autorip_excluded_drives.clone(),
-            )
-        };
-
-        if !autorip_enabled {
-            break;
-        }
-
+        let autorip_eject = state.config.read().await.ripping.autorip_eject_after;
         let active = state.active_rips.read().await;
+        let enabled = state.autorip_drives.read().await;
+
+        // Drop tracking for drives that no longer have auto-rip enabled, so
+        // re-enabling treats the current disc as a fresh insertion.
+        prev_states.retain(|idx, _| enabled.contains(idx));
 
         for drive in &drives {
-            let prev = prev_states.get(&drive.index).cloned();
-            prev_states.insert(drive.index, drive.state.clone());
-
-            // Push state changes to frontend via SSE
-            if prev != Some(drive.state.clone()) {
-                state
-                    .sse
-                    .send_status(&format!("drive:changed:{}:{}", drive.index, drive.state));
+            if !enabled.contains(&drive.index) {
+                continue;
             }
 
-            // Detect Empty → Ready transition (disc inserted)
+            let prev = prev_states.insert(drive.index, drive.state.clone());
+
+            // Detect Empty → Ready transition (disc inserted), or first sighting
+            // of a Ready drive (auto-rip just enabled with a disc present).
             let is_new_disc = matches!(prev, Some(DriveState::Empty) | None)
                 && matches!(drive.state, DriveState::Ready);
 
@@ -419,13 +415,6 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
             // Skip if already ripping on this drive
             if active.contains_key(&drive.index) {
                 continue;
-            }
-
-            // Skip if drive is in the excluded list
-            if let Some(ref excluded_list) = excluded {
-                if excluded_list.contains(&drive.index) {
-                    continue;
-                }
             }
 
             info!(
@@ -446,6 +435,7 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
             });
 
             drop(active);
+            drop(enabled);
             state.active_rips.write().await.insert(drive.index, handle);
             break;
         }
