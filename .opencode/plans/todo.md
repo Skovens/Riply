@@ -2,6 +2,10 @@
 
 ## Next Up
 
+> **Next Up:** #22 — Add `/ready` health/readiness endpoint (Batch 5). Small and
+> self-contained: return 200 when the HTTP server is up and the database is
+> reachable. Source: `improvements.md` §2.5.
+
 ### Batch 1: Quick Frontend & Config Fixes ✅
 
 | # | Task | Status | Plan File |
@@ -163,7 +167,7 @@ Source: `improvements.md`
 | 22 | Robustness: Add `/ready` health/readiness endpoint | PENDING | `improvements.md` §2.5 |
 | 23 | Robustness: Add CORS and timeout middleware layers | PENDING | `improvements.md` §2.6 |
 | 24 | Serviceability: Add CLI progress bars (`indicatif` crate) | PENDING | `improvements.md` §3.2 |
-| 25 | Serviceability: healthchecks.io heartbeat integration | PENDING | Simple background task pings hc-ping.com/<uuid> on interval |
+| 25 | Serviceability: healthchecks.io heartbeat integration | DONE | Background task pings hc-ping.com/<uuid>; config + serve.rs + AppState handle |
 | 26 | Serviceability: Add config validation with `config` crate | PENDING | `improvements.md` §3.6 |
 | 27 | Feature: Library scanning (`riply library scan` command) | PENDING | `improvements.md` §4.2 |
 | 28 | Feature: Watch directory / filesystem events (`notify` crate) | PENDING | `improvements.md` §4.4 |
@@ -178,18 +182,11 @@ Source: `improvements.md`
 
 | # | Task | Status | Depends On | Plan File |
 |---|------|--------|------------|-----------|
-| 13 | Add `#[instrument]` to public functions in `app/src/*.rs` | PENDING | — | — |
-| 14 | Add `TraceLayer` to HTTP router in `web/src/api.rs` | PENDING | — | — |
-| 15 | Add retry logic to HTTP client (`backon` crate) | PENDING | — | — |
-| 16 | Add graceful shutdown to server in `cli/src/main.rs` | PENDING | — | — |
-| 17 | Add `--json` flags to `riply status` and `riply rip list` | PENDING | — | — |
-| 19 | Add typed `WebError` type implementing `IntoResponse` | PENDING | — | — |
 | 20 | Add versioned database migrations with `sqlx::migrate!()` | PENDING | — | — |
 | 21 | Add CHECK constraints and indexes to database | PENDING | — | — |
 | 22 | Add `/ready` health/readiness endpoint | PENDING | — | — |
 | 23 | Add CORS and timeout middleware layers | PENDING | — | — |
 | 24 | Add CLI progress bars (`indicatif` crate) | PENDING | — | — |
-| 25 | healthchecks.io heartbeat integration | PENDING | — | — |
 | 26 | Add config validation with `config` crate | PENDING | — | — |
 | 27 | Library scanning (`riply library scan` command) | PENDING | — | — |
 | 28 | Watch directory / filesystem events (`notify` crate) | PENDING | — | — |
@@ -215,6 +212,8 @@ Source: `improvements.md`
 | 11 | ffprobe metadata extraction | `ffprobe-metadata.md` |
 | 12 | Duplicate detection (hash-based) | `duplicate-detection.md` |
 | 18 | Split monolithic router into per-domain modules | `improvements.md` §1.2 |
+| 13–17, 19 | Architecture & robustness quick wins (instrument spans, TraceLayer, retry, graceful shutdown, `--json`, WebError) | `improvements.md` §2–3 |
+| 25 | healthchecks.io heartbeat integration | `improvements.md` §2.5, `infra/src/healthchecks.rs` |
 | 33–43 | Ripping overhaul (11 tasks) | `makemkv-implementation.md`, `makemkv-setup.md` |
 | Legacy | Wire pipeline UI, MakeMKV abstraction, SvelteKit migration | — |
 
