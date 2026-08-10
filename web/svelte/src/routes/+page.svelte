@@ -19,6 +19,7 @@
   let drives = $state([]);
   let drivesLoading = $state(true);
   let ripOutputDir = $state('');
+  let autoripDrives = $state([]);
 
   // ── Files ──────────────────────────────────────────────────
   let files = $state([]);
@@ -51,6 +52,7 @@
     await Promise.all([
       fetchStats(),
       fetchDrives(),
+      fetchAutoripStatus(),
       fetchFiles(),
       fetchReviewQueue(),
       fetchJobs(),
@@ -104,6 +106,14 @@
       console.error('Failed to load drives:', e);
     } finally {
       drivesLoading = false;
+    }
+  }
+
+  async function fetchAutoripStatus() {
+    try {
+      autoripDrives = await ripperApi.getAutoripStatus();
+    } catch (e) {
+      console.error('Failed to load autorip status:', e);
     }
   }
 
@@ -251,6 +261,14 @@
       await ripperApi.cancel(index);
     } catch (e) {
       console.error('Failed to cancel rip:', e);
+    }
+  }
+
+  async function handleToggleAutorip(index) {
+    try {
+      autoripDrives = await ripperApi.toggleAutorip(index);
+    } catch (e) {
+      console.error('Failed to toggle auto-rip:', e);
     }
   }
 
@@ -466,23 +484,33 @@
                       <span class="badge badge--{drive.state === 'Ready' ? 'success' : 'default'}">{drive.state}</span>
                     </div>
                     <div class="drive-card__actions">
-                      {#if drive.state === 'Ready'}
-                        <button
-                          class="btn btn--primary btn--sm"
-                          onclick={() => handleRip(drive.index, ripOutputDir)}
-                          disabled={!ripOutputDir}
-                        >
-                          Rip
-                        </button>
-                      {/if}
-                      {#if drive.state === 'Ripping'}
-                        <button
-                          class="btn btn--danger btn--sm"
-                          onclick={() => handleCancelRip(drive.index)}
-                        >
-                          Cancel
-                        </button>
-                      {/if}
+                      <div class="drive-card__action-row">
+                        {#if drive.state === 'Ready'}
+                          <button
+                            class="btn btn--primary btn--sm"
+                            onclick={() => handleRip(drive.index, ripOutputDir)}
+                            disabled={!ripOutputDir}
+                          >
+                            Rip
+                          </button>
+                        {/if}
+                        {#if drive.state === 'Ripping'}
+                          <button
+                            class="btn btn--danger btn--sm"
+                            onclick={() => handleCancelRip(drive.index)}
+                          >
+                            Cancel
+                          </button>
+                        {/if}
+                      </div>
+                      <label class="toggle autorip-toggle" title="Auto-rip discs inserted in this drive">
+                        <input
+                          type="checkbox"
+                          checked={autoripDrives.includes(drive.index)}
+                          onclick={() => handleToggleAutorip(drive.index)}
+                        />
+                        <span class="toggle__track"></span>
+                      </label>
                     </div>
                   </div>
                 {/each}
@@ -879,6 +907,65 @@
     font-size: var(--text-xs);
     color: var(--color-text-muted);
     margin-bottom: var(--space-1);
+  }
+
+  .drive-card__actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    margin-top: var(--space-2);
+  }
+
+  .drive-card__action-row {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  .autorip-toggle {
+    margin: 0;
+  }
+
+  .toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    cursor: pointer;
+  }
+
+  .toggle input {
+    display: none;
+  }
+
+  .toggle__track {
+    display: block;
+    width: 36px;
+    height: 20px;
+    background: var(--color-border);
+    border-radius: 10px;
+    position: relative;
+    transition: background var(--transition-fast);
+  }
+
+  .toggle input:checked + .toggle__track {
+    background: var(--color-success);
+  }
+
+  .toggle__track::after {
+    content: '';
+    display: block;
+    width: 16px;
+    height: 16px;
+    background: white;
+    border-radius: 50%;
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    transition: transform var(--transition-fast);
+  }
+
+  .toggle input:checked + .toggle__track::after {
+    transform: translateX(16px);
   }
 
   /* ── Review Item ────────────────────────────────────────── */
