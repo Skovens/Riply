@@ -45,6 +45,12 @@ impl Database {
         Ok(())
     }
 
+    /// Check if the database is reachable
+    pub async fn ping(&self) -> Result<(), anyhow::Error> {
+        sqlx::query("SELECT 1").execute(&self.pool).await?;
+        Ok(())
+    }
+
     /// Save a file record.
     /// If a file with the same ID already exists, updates only scan-related
     /// fields (path, filename, size, hash) while preserving pipeline status,

@@ -17,7 +17,7 @@ CREATE TABLE files_new (
     canonical_year INTEGER,
     tmdb_id INTEGER,
     content_type TEXT DEFAULT 'unknown' CHECK(content_type IN ('unknown', 'video', 'audio', 'subtitle')),
-    media_type TEXT DEFAULT 'movie' CHECK(media_type IN ('movie', 'tv', 'music')),
+    media_type TEXT DEFAULT 'Movie' CHECK(media_type IN ('Movie', 'Tv', 'Music')),
     series_name TEXT,
     season_number INTEGER,
     episode_number INTEGER,
@@ -53,7 +53,7 @@ CREATE TABLE title_groups_new (
     title TEXT NOT NULL,
     year INTEGER,
     tmdb_id INTEGER,
-    media_type TEXT NOT NULL DEFAULT 'movie' CHECK(media_type IN ('movie', 'tv', 'music')),
+    media_type TEXT NOT NULL DEFAULT 'Movie' CHECK(media_type IN ('Movie', 'Tv', 'Music')),
     series_name TEXT,
     status TEXT NOT NULL DEFAULT 'New' CHECK(status IN ('New', 'Matched', 'Confirmed', 'Moved'))
 );

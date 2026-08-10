@@ -5,7 +5,7 @@ use axum::{
     http::{StatusCode, Uri},
     response::{IntoResponse, Response},
     routing::get,
-    Router,
+    Json, Router,
 };
 use riply_core::{MetadataSearcher, RipBackend};
 use tokio::sync::RwLock;
@@ -112,14 +112,37 @@ async fn embedded_assets(uri: Uri) -> Response {
         .unwrap()
 }
 
+/// Health check response
+#[derive(serde::Serialize)]
+pub struct HealthResponse {
+    pub status: String,
+    pub version: String,
+}
+
+/// Readiness check response
+#[derive(serde::Serialize)]
+pub struct ReadinessResponse {
+    pub status: String,
+    pub database: String,
+    pub error: Option<String>,
+}
+
+async fn health_handler() -> Json<HealthResponse> {
+    Json(HealthResponse {
+        status: "ok".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    })
+}
+
 /// Create the API router with all endpoints and static file serving
 pub fn create_router(state: Arc<AppState>) -> Router {
     info!("Creating API router");
 
     info!("Serving embedded frontend");
 
+    let shared_state = Arc::clone(&state);
+
     Router::new()
-        .route("/health", get(|| async { "OK" }))
         .merge(files::router(Arc::clone(&state)))
         .merge(review::router(Arc::clone(&state)))
         .merge(scan::router(Arc::clone(&state)))
@@ -130,6 +153,32 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .merge(cfg::router(Arc::clone(&state)))
         .merge(search::router(Arc::clone(&state)))
         .merge(sse_handler::router(Arc::clone(&state)))
+        .route("/health", get(health_handler))
+        .route("/ready", get(move || {
+            let db = shared_state.db.clone();
+            async move {
+                let db_ok = db.ping().await.is_ok();
+                if db_ok {
+                    (
+                        StatusCode::OK,
+                        Json(ReadinessResponse {
+                            status: "ready".to_string(),
+                            database: "ok".to_string(),
+                            error: None,
+                        }),
+                    )
+                } else {
+                    (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        Json(ReadinessResponse {
+                            status: "unavailable".to_string(),
+                            database: "error".to_string(),
+                            error: Some("Database unavailable".to_string()),
+                        }),
+                    )
+                }
+            }
+        }))
         // Static files (embedded frontend)
         .fallback(embedded_assets)
         .layer(TraceLayer::new_for_http())
