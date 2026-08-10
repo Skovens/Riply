@@ -45,41 +45,80 @@ pub async fn move_files(
     let mut errors = 0;
     let mut results = vec![];
 
-    for record in &records {
-        if !record.is_ready_to_move() {
-            skipped += 1;
-            continue;
-        }
+    if !json {
+        use indicatif::{ProgressBar, ProgressStyle};
+        let pb = ProgressBar::new(records.len() as u64);
+        pb.set_message("Moving files...");
+        pb.set_style(ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+            .unwrap()
+            .progress_chars("#>-"));
 
-        match mover.move_file(record, &movies_dir, &tv_dir).await {
-            Ok(updated_record) => {
-                moved += 1;
-                // Save updated record to database
-                db.update_file(&updated_record).await?;
-                if !json {
+        for record in &records {
+            if !record.is_ready_to_move() {
+                skipped += 1;
+                pb.inc(1);
+                continue;
+            }
+
+            match mover.move_file(record, &movies_dir, &tv_dir).await {
+                Ok(updated_record) => {
+                    moved += 1;
+                    db.update_file(&updated_record).await?;
                     println!("  ✓ {} -> {:?}", record.filename, updated_record.path);
+                    results.push(MoveResult {
+                        filename: record.filename.clone(),
+                        status: "moved".to_string(),
+                        path: Some(updated_record.path.to_string_lossy().to_string()),
+                    });
                 }
-                results.push(MoveResult {
-                    filename: record.filename.clone(),
-                    status: "moved".to_string(),
-                    path: Some(updated_record.path.to_string_lossy().to_string()),
-                });
-            }
-            Err(e) => {
-                errors += 1;
-                if !json {
+                Err(e) => {
+                    errors += 1;
                     println!("  ✗ {} (error: {})", record.filename, e);
+                    results.push(MoveResult {
+                        filename: record.filename.clone(),
+                        status: format!("error: {}", e),
+                        path: None,
+                    });
                 }
-                results.push(MoveResult {
-                    filename: record.filename.clone(),
-                    status: format!("error: {}", e),
-                    path: None,
-                });
+            }
+            pb.inc(1);
+        }
+        pb.finish_with_message("Move complete");
+
+        println!();
+        println!("Move complete:");
+        println!("  Moved: {}", moved);
+        println!("  Skipped: {}", skipped);
+        println!("  Errors: {}", errors);
+    } else {
+        for record in &records {
+            if !record.is_ready_to_move() {
+                skipped += 1;
+                continue;
+            }
+
+            match mover.move_file(record, &movies_dir, &tv_dir).await {
+                Ok(updated_record) => {
+                    moved += 1;
+                    db.update_file(&updated_record).await?;
+                    results.push(MoveResult {
+                        filename: record.filename.clone(),
+                        status: "moved".to_string(),
+                        path: Some(updated_record.path.to_string_lossy().to_string()),
+                    });
+                }
+                Err(e) => {
+                    errors += 1;
+                    results.push(MoveResult {
+                        filename: record.filename.clone(),
+                        status: format!("error: {}", e),
+                        path: None,
+                    });
+                }
             }
         }
-    }
 
-    if json {
         let out = MoveOutput {
             movies_dir: movies_dir.to_string_lossy().to_string(),
             tv_dir: tv_dir.to_string_lossy().to_string(),
@@ -90,12 +129,6 @@ pub async fn move_files(
             results,
         };
         println!("{}", serde_json::to_string_pretty(&out)?);
-    } else {
-        println!();
-        println!("Move complete:");
-        println!("  Moved: {}", moved);
-        println!("  Skipped: {}", skipped);
-        println!("  Errors: {}", errors);
     }
 
     Ok(())

@@ -681,6 +681,83 @@ impl Database {
 
         row.map(|r| self.row_to_file_record(&r)).transpose()
     }
+
+    /// Find all files that share the same hash (duplicates).
+    /// Returns a vector of groups, where each group contains files with the same hash.
+    pub async fn find_duplicates(&self) -> Result<Vec<Vec<riply_core::FileRecord>>, anyhow::Error> {
+        info!("Finding duplicate files");
+
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                id, path, filename, size, duration, hash, status,
+                suggested_title, suggested_year, confidence,
+                canonical_title, canonical_year, tmdb_id,
+                content_type, media_type, series_name,
+                season_number, episode_number, episode_title,
+                source, subtitle_text, duplicate_path,
+                title_group_id,
+                reviewed, created_at, updated_at
+            FROM files
+            ORDER BY hash
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        // Group by hash
+        let mut hash_groups: std::collections::HashMap<String, Vec<riply_core::FileRecord>> =
+            std::collections::HashMap::new();
+        for row in &rows {
+            let file = self.row_to_file_record(row)?;
+            hash_groups
+                .entry(file.hash.clone())
+                .or_default()
+                .push(file);
+        }
+
+        // Only keep groups with more than one file (actual duplicates)
+        let duplicates: Vec<_> = hash_groups
+            .into_values()
+            .filter(|group| group.len() > 1)
+            .collect();
+
+        info!(duplicate_groups = duplicates.len(), "Found duplicate groups");
+        Ok(duplicates)
+    }
+
+    /// Mark files as duplicates by setting their duplicate_path field.
+    /// The first file in each group is kept as the "original", the rest are marked.
+    pub async fn mark_duplicates(&self, duplicate_groups: &[Vec<riply_core::FileRecord>]) -> Result<usize, anyhow::Error> {
+        info!("Marking duplicate files");
+        let mut marked = 0;
+
+        for group in duplicate_groups {
+            if group.len() < 2 {
+                continue;
+            }
+            // First file is the original, mark the rest
+            for duplicate in &group[1..] {
+                sqlx::query(
+                    r#"
+                    UPDATE files SET
+                        duplicate_path = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                    "#,
+                )
+                .bind(duplicate.path.to_string_lossy().to_string())
+                .bind(&duplicate.updated_at)
+                .bind(&duplicate.id)
+                .execute(&self.pool)
+                .await?;
+                marked += 1;
+            }
+        }
+
+        info!(marked = marked, "Marked duplicate files");
+        Ok(marked)
+    }
 }
 
 #[cfg(test)]

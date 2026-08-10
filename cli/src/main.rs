@@ -5,11 +5,12 @@
 
 use clap::{Parser, Subcommand, ValueEnum};
 use commands::{
-    analyze_files, move_files, review_files, rip_command as do_rip, run_setup, scan_directory,
-    show_status, RipCommand, SetupArgs,
+    analyze_files, duplicate::find_duplicates, library::scan_library, move_files, review_files,
+    rip_command as do_rip, run_setup, scan_directory, show_status, watch::watch_directory,
+    RipCommand, SetupArgs,
 };
 use infra::{Config, Database};
-use riply_core::MetadataSearcher;
+use riply_core::{MetadataSearcher, MediaType};
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
 
@@ -95,6 +96,31 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Find duplicate files
+    Duplicate {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Scan an organized media library
+    Library {
+        /// Directory to scan
+        directory: String,
+        /// Media type (movie or tv)
+        #[arg(long, default_value = "movie")]
+        media_type: String,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Watch a directory for new files
+    Watch {
+        /// Directory to watch
+        directory: String,
+        /// Media type (movie or tv)
+        #[arg(long, default_value = "movie")]
+        media_type: String,
+    },
     /// Set up MakeMKV installation
     Setup(SetupArgs),
 }
@@ -168,6 +194,30 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Status { json } => {
             show_status(&db, json).await?;
+        }
+        Command::Duplicate { json } => {
+            find_duplicates(&db, &config, json).await?;
+        }
+        Command::Library {
+            directory,
+            media_type,
+            json,
+        } => {
+            let media_type = match media_type.as_str() {
+                "tv" => MediaType::Tv,
+                _ => MediaType::Movie,
+            };
+            scan_library(&directory, &config, media_type, json).await?;
+        }
+        Command::Watch {
+            directory,
+            media_type,
+        } => {
+            let media_type = match media_type.as_str() {
+                "tv" => MediaType::Tv,
+                _ => MediaType::Movie,
+            };
+            watch_directory(&directory, &config, media_type).await?;
         }
         Command::Setup(args) => {
             run_setup(args)?;

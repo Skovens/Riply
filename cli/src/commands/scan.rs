@@ -24,15 +24,74 @@ pub async fn scan_directory(
     db.migrate().await?;
 
     let scanner = ScannerService::new();
-    let result = scanner.scan_directory(path, searcher).await?;
 
-    // Save title groups
-    for group in &result.title_groups {
-        db.save_title_group(group).await?;
-    }
+    if !json {
+        use indicatif::{ProgressBar, ProgressStyle};
+        let pb = ProgressBar::new_spinner();
+        pb.set_message("Scanning directory...");
+        pb.enable_steady_tick(std::time::Duration::from_millis(100));
 
-    if result.records.is_empty() {
-        if json {
+        let result = scanner.scan_directory(path, searcher).await?;
+
+        pb.finish_with_message("Scan complete");
+
+        // Save title groups with progress
+        if !result.title_groups.is_empty() {
+            let group_pb = ProgressBar::new(result.title_groups.len() as u64);
+            group_pb.set_message("Saving title groups...");
+            group_pb.set_style(ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+                .unwrap()
+                .progress_chars("#>-"));
+            for group in &result.title_groups {
+                db.save_title_group(group).await?;
+                group_pb.inc(1);
+            }
+            group_pb.finish_with_message("Title groups saved");
+        }
+
+        if result.records.is_empty() {
+            println!("No media files found in {}", directory);
+            return Ok(());
+        }
+
+        let group_count = result.title_groups.len();
+        if group_count > 0 {
+            println!("Found {} title group(s):", group_count);
+            for g in &result.title_groups {
+                println!("  [{}] {}", g.id, g.title);
+            }
+            println!();
+        }
+
+        println!("Found {} media files:", result.records.len());
+        println!();
+
+        // Save each file record to database
+        let file_pb = ProgressBar::new(result.records.len() as u64);
+        file_pb.set_message("Saving files...");
+        file_pb.set_style(ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+            .unwrap()
+            .progress_chars("#>-"));
+
+        for record in &result.records {
+            db.save_file(record).await?;
+            file_pb.inc(1);
+        }
+        file_pb.finish_with_message("Files saved");
+
+        println!();
+        println!("{} records saved to database", result.records.len());
+    } else {
+        let result = scanner.scan_directory(path, searcher).await?;
+
+        // Save title groups
+        for group in &result.title_groups {
+            db.save_title_group(group).await?;
+        }
+
+        if result.records.is_empty() {
             let out = ScanOutput {
                 directory: directory.to_string(),
                 title_groups: 0,
@@ -40,14 +99,10 @@ pub async fn scan_directory(
                 records: vec![],
             };
             println!("{}", serde_json::to_string_pretty(&out)?);
-        } else {
-            println!("No media files found in {}", directory);
+            return Ok(());
         }
-        return Ok(());
-    }
 
-    let group_count = result.title_groups.len();
-    if json {
+        let group_count = result.title_groups.len();
         let records: Vec<serde_json::Value> = result
             .records
             .iter()
@@ -67,30 +122,7 @@ pub async fn scan_directory(
             records,
         };
         println!("{}", serde_json::to_string_pretty(&out)?);
-        return Ok(());
     }
-
-    if group_count > 0 {
-        println!("Found {} title group(s):", group_count);
-        for g in &result.title_groups {
-            println!("  [{}] {}", g.id, g.title);
-        }
-        println!();
-    }
-
-    println!("Found {} media files:", result.records.len());
-    println!();
-
-    // Save each file record to database
-    for record in &result.records {
-        db.save_file(record).await?;
-        println!("  {} [{}]", record.filename, record.id);
-        println!("    Status: {}", record.status);
-        println!("    Size: {:?}", record.size);
-    }
-
-    println!();
-    println!("{} records saved to database", result.records.len());
 
     Ok(())
 }

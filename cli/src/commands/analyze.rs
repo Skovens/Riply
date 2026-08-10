@@ -49,86 +49,119 @@ pub async fn analyze_files(
     let mut failed = 0;
     let mut results = vec![];
 
-    for record in &records {
-        let result = analyzer.analyze_file(record).await;
+    if !json {
+        use indicatif::{ProgressBar, ProgressStyle};
+        let pb = ProgressBar::new(records.len() as u64);
+        pb.set_message("Analyzing files...");
+        pb.set_style(ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+            .unwrap()
+            .progress_chars("#>-"));
 
-        match result {
-            Ok(updated_record) => {
-                // Save updated record to database
-                db.update_file(&updated_record).await?;
+        for record in &records {
+            let result = analyzer.analyze_file(record).await;
 
-                let title = updated_record.suggested_title.clone();
-                let year = updated_record.suggested_year;
-                let confidence = updated_record.confidence;
+            match result {
+                Ok(updated_record) => {
+                    db.update_file(&updated_record).await?;
 
-                match updated_record.status {
-                    riply_core::PipelineStatus::Matched => {
-                        matched += 1;
-                        if !json {
+                    let title = updated_record.suggested_title.clone();
+                    let year = updated_record.suggested_year;
+                    let confidence = updated_record.confidence;
+
+                    match updated_record.status {
+                        riply_core::PipelineStatus::Matched => {
+                            matched += 1;
                             println!(
                                 "  {} -> {}",
                                 record.filename,
                                 title.clone().unwrap_or_default()
                             );
                         }
-                        results.push(AnalyzeResult {
-                            filename: record.filename.clone(),
-                            status: format!("{}", updated_record.status),
-                            suggested_title: title,
-                            suggested_year: year,
-                            confidence,
-                        });
-                    }
-                    riply_core::PipelineStatus::NeedsReview => {
-                        needs_review += 1;
-                        if !json {
+                        riply_core::PipelineStatus::NeedsReview => {
+                            needs_review += 1;
                             println!(
                                 "  {} -> {} (needs review)",
                                 record.filename,
                                 title.clone().unwrap_or_default()
                             );
                         }
-                        results.push(AnalyzeResult {
-                            filename: record.filename.clone(),
-                            status: format!("{}", updated_record.status),
-                            suggested_title: title,
-                            suggested_year: year,
-                            confidence,
-                        });
-                    }
-                    riply_core::PipelineStatus::Failed => {
-                        failed += 1;
-                        if !json {
+                        riply_core::PipelineStatus::Failed => {
+                            failed += 1;
                             println!("  {} (failed)", record.filename);
                         }
-                        results.push(AnalyzeResult {
-                            filename: record.filename.clone(),
-                            status: format!("{}", updated_record.status),
-                            suggested_title: None,
-                            suggested_year: None,
-                            confidence: None,
-                        });
+                        _ => {}
                     }
-                    _ => {}
+
+                    results.push(AnalyzeResult {
+                        filename: record.filename.clone(),
+                        status: format!("{}", updated_record.status),
+                        suggested_title: title,
+                        suggested_year: year,
+                        confidence,
+                    });
+                }
+                Err(e) => {
+                    failed += 1;
+                    println!("  {} (error: {})", record.filename, e);
+                    results.push(AnalyzeResult {
+                        filename: record.filename.clone(),
+                        status: format!("Error: {}", e),
+                        suggested_title: None,
+                        suggested_year: None,
+                        confidence: None,
+                    });
                 }
             }
-            Err(e) => {
-                failed += 1;
-                if !json {
-                    println!("  {} (error: {})", record.filename, e);
+            pb.inc(1);
+        }
+        pb.finish_with_message("Analysis complete");
+
+        println!();
+        println!("Analysis complete:");
+        println!("  Matched: {}", matched);
+        println!("  Needs review: {}", needs_review);
+        println!("  Failed: {}", failed);
+    } else {
+        for record in &records {
+            let result = analyzer.analyze_file(record).await;
+
+            match result {
+                Ok(updated_record) => {
+                    db.update_file(&updated_record).await?;
+
+                    let title = updated_record.suggested_title.clone();
+                    let year = updated_record.suggested_year;
+                    let confidence = updated_record.confidence;
+
+                    match updated_record.status {
+                        riply_core::PipelineStatus::Matched => matched += 1,
+                        riply_core::PipelineStatus::NeedsReview => needs_review += 1,
+                        riply_core::PipelineStatus::Failed => failed += 1,
+                        _ => {}
+                    }
+
+                    results.push(AnalyzeResult {
+                        filename: record.filename.clone(),
+                        status: format!("{}", updated_record.status),
+                        suggested_title: title,
+                        suggested_year: year,
+                        confidence,
+                    });
                 }
-                results.push(AnalyzeResult {
-                    filename: record.filename.clone(),
-                    status: format!("Error: {}", e),
-                    suggested_title: None,
-                    suggested_year: None,
-                    confidence: None,
-                });
+                Err(e) => {
+                    failed += 1;
+                    results.push(AnalyzeResult {
+                        filename: record.filename.clone(),
+                        status: format!("Error: {}", e),
+                        suggested_title: None,
+                        suggested_year: None,
+                        confidence: None,
+                    });
+                }
             }
         }
-    }
 
-    if json {
         let out = AnalyzeOutput {
             files_analyzed: records.len(),
             matched,
@@ -137,12 +170,6 @@ pub async fn analyze_files(
             results,
         };
         println!("{}", serde_json::to_string_pretty(&out)?);
-    } else {
-        println!();
-        println!("Analysis complete:");
-        println!("  Matched: {}", matched);
-        println!("  Needs review: {}", needs_review);
-        println!("  Failed: {}", failed);
     }
 
     Ok(())
