@@ -7,6 +7,7 @@ use tokio::sync::RwLock;
 use app::JobScheduler;
 use infra::{Config, Database};
 use web::{create_router, AppState, SseManager};
+use web::metrics::Metrics;
 
 struct TestContext {
     addr: std::net::SocketAddr,
@@ -33,6 +34,7 @@ async fn setup() -> TestContext {
         autorip_drives: RwLock::new(HashSet::new()),
         autorip_handle: RwLock::new(None),
         healthchecks_handle: RwLock::new(None),
+        metrics: Metrics::default(),
     });
 
     let router = create_router(state.clone());
@@ -133,7 +135,8 @@ async fn test_health_check() {
     let ctx = setup().await;
     let (status, body) = get(&ctx, "/health").await;
     assert_eq!(status, 200);
-    assert_eq!(body["raw"], "OK");
+    assert_eq!(body["status"], "ok");
+    assert!(body["version"].is_string());
 }
 
 // ===== Files CRUD =====

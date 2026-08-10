@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use axum::{
+    extract::State,
     http::{StatusCode, Uri},
     response::{IntoResponse, Response},
     routing::get,
@@ -12,6 +13,7 @@ use tokio::sync::RwLock;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
+use crate::metrics::Metrics;
 use crate::sse::SseManager;
 use app::JobScheduler;
 use infra::{Config, Database};
@@ -44,6 +46,8 @@ pub struct AppState {
     pub autorip_handle: RwLock<Option<tokio::task::JoinHandle<()>>>,
     /// Handle for the healthchecks.io heartbeat task.
     pub healthchecks_handle: RwLock<Option<tokio::task::JoinHandle<()>>>,
+    /// Prometheus metrics collector.
+    pub metrics: Metrics,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -178,6 +182,10 @@ pub fn create_router(state: Arc<AppState>) -> Router {
                     )
                 }
             }
+        }))
+        .route("/metrics", get(move || {
+            let metrics = state.metrics.clone();
+            async move { metrics.to_prometheus() }
         }))
         // Static files (embedded frontend)
         .fallback(embedded_assets)

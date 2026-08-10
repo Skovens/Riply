@@ -9,7 +9,7 @@ CREATE TABLE files_new (
     size INTEGER,
     duration INTEGER,
     hash TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'Scanned' CHECK(status IN ('Scanned', 'Analyzed', 'Review', 'Confirmed', 'Ripped', 'Moved', 'Failed')),
+    status TEXT NOT NULL DEFAULT 'Scanned' CHECK(status IN ('Scanned', 'Analyzed', 'Needs Review', 'Matched', 'Confirmed', 'Ripped', 'Moved', 'Failed')),
     suggested_title TEXT,
     suggested_year INTEGER,
     confidence REAL,
