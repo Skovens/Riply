@@ -37,21 +37,9 @@ impl Database {
     pub async fn migrate(&self) -> Result<(), anyhow::Error> {
         info!("Applying database migrations");
 
-        let migration = include_str!("../migrations/001_create_files_table.sql");
-        sqlx::query(migration).execute(&self.pool).await?;
-
-        // Check if migration 002 has been applied by checking for title_group_id column
-        let has_col = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM pragma_table_info('files') WHERE name = 'title_group_id'",
-        )
-        .fetch_one(&self.pool)
-        .await?;
-
-        if has_col == 0 {
-            let migration2 = include_str!("../migrations/002_create_title_groups.sql");
-            sqlx::query(migration2).execute(&self.pool).await?;
-            info!("Migration 002 applied (title_groups table)");
-        }
+        sqlx::migrate!("src/migrations")
+            .run(&self.pool)
+            .await?;
 
         info!("Migrations applied successfully");
         Ok(())
