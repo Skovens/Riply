@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use axum::{
-    extract::State,
     http::{StatusCode, Uri},
     response::{IntoResponse, Response},
     routing::get,

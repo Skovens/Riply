@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Path, Query, State},
-    routing::{delete, get, post},
+    routing::get,
     Json, Router,
 };
 use riply_core::FileRecord;

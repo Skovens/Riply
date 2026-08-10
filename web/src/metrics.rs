@@ -30,24 +30,16 @@ impl Metrics {
         let mut output = String::new();
 
         // Total requests
-        output.push_str(&format!(
-            "# HELP riply_total_requests Total number of requests\n"
-        ));
-        output.push_str(&format!(
-            "# TYPE riply_total_requests counter\n"
-        ));
+        output.push_str("# HELP riply_total_requests Total number of requests\n");
+        output.push_str("# TYPE riply_total_requests counter\n");
         output.push_str(&format!(
             "riply_total_requests {}\n",
             self.total_requests.load(Ordering::Relaxed)
         ));
 
         // Per-route requests
-        output.push_str(&format!(
-            "# HELP riply_route_requests Requests per route\n"
-        ));
-        output.push_str(&format!(
-            "# TYPE riply_route_requests counter\n"
-        ));
+        output.push_str("# HELP riply_route_requests Requests per route\n");
+        output.push_str("# TYPE riply_route_requests counter\n");
 
         let counts = self.request_counts.lock().unwrap();
         for (route, counter) in counts.iter() {
