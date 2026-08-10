@@ -11,17 +11,17 @@ export interface MovePreviewItem {
 
 export const moveApi = {
   start(options: Record<string, unknown> = {}) {
-    return request('/api/move', {
+    return request('/v1/move', {
       method: 'POST',
       body: JSON.stringify(options),
     });
   },
 
   status() {
-    return request<MoveStatus>('/api/move/status');
+    return request<MoveStatus>('/v1/move/status');
   },
 
   preview() {
-    return request<MovePreviewItem[]>('/api/move/preview');
+    return request<MovePreviewItem[]>('/v1/move/preview');
   },
 };

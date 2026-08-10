@@ -10,28 +10,28 @@ export const filesApi = {
     if (params.per_page) query.set('per_page', String(params.per_page));
 
     const qs = query.toString();
-    return request<PaginatedResponse<FileRecord>>(`/api/files${qs ? '?' + qs : ''}`);
+    return request<PaginatedResponse<FileRecord>>(`/v1/files${qs ? '?' + qs : ''}`);
   },
 
   get(id: string) {
-    return request<FileRecord>(`/api/files/${id}`);
+    return request<FileRecord>(`/v1/files/${id}`);
   },
 
   update(id: string, data: Record<string, unknown>) {
-    return request<FileRecord>(`/api/files/${id}`, {
+    return request<FileRecord>(`/v1/files/${id}`, {
       method: 'POST',
       body: JSON.stringify(data),
     });
   },
 
   delete(id: string) {
-    return request<void>(`/api/files/${id}`, {
+    return request<void>(`/v1/files/${id}`, {
       method: 'DELETE',
     });
   },
 
   reset() {
-    return request<number>('/api/files', {
+    return request<number>('/v1/files', {
       method: 'DELETE',
     });
   },

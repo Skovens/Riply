@@ -1,7 +1,7 @@
 import { lastEvent } from '$lib/stores';
 
 export function connectSSE(onMessage: (data: string) => void) {
-  const eventSource = new EventSource('/api/sse');
+  const eventSource = new EventSource('/v1/sse');
 
   eventSource.addEventListener('status', (event: MessageEvent) => {
     onMessage(event.data);

@@ -3,14 +3,14 @@ import type { Job } from '$lib/types';
 
 export const jobsApi = {
   list() {
-    return request<Job[]>('/api/jobs');
+    return request<Job[]>('/v1/jobs');
   },
 
   get(id: string) {
-    return request<Job>(`/api/jobs/${id}`);
+    return request<Job>(`/v1/jobs/${id}`);
   },
 
   cancel(id: string) {
-    return request<void>(`/api/jobs/${id}/cancel`, { method: 'POST' });
+    return request<void>(`/v1/jobs/${id}/cancel`, { method: 'POST' });
   },
 };

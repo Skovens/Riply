@@ -23,7 +23,7 @@
 
   async function loadConfig() {
     try {
-      const res = await fetch('/api/config');
+      const res = await fetch('/v1/config');
       if (res.ok) {
         const data = await res.json();
         defaultDir = data.data?.scan_directory || '';
@@ -74,7 +74,7 @@
     if (!dir) return;
     scanLoading = true;
     try {
-      const res = await fetch('/api/scan', {
+      const res = await fetch('/v1/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ directory: dir })
@@ -91,7 +91,7 @@
     if (activeJob) return;
     moveLoading = true;
     try {
-      const res = await fetch('/api/move', { method: 'POST' });
+      const res = await fetch('/v1/move', { method: 'POST' });
       if (!res.ok) throw new Error(`Move failed: ${res.status}`);
     } catch (e) {
       console.error('Move error:', e);

@@ -110,7 +110,7 @@
   async function handleRetryFailed() {
     retrying = true;
     try {
-      const res = await fetch('/api/analyze/retry-failed', { method: 'POST' });
+      const res = await fetch('/v1/analyze/retry-failed', { method: 'POST' });
       if (!res.ok) throw new Error(`Retry failed: ${res.status}`);
       showToast('Retry submitted', 'success');
       loadFiles();
@@ -236,7 +236,7 @@
   async function handleAnalyze() {
     analyzing = true;
     try {
-      const res = await fetch('/api/analyze', { method: 'POST' });
+      const res = await fetch('/v1/analyze', { method: 'POST' });
       if (!res.ok) throw new Error(`Analyze failed: ${res.status}`);
       showToast('Analyze started', 'success');
       loadFiles();
