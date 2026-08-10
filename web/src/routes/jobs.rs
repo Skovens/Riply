@@ -13,9 +13,9 @@ use crate::error::WebError;
 /// Router for the jobs domain
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/api/jobs", get(list_jobs))
-        .route("/api/jobs/:id", get(get_job))
-        .route("/api/jobs/:id/cancel", post(cancel_job))
+        .route("/v1/jobs", get(list_jobs))
+        .route("/v1/jobs/:id", get(get_job))
+        .route("/v1/jobs/:id/cancel", post(cancel_job))
         .with_state(state)
 }
 

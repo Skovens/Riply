@@ -9,8 +9,8 @@ use crate::error::WebError;
 /// Router for the analyze domain
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/api/analyze", post(start_analyze))
-        .route("/api/analyze/retry-failed", post(retry_failed))
+        .route("/v1/analyze", post(start_analyze))
+        .route("/v1/analyze/retry-failed", post(retry_failed))
         .with_state(state)
 }
 

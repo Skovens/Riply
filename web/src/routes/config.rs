@@ -10,8 +10,8 @@ use crate::error::WebError;
 /// Router for the config domain
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/api/config", get(get_config).put(update_config))
-        .route("/api/config/reset", post(reset_config))
+        .route("/v1/config", get(get_config).put(update_config))
+        .route("/v1/config/reset", post(reset_config))
         .with_state(state)
 }
 

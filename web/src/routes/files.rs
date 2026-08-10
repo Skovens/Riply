@@ -14,9 +14,9 @@ use crate::error::WebError;
 /// Router for the files domain
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/api/files", get(list_files).delete(reset_db))
+        .route("/v1/files", get(list_files).delete(reset_db))
         .route(
-            "/api/files/:id",
+            "/v1/files/:id",
             get(get_file).post(update_file).delete(delete_file),
         )
         .with_state(state)

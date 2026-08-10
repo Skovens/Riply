@@ -12,7 +12,7 @@ use crate::error::WebError;
 /// Router for the scan domain
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/api/scan", post(start_scan))
+        .route("/v1/scan", post(start_scan))
         .with_state(state)
 }
 

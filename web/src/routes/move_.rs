@@ -11,9 +11,9 @@ use crate::error::WebError;
 /// Router for the move domain
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/api/move", post(start_move))
-        .route("/api/move/status", get(get_move_status))
-        .route("/api/move/preview", get(preview_move))
+        .route("/v1/move", post(start_move))
+        .route("/v1/move/status", get(get_move_status))
+        .route("/v1/move/preview", get(preview_move))
         .with_state(state)
 }
 

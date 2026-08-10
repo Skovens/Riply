@@ -12,9 +12,9 @@ use riply_core::FileRecord;
 /// Router for the review domain
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/api/review", get(get_review_queue))
-        .route("/api/review/:id/accept", post(accept_file))
-        .route("/api/review/:id/reject", post(reject_file))
+        .route("/v1/review", get(get_review_queue))
+        .route("/v1/review/:id/accept", post(accept_file))
+        .route("/v1/review/:id/reject", post(reject_file))
         .with_state(state)
 }
 

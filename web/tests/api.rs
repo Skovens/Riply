@@ -144,7 +144,7 @@ async fn test_health_check() {
 #[tokio::test]
 async fn test_list_files_empty() {
     let ctx = setup().await;
-    let (status, body) = get(&ctx, "/api/files").await;
+    let (status, body) = get(&ctx, "/v1/files").await;
     assert_eq!(status, 200);
     assert_eq!(body["success"], true);
     assert_eq!(body["data"]["items"], serde_json::json!([]));
@@ -157,7 +157,7 @@ async fn test_list_files_with_data() {
     seed_file(&ctx, "f1", "a.mkv", riply_core::PipelineStatus::Scanned).await;
     seed_file(&ctx, "f2", "b.mp4", riply_core::PipelineStatus::Matched).await;
 
-    let (status, body) = get(&ctx, "/api/files").await;
+    let (status, body) = get(&ctx, "/v1/files").await;
     assert_eq!(status, 200);
     assert_eq!(body["success"], true);
     assert_eq!(body["data"]["total"], 2);
@@ -169,11 +169,11 @@ async fn test_list_files_filter_by_status() {
     seed_file(&ctx, "f1", "a.mkv", riply_core::PipelineStatus::NeedsReview).await;
     seed_file(&ctx, "f2", "b.mp4", riply_core::PipelineStatus::Scanned).await;
 
-    let (status, body) = get(&ctx, "/api/files?status=Needs%20Review").await;
+    let (status, body) = get(&ctx, "/v1/files?status=Needs%20Review").await;
     assert_eq!(status, 200);
     assert_eq!(body["data"]["total"], 1);
 
-    let (status, body) = get(&ctx, "/api/files?status=Scanned").await;
+    let (status, body) = get(&ctx, "/v1/files?status=Scanned").await;
     assert_eq!(status, 200);
     assert_eq!(body["data"]["total"], 1);
 }
@@ -181,7 +181,7 @@ async fn test_list_files_filter_by_status() {
 #[tokio::test]
 async fn test_get_file_not_found() {
     let ctx = setup().await;
-    let (status, _) = get(&ctx, "/api/files/nonexistent").await;
+    let (status, _) = get(&ctx, "/v1/files/nonexistent").await;
     assert_eq!(status, 404);
 }
 
@@ -190,7 +190,7 @@ async fn test_get_file_found() {
     let ctx = setup().await;
     seed_file(&ctx, "f1", "a.mkv", riply_core::PipelineStatus::Scanned).await;
 
-    let (status, body) = get(&ctx, "/api/files/f1").await;
+    let (status, body) = get(&ctx, "/v1/files/f1").await;
     assert_eq!(status, 200);
     assert_eq!(body["data"]["id"], "f1");
     assert_eq!(body["data"]["filename"], "a.mkv");
@@ -205,7 +205,7 @@ async fn test_update_file() {
         "canonical_title": "The Movie",
         "canonical_year": 2024
     });
-    let (status, resp) = post(&ctx, "/api/files/f1", body).await;
+    let (status, resp) = post(&ctx, "/v1/files/f1", body).await;
     assert_eq!(status, 200);
     assert_eq!(resp["data"]["canonical_title"], "The Movie");
     assert_eq!(resp["data"]["canonical_year"], 2024);
@@ -216,7 +216,7 @@ async fn test_update_file_not_found() {
     let ctx = setup().await;
     let (status, _) = post(
         &ctx,
-        "/api/files/nonexistent",
+        "/v1/files/nonexistent",
         serde_json::json!({ "canonical_title": "X" }),
     )
     .await;
@@ -228,17 +228,17 @@ async fn test_delete_file() {
     let ctx = setup().await;
     seed_file(&ctx, "f1", "a.mkv", riply_core::PipelineStatus::Scanned).await;
 
-    let (status, _) = delete(&ctx, "/api/files/f1").await;
+    let (status, _) = delete(&ctx, "/v1/files/f1").await;
     assert_eq!(status, 200);
 
-    let (status, _) = get(&ctx, "/api/files/f1").await;
+    let (status, _) = get(&ctx, "/v1/files/f1").await;
     assert_eq!(status, 404);
 }
 
 #[tokio::test]
 async fn test_delete_file_not_found() {
     let ctx = setup().await;
-    let (status, _) = delete(&ctx, "/api/files/nonexistent").await;
+    let (status, _) = delete(&ctx, "/v1/files/nonexistent").await;
     assert_eq!(status, 404);
 }
 
@@ -247,7 +247,7 @@ async fn test_delete_file_not_found() {
 #[tokio::test]
 async fn test_review_queue_empty() {
     let ctx = setup().await;
-    let (status, body) = get(&ctx, "/api/review").await;
+    let (status, body) = get(&ctx, "/v1/review").await;
     assert_eq!(status, 200);
     assert_eq!(body["data"], serde_json::json!([]));
 }
@@ -258,7 +258,7 @@ async fn test_review_queue_has_files() {
     seed_file(&ctx, "f1", "a.mkv", riply_core::PipelineStatus::NeedsReview).await;
     seed_file(&ctx, "f2", "b.mp4", riply_core::PipelineStatus::Scanned).await;
 
-    let (status, body) = get(&ctx, "/api/review").await;
+    let (status, body) = get(&ctx, "/v1/review").await;
     assert_eq!(status, 200);
     assert_eq!(body["data"].as_array().unwrap().len(), 1);
     assert_eq!(body["data"][0]["id"], "f1");
@@ -269,7 +269,7 @@ async fn test_accept_file() {
     let ctx = setup().await;
     seed_file(&ctx, "f1", "a.mkv", riply_core::PipelineStatus::NeedsReview).await;
 
-    let (status, body) = post(&ctx, "/api/review/f1/accept", serde_json::json!({})).await;
+    let (status, body) = post(&ctx, "/v1/review/f1/accept", serde_json::json!({})).await;
     assert_eq!(status, 200);
     assert_eq!(body["data"]["status"], "Confirmed");
 }
@@ -279,7 +279,7 @@ async fn test_reject_file() {
     let ctx = setup().await;
     seed_file(&ctx, "f1", "a.mkv", riply_core::PipelineStatus::NeedsReview).await;
 
-    let (status, body) = post(&ctx, "/api/review/f1/reject", serde_json::json!({})).await;
+    let (status, body) = post(&ctx, "/v1/review/f1/reject", serde_json::json!({})).await;
     assert_eq!(status, 200);
     assert_eq!(body["data"]["status"], "Failed");
 }
@@ -289,7 +289,7 @@ async fn test_accept_file_not_found() {
     let ctx = setup().await;
     let (status, _) = post(
         &ctx,
-        "/api/review/nonexistent/accept",
+        "/v1/review/nonexistent/accept",
         serde_json::json!({}),
     )
     .await;
@@ -301,7 +301,7 @@ async fn test_reject_file_not_found() {
     let ctx = setup().await;
     let (status, _) = post(
         &ctx,
-        "/api/review/nonexistent/reject",
+        "/v1/review/nonexistent/reject",
         serde_json::json!({}),
     )
     .await;
@@ -314,15 +314,15 @@ async fn test_reset_db() {
     seed_file(&ctx, "f1", "a.mkv", riply_core::PipelineStatus::NeedsReview).await;
     seed_file(&ctx, "f2", "b.mp4", riply_core::PipelineStatus::Confirmed).await;
 
-    let (status, _) = get(&ctx, "/api/files").await;
+    let (status, _) = get(&ctx, "/v1/files").await;
     assert_eq!(status, 200);
 
-    let (status, body) = delete(&ctx, "/api/files").await;
+    let (status, body) = delete(&ctx, "/v1/files").await;
     assert_eq!(status, 200);
     assert_eq!(body["success"], true);
     assert_eq!(body["data"], 2);
 
-    let (status, body) = get(&ctx, "/api/files").await;
+    let (status, body) = get(&ctx, "/v1/files").await;
     assert_eq!(status, 200);
     assert_eq!(body["data"]["total"], 0);
 }
@@ -333,7 +333,7 @@ async fn test_reset_config() {
 
     let (status, _) = put(
         &ctx,
-        "/api/config",
+        "/v1/config",
         serde_json::json!({
             "host": "127.0.0.1",
             "port": 8080,
@@ -343,11 +343,11 @@ async fn test_reset_config() {
     .await;
     assert_eq!(status, 200);
 
-    let (status, body) = get(&ctx, "/api/config").await;
+    let (status, body) = get(&ctx, "/v1/config").await;
     assert_eq!(status, 200);
     assert_eq!(body["data"]["host"], "127.0.0.1");
 
-    let (status, body) = post(&ctx, "/api/config/reset", serde_json::json!({})).await;
+    let (status, body) = post(&ctx, "/v1/config/reset", serde_json::json!({})).await;
     assert_eq!(status, 200);
     assert_eq!(body["success"], true);
     assert_eq!(body["data"]["host"], "0.0.0.0");
@@ -360,7 +360,7 @@ async fn test_reset_config() {
 #[tokio::test]
 async fn test_move_status_empty() {
     let ctx = setup().await;
-    let (status, body) = get(&ctx, "/api/move/status").await;
+    let (status, body) = get(&ctx, "/v1/move/status").await;
     assert_eq!(status, 200);
     assert_eq!(body["data"]["confirmed_count"], 0);
     assert_eq!(body["data"]["moved_count"], 0);
@@ -373,7 +373,7 @@ async fn test_move_status_with_files() {
     seed_file(&ctx, "m1", "m.mkv", riply_core::PipelineStatus::Moved).await;
     seed_file(&ctx, "m2", "m2.mkv", riply_core::PipelineStatus::Moved).await;
 
-    let (status, body) = get(&ctx, "/api/move/status").await;
+    let (status, body) = get(&ctx, "/v1/move/status").await;
     assert_eq!(status, 200);
     assert_eq!(body["data"]["confirmed_count"], 1);
     assert_eq!(body["data"]["moved_count"], 2);
@@ -384,7 +384,7 @@ async fn test_move_status_with_files() {
 #[tokio::test]
 async fn test_get_config() {
     let ctx = setup().await;
-    let (status, body) = get(&ctx, "/api/config").await;
+    let (status, body) = get(&ctx, "/v1/config").await;
     assert_eq!(status, 200);
     assert_eq!(body["data"]["database_path"], "riply.db");
     assert_eq!(body["data"]["movies_directory"], "movies");
@@ -400,7 +400,7 @@ async fn test_update_config() {
         "movies_directory": "/data/movies",
         "port": 8080
     });
-    let (status, resp) = put(&ctx, "/api/config", body).await;
+    let (status, resp) = put(&ctx, "/v1/config", body).await;
     assert_eq!(status, 200);
     assert_eq!(resp["data"]["movies_directory"], "/data/movies");
     assert_eq!(resp["data"]["port"], 8080);
@@ -411,7 +411,7 @@ async fn test_update_config() {
 #[tokio::test]
 async fn test_list_drives() {
     let ctx = setup().await;
-    let (status, body) = get(&ctx, "/api/ripper/drives").await;
+    let (status, body) = get(&ctx, "/v1/ripper/drives").await;
     assert_eq!(status, 200);
     assert_eq!(body["data"], serde_json::json!([]));
 }
@@ -419,7 +419,7 @@ async fn test_list_drives() {
 #[tokio::test]
 async fn test_start_rip_no_makemkv() {
     let ctx = setup().await;
-    let (status, _body) = post(&ctx, "/api/ripper/0/start", serde_json::json!({})).await;
+    let (status, _body) = post(&ctx, "/v1/ripper/0/start", serde_json::json!({})).await;
     // Returns 503 when MakeMKV is not installed (mkv_client is None in test)
     assert_eq!(status, 503);
 }
@@ -427,7 +427,7 @@ async fn test_start_rip_no_makemkv() {
 #[tokio::test]
 async fn test_cancel_rip_no_active() {
     let ctx = setup().await;
-    let (status, body) = post(&ctx, "/api/ripper/0/cancel", serde_json::json!({})).await;
+    let (status, body) = post(&ctx, "/v1/ripper/0/cancel", serde_json::json!({})).await;
     assert_eq!(status, 200);
     assert!(body["data"].as_str().unwrap().contains("No active rip"));
 }
@@ -437,7 +437,7 @@ async fn test_cancel_rip_no_active() {
 #[tokio::test]
 async fn test_autorip_status_default_off() {
     let ctx = setup().await;
-    let (status, body) = get(&ctx, "/api/ripper/autorip").await;
+    let (status, body) = get(&ctx, "/v1/ripper/autorip").await;
     assert_eq!(status, 200);
     assert_eq!(body["data"], serde_json::json!([]));
 }
@@ -446,15 +446,15 @@ async fn test_autorip_status_default_off() {
 async fn test_autorip_toggle_session_only() {
     let ctx = setup().await;
 
-    let (status, body) = post(&ctx, "/api/ripper/autorip/0/toggle", serde_json::json!({})).await;
+    let (status, body) = post(&ctx, "/v1/ripper/autorip/0/toggle", serde_json::json!({})).await;
     assert_eq!(status, 200);
     assert_eq!(body["data"], serde_json::json!([0]));
 
-    let (status, body) = get(&ctx, "/api/ripper/autorip").await;
+    let (status, body) = get(&ctx, "/v1/ripper/autorip").await;
     assert_eq!(status, 200);
     assert_eq!(body["data"], serde_json::json!([0]));
 
-    let (status, body) = post(&ctx, "/api/ripper/autorip/0/toggle", serde_json::json!({})).await;
+    let (status, body) = post(&ctx, "/v1/ripper/autorip/0/toggle", serde_json::json!({})).await;
     assert_eq!(status, 200);
     assert_eq!(body["data"], serde_json::json!([]));
 }
@@ -462,10 +462,10 @@ async fn test_autorip_toggle_session_only() {
 #[tokio::test]
 async fn test_autorip_toggle_multiple_drives() {
     let ctx = setup().await;
-    post(&ctx, "/api/ripper/autorip/0/toggle", serde_json::json!({})).await;
-    post(&ctx, "/api/ripper/autorip/2/toggle", serde_json::json!({})).await;
+    post(&ctx, "/v1/ripper/autorip/0/toggle", serde_json::json!({})).await;
+    post(&ctx, "/v1/ripper/autorip/2/toggle", serde_json::json!({})).await;
 
-    let (status, body) = get(&ctx, "/api/ripper/autorip").await;
+    let (status, body) = get(&ctx, "/v1/ripper/autorip").await;
     assert_eq!(status, 200);
     assert_eq!(body["data"], serde_json::json!([0, 2]));
 }
@@ -476,7 +476,7 @@ async fn test_config_ignores_autorip_enabled() {
 
     let (status, resp) = put(
         &ctx,
-        "/api/config",
+        "/v1/config",
         serde_json::json!({ "autorip_enabled": true }),
     )
     .await;
@@ -499,13 +499,13 @@ async fn test_pagination() {
         .await;
     }
 
-    let (_, body) = get(&ctx, "/api/files?per_page=2&page=1").await;
+    let (_, body) = get(&ctx, "/v1/files?per_page=2&page=1").await;
     assert_eq!(body["data"]["items"].as_array().unwrap().len(), 2);
     assert_eq!(body["data"]["total"], 5);
     assert_eq!(body["data"]["page"], 1);
     assert_eq!(body["data"]["per_page"], 2);
 
-    let (_, body) = get(&ctx, "/api/files?per_page=2&page=3").await;
+    let (_, body) = get(&ctx, "/v1/files?per_page=2&page=3").await;
     assert_eq!(body["data"]["items"].as_array().unwrap().len(), 1);
 }
 
@@ -514,7 +514,7 @@ async fn test_pagination() {
 #[tokio::test]
 async fn test_api_response_success_format() {
     let ctx = setup().await;
-    let (_, body) = get(&ctx, "/api/files").await;
+    let (_, body) = get(&ctx, "/v1/files").await;
     assert!(body.is_object());
     assert!(body.get("success").is_some());
     assert!(body.get("data").is_some());
@@ -607,13 +607,13 @@ async fn test_debug_routes() {
     let ctx = setup().await;
     let routes = [
         "/health",
-        "/api/files",
-        "/api/files/f1",
-        "/api/review",
-        "/api/review/f1/accept",
-        "/api/ripper/0/start",
-        "/api/config",
-        "/api/move/status",
+        "/v1/files",
+        "/v1/files/f1",
+        "/v1/review",
+        "/v1/review/f1/accept",
+        "/v1/ripper/0/start",
+        "/v1/config",
+        "/v1/move/status",
     ];
     for path in &routes {
         let (status, _) = get(&ctx, path).await;
@@ -633,7 +633,7 @@ async fn test_debug_seed_and_get() {
     eprintln!("DB lookup for f1: {:?}", files.is_some());
 
     // Try the HTTP endpoint
-    let (status, body) = get(&ctx, "/api/files/f1").await;
+    let (status, body) = get(&ctx, "/v1/files/f1").await;
     eprintln!("GET /api/files/f1 -> {} body: {}", status, body);
 
     // Also try get_all_files

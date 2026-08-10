@@ -16,14 +16,14 @@ use crate::error::WebError;
 /// Router for the ripper domain
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/api/ripper/drives", get(list_drives))
-        .route("/api/ripper/status", get(ripper_status))
-        .route("/api/ripper/:index/start", post(start_rip))
-        .route("/api/ripper/:index/cancel", post(cancel_rip))
-        .route("/api/ripper/:index/eject", post(eject_disc))
-        .route("/api/ripper/autorip", get(autorip_status))
+        .route("/v1/ripper/drives", get(list_drives))
+        .route("/v1/ripper/status", get(ripper_status))
+        .route("/v1/ripper/:index/start", post(start_rip))
+        .route("/v1/ripper/:index/cancel", post(cancel_rip))
+        .route("/v1/ripper/:index/eject", post(eject_disc))
+        .route("/v1/ripper/autorip", get(autorip_status))
         .route(
-            "/api/ripper/autorip/:index/toggle",
+            "/v1/ripper/autorip/:index/toggle",
             post(autorip_toggle),
         )
         .with_state(state)

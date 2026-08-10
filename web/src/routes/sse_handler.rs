@@ -14,7 +14,7 @@ use crate::sse::SseManager;
 /// Router for the SSE domain
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/api/sse", get(sse_endpoint))
+        .route("/v1/sse", get(sse_endpoint))
         .with_state(state)
 }
 

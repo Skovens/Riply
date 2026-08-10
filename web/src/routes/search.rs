@@ -11,7 +11,7 @@ use riply_core::{MediaType, MetadataMatch};
 /// Router for the search domain
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/api/search", get(search_metadata))
+        .route("/v1/search", get(search_metadata))
         .with_state(state)
 }
 
