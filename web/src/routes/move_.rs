@@ -1,12 +1,21 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::{extract::State, Json};
+use axum::{extract::State, routing::{get, post}, Json, Router};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
 use crate::api::{ApiResponse, AppState, JobStartedResponse};
 use crate::error::WebError;
+
+/// Router for the move domain
+pub fn router(state: Arc<AppState>) -> Router {
+    Router::new()
+        .route("/api/move", post(start_move))
+        .route("/api/move/status", get(get_move_status))
+        .route("/api/move/preview", get(preview_move))
+        .with_state(state)
+}
 
 #[derive(Debug, Deserialize)]
 pub struct StartMoveBody {

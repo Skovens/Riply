@@ -2,13 +2,25 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Path, Query, State},
-    Json,
+    routing::{delete, get, post},
+    Json, Router,
 };
 use riply_core::FileRecord;
 use serde::Deserialize;
 
 use crate::api::{ApiResponse, AppState, PaginatedResponse};
 use crate::error::WebError;
+
+/// Router for the files domain
+pub fn router(state: Arc<AppState>) -> Router {
+    Router::new()
+        .route("/api/files", get(list_files).delete(reset_db))
+        .route(
+            "/api/files/:id",
+            get(get_file).post(update_file).delete(delete_file),
+        )
+        .with_state(state)
+}
 
 #[derive(Debug, Deserialize)]
 pub struct FileListParams {

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use axum::{
     http::{StatusCode, Uri},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::get,
     Router,
 };
 use riply_core::{MetadataSearcher, RipBackend};
@@ -120,51 +120,17 @@ pub fn create_router(state: Arc<AppState>) -> Router {
 
     Router::new()
         .route("/health", get(|| async { "OK" }))
-        // Files
-        .route("/api/files", get(files::list_files).delete(files::reset_db))
-        .route(
-            "/api/files/:id",
-            get(files::get_file)
-                .post(files::update_file)
-                .delete(files::delete_file),
-        )
-        // Review
-        .route("/api/review", get(review::get_review_queue))
-        .route("/api/review/:id/accept", post(review::accept_file))
-        .route("/api/review/:id/reject", post(review::reject_file))
-        // Scan
-        .route("/api/scan", post(scan::start_scan))
-        // Analyze
-        .route("/api/analyze", post(analyze::start_analyze))
-        .route("/api/analyze/retry-failed", post(analyze::retry_failed))
-        // Move
-        .route("/api/move", post(mover_routes::start_move))
-        .route("/api/move/status", get(mover_routes::get_move_status))
-        .route("/api/move/preview", get(mover_routes::preview_move))
-        // Jobs
-        .route("/api/jobs", get(jobs::list_jobs))
-        .route("/api/jobs/:id", get(jobs::get_job))
-        .route("/api/jobs/:id/cancel", post(jobs::cancel_job))
-        // Ripper
-        .route("/api/ripper/drives", get(ripper::list_drives))
-        .route("/api/ripper/status", get(ripper::ripper_status))
-        .route("/api/ripper/:index/start", post(ripper::start_rip))
-        .route("/api/ripper/:index/cancel", post(ripper::cancel_rip))
-        .route("/api/ripper/:index/eject", post(ripper::eject_disc))
-        .route("/api/ripper/autorip", get(ripper::autorip_status))
-        .route(
-            "/api/ripper/autorip/:index/toggle",
-            post(ripper::autorip_toggle),
-        )
-        // Config
-        .route("/api/config", get(cfg::get_config).put(cfg::update_config))
-        .route("/api/config/reset", post(cfg::reset_config))
-        // Search
-        .route("/api/search", get(search::search_metadata))
-        // SSE
-        .route("/api/sse", get(sse_handler::sse_endpoint))
+        .merge(files::router(Arc::clone(&state)))
+        .merge(review::router(Arc::clone(&state)))
+        .merge(scan::router(Arc::clone(&state)))
+        .merge(analyze::router(Arc::clone(&state)))
+        .merge(mover_routes::router(Arc::clone(&state)))
+        .merge(jobs::router(Arc::clone(&state)))
+        .merge(ripper::router(Arc::clone(&state)))
+        .merge(cfg::router(Arc::clone(&state)))
+        .merge(search::router(Arc::clone(&state)))
+        .merge(sse_handler::router(Arc::clone(&state)))
         // Static files (embedded frontend)
         .fallback(embedded_assets)
         .layer(TraceLayer::new_for_http())
-        .with_state(state)
 }

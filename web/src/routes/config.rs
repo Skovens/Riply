@@ -1,11 +1,19 @@
 use std::sync::Arc;
 
-use axum::{extract::State, Json};
+use axum::{extract::State, routing::{get, post, put}, Json, Router};
 use infra::Config;
 use serde::Deserialize;
 
 use crate::api::{ApiResponse, AppState};
 use crate::error::WebError;
+
+/// Router for the config domain
+pub fn router(state: Arc<AppState>) -> Router {
+    Router::new()
+        .route("/api/config", get(get_config).put(update_config))
+        .route("/api/config/reset", post(reset_config))
+        .with_state(state)
+}
 
 pub async fn get_config(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Config>> {
     let config = state.config.read().await;

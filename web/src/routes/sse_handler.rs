@@ -3,11 +3,20 @@ use std::sync::Arc;
 use axum::{
     extract::State,
     response::sse::{Event, Sse},
+    routing::get,
+    Router,
 };
 use tracing::info;
 
 use crate::api::AppState;
 use crate::sse::SseManager;
+
+/// Router for the SSE domain
+pub fn router(state: Arc<AppState>) -> Router {
+    Router::new()
+        .route("/api/sse", get(sse_endpoint))
+        .with_state(state)
+}
 
 pub async fn sse_endpoint(
     State(state): State<Arc<AppState>>,

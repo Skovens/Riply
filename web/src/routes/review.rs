@@ -4,9 +4,19 @@ use crate::api::{ApiResponse, AppState};
 use crate::error::WebError;
 use axum::{
     extract::{Path, State},
-    Json,
+    routing::{get, post},
+    Json, Router,
 };
 use riply_core::FileRecord;
+
+/// Router for the review domain
+pub fn router(state: Arc<AppState>) -> Router {
+    Router::new()
+        .route("/api/review", get(get_review_queue))
+        .route("/api/review/:id/accept", post(accept_file))
+        .route("/api/review/:id/reject", post(reject_file))
+        .with_state(state)
+}
 
 pub async fn get_review_queue(
     State(state): State<Arc<AppState>>,

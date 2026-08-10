@@ -1,10 +1,18 @@
 use std::sync::Arc;
 
-use axum::{extract::State, Json};
+use axum::{extract::State, routing::post, Json, Router};
 use tracing::info;
 
 use crate::api::{ApiResponse, AppState, JobStartedResponse};
 use crate::error::WebError;
+
+/// Router for the analyze domain
+pub fn router(state: Arc<AppState>) -> Router {
+    Router::new()
+        .route("/api/analyze", post(start_analyze))
+        .route("/api/analyze/retry-failed", post(retry_failed))
+        .with_state(state)
+}
 
 pub async fn start_analyze(
     State(state): State<Arc<AppState>>,

@@ -3,7 +3,8 @@ use std::time::Instant;
 
 use axum::{
     extract::{Path, State},
-    Json,
+    routing::{get, post},
+    Json, Router,
 };
 use riply_core::{DriveInfo, DriveState, MetadataSearcher, RipEvent, RipHandle};
 use serde::Deserialize;
@@ -11,6 +12,22 @@ use tracing::{info, warn};
 
 use crate::api::{ApiResponse, AppState};
 use crate::error::WebError;
+
+/// Router for the ripper domain
+pub fn router(state: Arc<AppState>) -> Router {
+    Router::new()
+        .route("/api/ripper/drives", get(list_drives))
+        .route("/api/ripper/status", get(ripper_status))
+        .route("/api/ripper/:index/start", post(start_rip))
+        .route("/api/ripper/:index/cancel", post(cancel_rip))
+        .route("/api/ripper/:index/eject", post(eject_disc))
+        .route("/api/ripper/autorip", get(autorip_status))
+        .route(
+            "/api/ripper/autorip/:index/toggle",
+            post(autorip_toggle),
+        )
+        .with_state(state)
+}
 
 pub async fn ripper_status() -> Json<ApiResponse<infra::InstallationStatus>> {
     let status = tokio::task::spawn_blocking(infra::check_installation)

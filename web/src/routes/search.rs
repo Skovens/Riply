@@ -1,12 +1,19 @@
 use std::sync::Arc;
 
-use axum::{extract::Query, extract::State, Json};
+use axum::{extract::Query, extract::State, routing::get, Json, Router};
 use serde::Deserialize;
 use tracing::info;
 
 use crate::api::{ApiResponse, AppState};
 use crate::error::WebError;
 use riply_core::{MediaType, MetadataMatch};
+
+/// Router for the search domain
+pub fn router(state: Arc<AppState>) -> Router {
+    Router::new()
+        .route("/api/search", get(search_metadata))
+        .with_state(state)
+}
 
 #[derive(Debug, Deserialize)]
 pub struct SearchQuery {

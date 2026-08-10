@@ -2,12 +2,22 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Path, State},
-    Json,
+    routing::{delete, get, post},
+    Json, Router,
 };
 use serde::Serialize;
 
 use crate::api::{ApiResponse, AppState};
 use crate::error::WebError;
+
+/// Router for the jobs domain
+pub fn router(state: Arc<AppState>) -> Router {
+    Router::new()
+        .route("/api/jobs", get(list_jobs))
+        .route("/api/jobs/:id", get(get_job))
+        .route("/api/jobs/:id/cancel", post(cancel_job))
+        .with_state(state)
+}
 
 #[derive(Serialize)]
 pub struct JobInfoResponse {

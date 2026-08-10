@@ -2,12 +2,19 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::{extract::State, Json};
+use axum::{extract::State, routing::post, Json, Router};
 use serde::Deserialize;
 use tracing::info;
 
 use crate::api::{ApiResponse, AppState, JobStartedResponse};
 use crate::error::WebError;
+
+/// Router for the scan domain
+pub fn router(state: Arc<AppState>) -> Router {
+    Router::new()
+        .route("/api/scan", post(start_scan))
+        .with_state(state)
+}
 
 #[derive(Debug, Deserialize)]
 pub struct ScanBody {
