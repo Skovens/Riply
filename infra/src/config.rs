@@ -196,6 +196,24 @@ impl Config {
             ),
         }
     }
+
+    /// Validate the full configuration for required fields and valid ranges.
+    /// Returns `Ok(())` if valid, or a descriptive error message.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.database_path.is_empty() {
+            return Err("database_path is required".to_string());
+        }
+        if self.movies_directory.is_empty() {
+            return Err("movies_directory is required".to_string());
+        }
+        if self.tv_directory.is_empty() {
+            return Err("tv_directory is required".to_string());
+        }
+        if self.port == 0 {
+            return Err("port must be between 1 and 65535".to_string());
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -360,5 +378,41 @@ makemkvcon_path = "/usr/bin/makemkvcon"
         };
         let err = config.validate_for_ripping().unwrap_err();
         assert!(err.contains("Parent directory"));
+    }
+
+    #[test]
+    fn test_validate_ok() {
+        let config = Config::default();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_empty_database_path() {
+        let config = Config {
+            database_path: "".to_string(),
+            ..Config::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(err.contains("database_path"));
+    }
+
+    #[test]
+    fn test_validate_empty_movies_directory() {
+        let config = Config {
+            movies_directory: "".to_string(),
+            ..Config::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(err.contains("movies_directory"));
+    }
+
+    #[test]
+    fn test_validate_zero_port() {
+        let config = Config {
+            port: 0,
+            ..Config::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(err.contains("port"));
     }
 }
