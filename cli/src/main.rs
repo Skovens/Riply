@@ -52,9 +52,16 @@ enum Command {
     Scan {
         /// Directory to scan
         directory: String,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Analyze scanned files
-    Analyze,
+    Analyze {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Review files that need manual confirmation
     Review {
         /// Enable YOLO mode (move without review)
@@ -62,7 +69,11 @@ enum Command {
         yolo: bool,
     },
     /// Move confirmed files to organized library
-    Move,
+    Move {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Manage disc ripping
     Rip {
         /// Subcommand for rip operations
@@ -127,7 +138,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Execute command
     match cli.command {
-        Command::Scan { directory } => {
+        Command::Scan { directory, json } => {
             let searcher: Option<Box<dyn MetadataSearcher>> =
                 if config.tmdb_api_key.is_some() || config.omdb_api_key.is_some() {
                     let client = infra::HttpClient::new(
@@ -138,16 +149,16 @@ async fn main() -> anyhow::Result<()> {
                 } else {
                     None
                 };
-            scan_directory(&directory, &config, searcher.as_deref()).await?;
+            scan_directory(&directory, &config, searcher.as_deref(), json).await?;
         }
-        Command::Analyze => {
-            analyze_files(&db, &config).await?;
+        Command::Analyze { json } => {
+            analyze_files(&db, &config, json).await?;
         }
         Command::Review { yolo } => {
             review_files(yolo, &db).await?;
         }
-        Command::Move => {
-            move_files(&db, &config).await?;
+        Command::Move { json } => {
+            move_files(&db, &config, json).await?;
         }
         Command::Rip { rip_command } => {
             do_rip(rip_command, &config).await?;

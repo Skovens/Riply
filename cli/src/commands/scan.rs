@@ -1,6 +1,7 @@
 use app::ScannerService;
 use infra::{Config, Database};
 use riply_core::MetadataSearcher;
+use serde::Serialize;
 use std::path::Path;
 use tracing::info;
 
@@ -9,6 +10,7 @@ pub async fn scan_directory(
     directory: &str,
     config: &Config,
     searcher: Option<&dyn MetadataSearcher>,
+    json: bool,
 ) -> Result<(), anyhow::Error> {
     info!(dir = %directory, "Scanning directory");
 
@@ -30,11 +32,44 @@ pub async fn scan_directory(
     }
 
     if result.records.is_empty() {
-        println!("No media files found in {}", directory);
+        if json {
+            let out = ScanOutput {
+                directory: directory.to_string(),
+                title_groups: 0,
+                files: 0,
+                records: vec![],
+            };
+            println!("{}", serde_json::to_string_pretty(&out)?);
+        } else {
+            println!("No media files found in {}", directory);
+        }
         return Ok(());
     }
 
     let group_count = result.title_groups.len();
+    if json {
+        let records: Vec<serde_json::Value> = result
+            .records
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "id": r.id,
+                    "filename": r.filename,
+                    "status": format!("{}", r.status),
+                    "size": r.size,
+                })
+            })
+            .collect();
+        let out = ScanOutput {
+            directory: directory.to_string(),
+            title_groups: group_count,
+            files: result.records.len(),
+            records,
+        };
+        println!("{}", serde_json::to_string_pretty(&out)?);
+        return Ok(());
+    }
+
     if group_count > 0 {
         println!("Found {} title group(s):", group_count);
         for g in &result.title_groups {
@@ -58,4 +93,13 @@ pub async fn scan_directory(
     println!("{} records saved to database", result.records.len());
 
     Ok(())
+}
+
+/// JSON output for scan command
+#[derive(Serialize)]
+struct ScanOutput {
+    directory: String,
+    title_groups: usize,
+    files: usize,
+    records: Vec<serde_json::Value>,
 }
