@@ -124,29 +124,32 @@ Scope options: `core`, `app`, `infra`, `web`, `cli`, `scanner`, `metadata`,
 
 ### How to Track Progress
 
+**All progress documentation lives in the repo** — committed task board, plan
+files, ADRs, and AGENTS.md. Do not use OpenHands memory dirs or external
+notes; anything worth recording must be a committed repo file so it survives
+workspace resets.
+
 **Session start ritual — always do this first:**
 
 1. Read `AGENTS.md` (this file).
 2. Read `.opencode/plans/todo.md` — the "Next Up" callout tells you what to
    work on. It is the canonical task board; keep it accurate.
-3. Read `.openhands/memory/MEMORY.md` and the most recent daily log
-   (`.openhands/memory/*.md`) for session notes.
-4. Run `git --no-pager log --oneline -15` — the git history is the final
+3. Run `git --no-pager log --oneline -15` — the git history is the final
    source of truth for what has already been done. **Never re-implement or
    re-commit work that git already shows as done.**
 
 **Session-end handoff checklist** (before finishing or being compacted):
 
-1. Commit all work incrementally (small, frequent commits — see Commit
-   Messages). Do not leave uncommitted work; the workspace is reset
-   occasionally and uncommitted work is lost.
+1. **Code done → test → commit → push.** Every feature or fix must be
+   committed before you stop. Do not leave uncommitted work; the workspace is
+   reset occasionally and uncommitted work is lost.
 2. Update task status in `.opencode/plans/todo.md` (`PENDING` →
    `IN_PROGRESS` → `DONE`), add completion notes, and update the "Next Up"
    callout so the next session starts in the right place.
-3. Append a session note to `.openhands/memory/YYYY-MM-DD.md` in this repo:
-   what changed, key commits (SHAs), decisions, blockers, gotchas.
-   Fold durable facts into `.openhands/memory/MEMORY.md`.
-4. If a new architectural decision was made, create an ADR in `docs/adr/`.
+3. Record decisions, blockers, and gotchas in the repo: a decision goes in
+   `docs/adr/` (or a `## Decisions` note in the relevant plan file); gotchas
+   and conventions go in AGENTS.md.
+4. Push your commits to the remote.
 
 Update the task board as you go (not just at the end) so a compaction or
 handoff mid-task still has accurate state.

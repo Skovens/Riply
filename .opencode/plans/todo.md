@@ -3,8 +3,10 @@
 ## Next Up
 
 > **Next Up:** No pending roadmap items — all of `improvements.md` (Batch 5, §2–§4)
-> is DONE. The only remaining item is the "consider" task **#31** (Merge `web`
-> crate into `cli`) — not started, no plan file, low priority.
+> is DONE. The last "consider" item **#31** (Merge `web` crate into `cli`) was
+> **decided against on 2026-08-02** — pure internal refactor with no user value;
+> keeping `web` separate preserves the option of a future second binary (daemon /
+> other UI) sharing the router. The roadmap is now fully closed out.
 >
 > **Last session (2026-08-02):** Finished the last roadmap gaps in three commits:
 > - `feat(web): add CORS and request timeout middleware` (#23) — permissive CORS +
@@ -184,16 +186,14 @@ Source: `improvements.md`
 | 28 | Feature: Watch directory / filesystem events (`notify` crate) | DONE | `improvements.md` §4.4 |
 | 29 | Feature: Metadata enrichment (genres, runtime, cast, content rating) | DONE | `improvements.md` §4.3, migration 004 (2026-08-02) |
 | 30 | Feature: Backup and restore commands | DONE | `improvements.md` §4.5 (2026-08-02) |
-| 31 | Consider: Merge `web` crate into `cli` | PENDING | `improvements.md` §1.5 — only remaining item |
+| 31 | Consider: Merge `web` crate into `cli` | DECIDED AGAINST | `improvements.md` §1.5 — closed 2026-08-02: no user value, pure refactor; keep `web` separate for a future second binary |
 | 32 | Consider: API versioning (`/api/v1` prefix) | DONE | `improvements.md` §4.6, ADR-017 (`/v1/` prefix) |
 
 ---
 
 ## Active Tasks
 
-| # | Task | Status | Depends On | Plan File |
-|---|------|--------|------------|-----------|
-| 31 | Consider: Merge `web` crate into `cli` | PENDING | — | `improvements.md` §1.5 |
+*None — the roadmap is fully closed out. All items are DONE or DECIDED AGAINST.
 
 ## Completed Tasks
 
@@ -223,6 +223,7 @@ Source: `improvements.md`
 | 29 | Metadata enrichment (genres, runtime, cast, rating) | `improvements.md` §4.3, migration 004 (2026-08-02) |
 | 30 | Backup and restore commands | `improvements.md` §4.5 (2026-08-02) |
 | 32 | API versioning (`/v1/` prefix, ADR-017) | `improvements.md` §4.6 |
+| 31 | ~~Merge `web` crate into `cli`~~ — **decided against** 2026-08-02 (no user value; keep `web` separate) | `improvements.md` §1.5 |
 | 13–17, 19 | Architecture & robustness quick wins (instrument spans, TraceLayer, retry, graceful shutdown, `--json`, WebError) | `improvements.md` §2–3 |
 | 25 | healthchecks.io heartbeat integration | `improvements.md` §2.5, `infra/src/healthchecks.rs` |
 | 33–43 | Ripping overhaul (11 tasks) | `makemkv-implementation.md`, `makemkv-setup.md` |
