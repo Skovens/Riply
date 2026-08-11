@@ -1,5 +1,6 @@
 // Commands module - CLI subcommand implementations
 pub mod analyze;
+pub mod backup;
 pub mod duplicate;
 pub mod library;
 pub mod mover;
@@ -12,6 +13,7 @@ pub mod status;
 pub mod watch;
 
 pub use analyze::analyze_files;
+pub use backup::{backup_database, restore_database};
 pub use duplicate::find_duplicates;
 pub use library::scan_library;
 pub use mover::move_files;

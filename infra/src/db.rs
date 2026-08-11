@@ -1,11 +1,13 @@
+use std::path::Path;
 use std::str::FromStr;
 
-use sqlx::{sqlite::SqlitePoolOptions, Row};
+use sqlx::{sqlite::SqlitePoolOptions, Acquire, Row};
 use tracing::info;
 
 /// Database adapter - handles SQLite connections and queries
 pub struct Database {
     pool: sqlx::SqlitePool,
+    db_path: String,
 }
 
 impl Database {
@@ -30,7 +32,10 @@ impl Database {
         // Verify connection
         sqlx::query("SELECT 1").execute(&pool).await?;
 
-        Ok(Database { pool })
+        Ok(Database {
+            pool,
+            db_path: path.to_string(),
+        })
     }
 
     /// Apply pending migrations
@@ -758,6 +763,116 @@ impl Database {
         info!(marked = marked, "Marked duplicate files");
         Ok(marked)
     }
+
+    /// Backup the database to a destination file using SQLite's VACUUM INTO.
+    /// The backup is a consistent snapshot even if the DB is in use (WAL mode).
+    pub async fn backup(&self, destination: &Path) -> Result<(), anyhow::Error> {
+        info!(destination = %destination.display(), "Backing up database");
+
+        if let Some(parent) = destination.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+
+        let dest_str = destination.to_string_lossy().to_string();
+        let sql = format!("VACUUM INTO '{}'", dest_str.replace('\'', "''"));
+        sqlx::query(&sql).execute(&self.pool).await?;
+
+        info!(destination = %destination.display(), "Database backup complete");
+        Ok(())
+    }
+
+    /// Restore the database from a backup file by replacing the current database.
+    /// The pool is kept open: the backup is attached and each table/index is
+    /// recreated from its original DDL, then populated from the backup data.
+    pub async fn restore(&self, source: &Path) -> Result<(), anyhow::Error> {
+        info!(source = %source.display(), "Restoring database from backup");
+
+        if !source.exists() {
+            anyhow::bail!("Backup file not found: {}", source.display());
+        }
+
+        let src_str = source.to_string_lossy().to_string();
+
+        // Use a dedicated connection so ATTACH/DETACH and the copy transaction
+        // all run on the same connection. DETACH must run outside the
+        // transaction — an open read transaction on the attached DB (from the
+        // INSERT...SELECT) makes SQLite refuse to detach with "database is
+        // locked".
+        let mut conn = self.pool.acquire().await?;
+
+        let attach = format!(
+            "ATTACH DATABASE '{}' AS backup_db",
+            src_str.replace('\'', "''")
+        );
+        sqlx::query(&attach).execute(&mut *conn).await?;
+
+        // Copy schema and data inside a transaction for atomicity.
+        let mut tx = conn.begin().await?;
+
+        // Drop existing user tables so the backup becomes the source of truth.
+        let tables = sqlx::query(
+            "SELECT name FROM main.sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        for row in &tables {
+            let name: String = row.get("name");
+            sqlx::query(&format!("DROP TABLE IF EXISTS main.\"{}\"", name))
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        // Recreate tables from the backup's DDL.
+        let backup_tables = sqlx::query(
+            "SELECT name, sql FROM backup_db.sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        for row in &backup_tables {
+            let name: String = row.get("name");
+            let ddl: String = row.get("sql");
+            sqlx::query(&ddl).execute(&mut *tx).await?;
+            sqlx::query(&format!(
+                "INSERT INTO main.\"{}\" SELECT * FROM backup_db.\"{}\"",
+                name, name
+            ))
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        // Recreate indexes from the backup's DDL. Unqualified DDL from the
+        // attached backup creates the index in the main schema.
+        let backup_indexes = sqlx::query(
+            "SELECT name, sql FROM backup_db.sqlite_master WHERE type='index' AND sql IS NOT NULL",
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        for row in &backup_indexes {
+            let name: String = row.get("name");
+            let ddl: String = row.get("sql");
+            sqlx::query(&format!("DROP INDEX IF EXISTS main.\"{}\"", name))
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query(&ddl).execute(&mut *tx).await?;
+        }
+
+        tx.commit().await?;
+
+        // Detach after the transaction has released its read lock on backup_db.
+        sqlx::query("DETACH DATABASE backup_db")
+            .execute(&mut *conn)
+            .await?;
+
+        info!(source = %source.display(), "Database restored");
+        Ok(())
+    }
+
+    /// Get the database file path.
+    pub fn get_db_path(&self) -> &str {
+        &self.db_path
+    }
 }
 
 #[cfg(test)]
@@ -812,5 +927,40 @@ mod tests {
         assert!(files[0].duplicate_path.is_none());
 
         db.update_file(&files[0]).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_backup_restore_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let backup_path = dir.path().join("backup.db");
+
+        let db = Database::new(db_path.to_str().unwrap()).await.unwrap();
+        db.migrate().await.unwrap();
+
+        let file = riply_core::FileRecord::new(
+            "backup-test".to_string(),
+            std::path::PathBuf::from("/test/backup.mkv"),
+            "backup.mkv".to_string(),
+            "hash-backup".to_string(),
+        );
+        db.save_file(&file).await.unwrap();
+
+        // Backup to a separate file
+        db.backup(&backup_path).await.unwrap();
+        assert!(backup_path.exists());
+
+        // Mutate the live DB so restore has something to undo
+        db.delete_file("backup-test").await.unwrap();
+        let files = db.get_all_files().await.unwrap();
+        assert_eq!(files.len(), 0);
+
+        // Restore from backup
+        db.restore(&backup_path).await.unwrap();
+
+        let files = db.get_all_files().await.unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].id, "backup-test");
+        assert_eq!(files[0].filename, "backup.mkv");
     }
 }

@@ -5,9 +5,9 @@
 
 use clap::{Parser, Subcommand, ValueEnum};
 use commands::{
-    analyze_files, duplicate::find_duplicates, library::scan_library, move_files, review_files,
-    rip_command as do_rip, run_setup, scan_directory, show_status, watch::watch_directory,
-    RipCommand, SetupArgs,
+    analyze_files, backup_database, duplicate::find_duplicates, library::scan_library,
+    move_files, restore_database, review_files, rip_command as do_rip, run_setup, scan_directory,
+    show_status, watch::watch_directory, RipCommand, SetupArgs,
 };
 use infra::{Config, Database};
 use riply_core::{MetadataSearcher, MediaType};
@@ -121,6 +121,17 @@ enum Command {
         #[arg(long, default_value = "movie")]
         media_type: String,
     },
+    /// Backup the database to a file
+    Backup {
+        /// Destination backup file path (default: riply_backup_<timestamp>.db)
+        #[arg(short, long)]
+        output: Option<std::path::PathBuf>,
+    },
+    /// Restore the database from a backup file
+    Restore {
+        /// Source backup file to restore from
+        source: std::path::PathBuf,
+    },
     /// Set up MakeMKV installation
     Setup(SetupArgs),
 }
@@ -218,6 +229,12 @@ async fn main() -> anyhow::Result<()> {
                 _ => MediaType::Movie,
             };
             watch_directory(&directory, &config, media_type).await?;
+        }
+        Command::Backup { output } => {
+            backup_database(&db, output).await?;
+        }
+        Command::Restore { source } => {
+            restore_database(&db, source).await?;
         }
         Command::Setup(args) => {
             run_setup(args)?;
