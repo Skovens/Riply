@@ -57,6 +57,11 @@ What becomes easier or more difficult to do?
 | [011](011-real-time-updates.md) | Real-Time Web Updates | Accepted | 2026-08-02 |
 | [012](012-testing-strategy.md) | Testing Strategy | Accepted | 2026-08-02 |
 | [013](013-progress-tracking.md) | Progress Tracking System | Accepted | 2026-08-02 |
+| [014](014-router-splitting.md) | Router Splitting (Per-Domain Modules) | Accepted | 2026-08-02 |
+| [015](015-typed-web-error.md) | Typed Web Error Type | Accepted | 2026-08-02 |
+| [016](016-sqlx-migration-system.md) | SQLx Migration System | Accepted | 2026-08-02 |
+| [017](017-api-versioning.md) | API Versioning | Accepted | 2026-08-02 |
+| [018](018-graceful-shutdown.md) | Graceful Shutdown | Accepted | 2026-08-02 |
 
 ## Creating a New ADR
 
@@ -66,18 +71,6 @@ What becomes easier or more difficult to do?
 4. Discuss and update to **Accepted** when agreed upon
 5. Update this index
 6. Reference the ADR in relevant code comments and documentation
-
-## Planned ADRs
-
-These code-level decisions are identified as needing formal ADRs before or during implementation:
-
-| # | Topic | Source | Priority |
-|---|-------|--------|----------|
-| 014 | Router Splitting (per-domain modules) | improvements.md §1.2 | Medium |
-| 015 | Typed Web Error Type | improvements.md §1.3 | Medium |
-| 016 | SQLx Migration System | improvements.md §1.4 | Medium |
-| 017 | API Versioning | improvements.md §4.6 | Low |
-| 018 | Graceful Shutdown | improvements.md §2.2 | Low |
 
 ## Documentation Note
 
