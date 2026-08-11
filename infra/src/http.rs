@@ -548,10 +548,7 @@ impl MetadataSearcher for HttpClient {
         media_type: &MediaType,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<
-                    Output = Result<MetadataEnrichment, MetadataError>,
-                > + Send
-                + '_,
+            dyn std::future::Future<Output = Result<MetadataEnrichment, MetadataError>> + Send + '_,
         >,
     > {
         let media_type = media_type.clone();
@@ -693,12 +690,20 @@ mod tests {
         );
         assert_eq!(enrichment.runtime, Some(139));
         assert_eq!(enrichment.content_rating.as_deref(), Some("R"));
-        assert_eq!(enrichment.overview.as_deref(), Some("An insomniac office worker."));
-        assert_eq!(enrichment.cast_list.as_deref(), Some(&[
-            "Brad Pitt".to_string(),
-            "Edward Norton".to_string(),
-            "Helena Bonham Carter".to_string()
-        ][..]));
+        assert_eq!(
+            enrichment.overview.as_deref(),
+            Some("An insomniac office worker.")
+        );
+        assert_eq!(
+            enrichment.cast_list.as_deref(),
+            Some(
+                &[
+                    "Brad Pitt".to_string(),
+                    "Edward Norton".to_string(),
+                    "Helena Bonham Carter".to_string()
+                ][..]
+            )
+        );
     }
 
     #[tokio::test]

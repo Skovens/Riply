@@ -75,11 +75,20 @@ pub async fn find_duplicates(
         if duplicates.is_empty() {
             println!("No duplicates found.");
         } else {
-            println!("Found {} duplicate group(s) with {} total duplicate(s):", duplicates.len(), total_duplicates);
+            println!(
+                "Found {} duplicate group(s) with {} total duplicate(s):",
+                duplicates.len(),
+                total_duplicates
+            );
             println!();
 
             for (i, group) in duplicates.iter().enumerate() {
-                println!("Group {} ({} files, hash: {}...):", i + 1, group.len(), &group[0].hash[..12]);
+                println!(
+                    "Group {} ({} files, hash: {}...):",
+                    i + 1,
+                    group.len(),
+                    &group[0].hash[..12]
+                );
                 for (j, file) in group.iter().enumerate() {
                     let marker = if j == 0 { "[original]" } else { "[duplicate]" };
                     println!("  {} {} ({:?})", marker, file.filename, file.path);

@@ -70,10 +70,14 @@ pub async fn scan_directory(
         // Save each file record to database
         let file_pb = ProgressBar::new(result.records.len() as u64);
         file_pb.set_message("Saving files...");
-        file_pb.set_style(ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
-            .unwrap()
-            .progress_chars("#>-"));
+        file_pb.set_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}",
+                )
+                .unwrap()
+                .progress_chars("#>-"),
+        );
 
         for record in &result.records {
             db.save_file(record).await?;

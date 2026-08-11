@@ -6,8 +6,8 @@ use tokio::sync::RwLock;
 
 use app::JobScheduler;
 use infra::{Config, Database};
-use web::{create_router, AppState, SseManager};
 use web::metrics::Metrics;
+use web::{create_router, AppState, SseManager};
 
 struct TestContext {
     addr: std::net::SocketAddr,
@@ -287,24 +287,14 @@ async fn test_reject_file() {
 #[tokio::test]
 async fn test_accept_file_not_found() {
     let ctx = setup().await;
-    let (status, _) = post(
-        &ctx,
-        "/v1/review/nonexistent/accept",
-        serde_json::json!({}),
-    )
-    .await;
+    let (status, _) = post(&ctx, "/v1/review/nonexistent/accept", serde_json::json!({})).await;
     assert_eq!(status, 404);
 }
 
 #[tokio::test]
 async fn test_reject_file_not_found() {
     let ctx = setup().await;
-    let (status, _) = post(
-        &ctx,
-        "/v1/review/nonexistent/reject",
-        serde_json::json!({}),
-    )
-    .await;
+    let (status, _) = post(&ctx, "/v1/review/nonexistent/reject", serde_json::json!({})).await;
     assert_eq!(status, 404);
 }
 

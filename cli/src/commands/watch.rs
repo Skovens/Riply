@@ -1,6 +1,6 @@
 use app::ScannerService;
 use infra::{Config, Database};
-use riply_core::{MetadataSearcher, MediaType};
+use riply_core::{MediaType, MetadataSearcher};
 use std::collections::HashSet;
 use std::path::Path;
 use std::time::Duration;
@@ -25,10 +25,8 @@ pub async fn watch_directory(
     // Initialize metadata searcher if API keys are configured
     let searcher: Option<Box<dyn MetadataSearcher>> =
         if config.tmdb_api_key.is_some() || config.omdb_api_key.is_some() {
-            let client = infra::HttpClient::new(
-                config.tmdb_api_key.clone(),
-                config.omdb_api_key.clone(),
-            );
+            let client =
+                infra::HttpClient::new(config.tmdb_api_key.clone(), config.omdb_api_key.clone());
             Some(Box::new(client))
         } else {
             None

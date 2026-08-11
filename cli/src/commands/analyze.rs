@@ -53,10 +53,14 @@ pub async fn analyze_files(
         use indicatif::{ProgressBar, ProgressStyle};
         let pb = ProgressBar::new(records.len() as u64);
         pb.set_message("Analyzing files...");
-        pb.set_style(ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
-            .unwrap()
-            .progress_chars("#>-"));
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}",
+                )
+                .unwrap()
+                .progress_chars("#>-"),
+        );
 
         for record in &records {
             let result = analyzer.analyze_file(record).await;

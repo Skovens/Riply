@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
-use axum::{extract::State, routing::{get, post}, Json, Router};
+use axum::{
+    extract::State,
+    routing::{get, post},
+    Json, Router,
+};
 use infra::Config;
 use serde::Deserialize;
 

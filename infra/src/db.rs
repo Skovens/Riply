@@ -54,9 +54,7 @@ impl Database {
     pub async fn migrate(&self) -> Result<(), anyhow::Error> {
         info!("Applying database migrations");
 
-        sqlx::migrate!("src/migrations")
-            .run(&self.pool)
-            .await?;
+        sqlx::migrate!("src/migrations").run(&self.pool).await?;
 
         info!("Migrations applied successfully");
         Ok(())
@@ -754,10 +752,7 @@ impl Database {
             std::collections::HashMap::new();
         for row in &rows {
             let file = self.row_to_file_record(row)?;
-            hash_groups
-                .entry(file.hash.clone())
-                .or_default()
-                .push(file);
+            hash_groups.entry(file.hash.clone()).or_default().push(file);
         }
 
         // Only keep groups with more than one file (actual duplicates)
@@ -766,13 +761,19 @@ impl Database {
             .filter(|group| group.len() > 1)
             .collect();
 
-        info!(duplicate_groups = duplicates.len(), "Found duplicate groups");
+        info!(
+            duplicate_groups = duplicates.len(),
+            "Found duplicate groups"
+        );
         Ok(duplicates)
     }
 
     /// Mark files as duplicates by setting their duplicate_path field.
     /// The first file in each group is kept as the "original", the rest are marked.
-    pub async fn mark_duplicates(&self, duplicate_groups: &[Vec<riply_core::FileRecord>]) -> Result<usize, anyhow::Error> {
+    pub async fn mark_duplicates(
+        &self,
+        duplicate_groups: &[Vec<riply_core::FileRecord>],
+    ) -> Result<usize, anyhow::Error> {
         info!("Marking duplicate files");
         let mut marked = 0;
 
@@ -1026,10 +1027,19 @@ mod tests {
 
         let files = db.get_all_files().await.unwrap();
         assert_eq!(files.len(), 1);
-        assert_eq!(files[0].genres.as_deref(), Some(&["Drama".to_string(), "Crime".to_string()][..]));
+        assert_eq!(
+            files[0].genres.as_deref(),
+            Some(&["Drama".to_string(), "Crime".to_string()][..])
+        );
         assert_eq!(files[0].runtime, Some(139));
         assert_eq!(files[0].content_rating.as_deref(), Some("R"));
-        assert_eq!(files[0].overview.as_deref(), Some("An insomniac office worker."));
-        assert_eq!(files[0].cast_list.as_deref(), Some(&["Brad Pitt".to_string(), "Edward Norton".to_string()][..]));
+        assert_eq!(
+            files[0].overview.as_deref(),
+            Some("An insomniac office worker.")
+        );
+        assert_eq!(
+            files[0].cast_list.as_deref(),
+            Some(&["Brad Pitt".to_string(), "Edward Norton".to_string()][..])
+        );
     }
 }

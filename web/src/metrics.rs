@@ -16,9 +16,7 @@ impl Metrics {
     pub fn record_request(&self, route: &str) {
         let key = route.to_string();
         let mut counts = self.request_counts.lock().unwrap();
-        let counter = counts
-            .entry(key)
-            .or_insert_with(|| AtomicU64::new(0));
+        let counter = counts.entry(key).or_insert_with(|| AtomicU64::new(0));
         counter.fetch_add(1, Ordering::Relaxed);
         drop(counts);
 

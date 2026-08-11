@@ -110,10 +110,7 @@ impl AnalyzerService {
                             // Enrich with genres, runtime, rating, overview, cast.
                             // Failures degrade gracefully — the match is still valid.
                             if let Some(tmdb_id) = best.tmdb_id {
-                                match searcher
-                                    .fetch_enrichment(tmdb_id, &record.media_type)
-                                    .await
-                                {
+                                match searcher.fetch_enrichment(tmdb_id, &record.media_type).await {
                                     Ok(enrichment) => {
                                         record.genres = enrichment.genres;
                                         record.runtime = enrichment.runtime;
@@ -594,7 +591,10 @@ mod tests {
             ) -> std::pin::Pin<
                 Box<
                     dyn std::future::Future<
-                            Output = Result<riply_core::MetadataEnrichment, riply_core::MetadataError>,
+                            Output = Result<
+                                riply_core::MetadataEnrichment,
+                                riply_core::MetadataError,
+                            >,
                         > + Send
                         + '_,
                 >,
@@ -621,11 +621,20 @@ mod tests {
         let analyzer = AnalyzerService::new(Some(Box::new(EnrichingSearcher)));
         let result = analyzer.analyze_file(&file).await.unwrap();
 
-        assert_eq!(result.genres.as_deref(), Some(&["Sci-Fi".to_string(), "Action".to_string()][..]));
+        assert_eq!(
+            result.genres.as_deref(),
+            Some(&["Sci-Fi".to_string(), "Action".to_string()][..])
+        );
         assert_eq!(result.runtime, Some(136));
         assert_eq!(result.content_rating.as_deref(), Some("R"));
-        assert_eq!(result.overview.as_deref(), Some("A hacker discovers the truth."));
-        assert_eq!(result.cast_list.as_deref(), Some(&["Keanu Reeves".to_string()][..]));
+        assert_eq!(
+            result.overview.as_deref(),
+            Some("A hacker discovers the truth.")
+        );
+        assert_eq!(
+            result.cast_list.as_deref(),
+            Some(&["Keanu Reeves".to_string()][..])
+        );
     }
 
     /// Test analyzer skips metadata search for extras

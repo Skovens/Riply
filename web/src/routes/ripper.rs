@@ -22,10 +22,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/ripper/:index/cancel", post(cancel_rip))
         .route("/v1/ripper/:index/eject", post(eject_disc))
         .route("/v1/ripper/autorip", get(autorip_status))
-        .route(
-            "/v1/ripper/autorip/:index/toggle",
-            post(autorip_toggle),
-        )
+        .route("/v1/ripper/autorip/:index/toggle", post(autorip_toggle))
         .with_state(state)
 }
 

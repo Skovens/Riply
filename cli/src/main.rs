@@ -5,12 +5,12 @@
 
 use clap::{Parser, Subcommand, ValueEnum};
 use commands::{
-    analyze_files, backup_database, duplicate::find_duplicates, library::scan_library,
-    move_files, restore_database, review_files, rip_command as do_rip, run_setup, scan_directory,
-    show_status, watch::watch_directory, RipCommand, SetupArgs,
+    analyze_files, backup_database, duplicate::find_duplicates, library::scan_library, move_files,
+    restore_database, review_files, rip_command as do_rip, run_setup, scan_directory, show_status,
+    watch::watch_directory, RipCommand, SetupArgs,
 };
 use infra::{Config, Database};
-use riply_core::{MetadataSearcher, MediaType};
+use riply_core::{MediaType, MetadataSearcher};
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
 
