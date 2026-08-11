@@ -59,7 +59,7 @@ cargo build --all
 cargo test --all
 ```
 
-Expected: **0 clippy warnings**, **131+ tests passing**.
+Expected: **0 clippy warnings**, **216+ tests passing**.
 
 The SvelteKit frontend is embedded into the binary at build time via
 `web/build.rs` + `rust-embed` (folder `web/svelte/build`). `cargo build` fails
@@ -124,25 +124,34 @@ Scope options: `core`, `app`, `infra`, `web`, `cli`, `scanner`, `metadata`,
 
 ### How to Track Progress
 
-Always start by reading `.opencode/plans/todo.md`. The "Next Up" callout
-tells you what to work on. Update task status as you go:
-`PENDING` → `IN_PROGRESS` → `DONE`.
+**Session start ritual — always do this first:**
+
+1. Read `AGENTS.md` (this file).
+2. Read `.opencode/plans/todo.md` — the "Next Up" callout tells you what to
+   work on. It is the canonical task board; keep it accurate.
+3. Read `.openhands/memory/MEMORY.md` and the most recent daily log
+   (`.openhands/memory/*.md`) for session notes.
+4. Run `git --no-pager log --oneline -15` — the git history is the final
+   source of truth for what has already been done. **Never re-implement or
+   re-commit work that git already shows as done.**
+
+**Session-end handoff checklist** (before finishing or being compacted):
+
+1. Commit all work incrementally (small, frequent commits — see Commit
+   Messages). Do not leave uncommitted work; the workspace is reset
+   occasionally and uncommitted work is lost.
+2. Update task status in `.opencode/plans/todo.md` (`PENDING` →
+   `IN_PROGRESS` → `DONE`), add completion notes, and update the "Next Up"
+   callout so the next session starts in the right place.
+3. Append a session note to `.openhands/memory/YYYY-MM-DD.md` in this repo:
+   what changed, key commits (SHAs), decisions, blockers, gotchas.
+   Fold durable facts into `.openhands/memory/MEMORY.md`.
+4. If a new architectural decision was made, create an ADR in `docs/adr/`.
+
+Update the task board as you go (not just at the end) so a compaction or
+handoff mid-task still has accurate state.
 
 See `docs/adr/013-progress-tracking.md` for the full tracking system.
-
-### Before Compaction or Session End
-
-If you've made significant progress or discovered important information:
-
-1. Update the task status in `.opencode/plans/todo.md`
-2. Update the relevant plan file (`.opencode/plans/`) with:
-   - What was changed and why
-   - Important decisions made
-   - Remaining work
-   - Any blockers or gotchas
-3. If a new architectural decision was made, create an ADR in `docs/adr/`
-
-This ensures the next session can pick up without guessing.
 
 ---
 
@@ -247,9 +256,24 @@ the module. Write `warn!(error = %e, "Ping failed")` instead.
    `create_if_missing(true)` + WAL journal mode.
 
 5. **Database is ephemeral**: The SQLite DB is treated as disposable — it holds
-   no data that can't be rebuilt on a new scan. Don't write migrations or spend
-   time preserving/upgrading existing DB state; just recreate it when schema
-   changes.
+   no data that can't be rebuilt on a new scan. Schema changes are made freely
+   via **versioned migrations** (`infra/src/migrations/`, applied with
+   `sqlx::migrate!()`; currently 001–004). Always add a new numbered migration
+   for schema changes rather than mutating an old one — fresh DBs are cheap.
+   `riply backup` / `riply restore` also exist for preserving data. The `files`
+   enrichment columns use `cast_list` (not `cast`) because `CAST` is a SQLite
+   keyword; genres/cast are JSON-encoded TEXT, serialized in `infra/src/db.rs`.
 
 6. **`web` is library-only**: The binary is in `cli` (`riply`). Running
    `cargo run -p web` does nothing — use `cargo run -p cli -- serve` instead.
+
+7. **TimeoutLayer excludes SSE**: `web/src/api.rs` applies a 30s
+   `TimeoutLayer` to the API sub-router only. Do NOT move it over the whole
+   router — `/v1/sse` is a long-lived stream and would be cut. Static
+   fallback is also outside the timed router. Router tests assert both.
+
+8. **New async trait methods** (e.g. `MetadataSearcher`) return
+   `Pin<Box<dyn Future<...> + Send + '_>>` (see gotcha 3). When a real
+   implementation like `infra::HttpClient` adds such a method, mirror the
+   feature in the `web::api`/`app::analyzer` wiring with graceful degradation
+   (warn + fallback, never fail the pipeline).

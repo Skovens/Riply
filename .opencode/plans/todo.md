@@ -2,9 +2,20 @@
 
 ## Next Up
 
-> **Next Up:** #22 — Add `/ready` health/readiness endpoint (Batch 5). Small and
-> self-contained: return 200 when the HTTP server is up and the database is
-> reachable. Source: `improvements.md` §2.5.
+> **Next Up:** No pending roadmap items — all of `improvements.md` (Batch 5, §2–§4)
+> is DONE. The only remaining item is the "consider" task **#31** (Merge `web`
+> crate into `cli`) — not started, no plan file, low priority.
+>
+> **Last session (2026-08-02):** Finished the last roadmap gaps in three commits:
+> - `feat(web): add CORS and request timeout middleware` (#23) — permissive CORS +
+>   30s `TimeoutLayer` on API routes only (SSE and static fallback excluded so
+>   long-lived streams aren't cut); router tests for both.
+> - `style: apply rustfmt across workspace` — repo had pre-existing format debt.
+> - `chore(cli): remove unused command re-exports` (clippy warning fix).
+>
+> Earlier same session: `feat: add database backup and restore commands` (#30) and
+> `feat: metadata enrichment from TMDb` (#29, migration 004). Full suite: 216 tests
+> pass, clippy clean.
 
 ### Batch 1: Quick Frontend & Config Fixes ✅
 
@@ -162,19 +173,19 @@ Source: `improvements.md`
 | 17 | Quick win: Add `--json` flags to `riply status` and `riply rip list` | DONE | `improvements.md` §3.3 |
 | 18 | Structure: Split monolithic router into per-domain modules | DONE | `improvements.md` §1.2 |
 | 19 | Structure: Add typed `WebError` type implementing `IntoResponse` | DONE | `improvements.md` §1.3 |
-| 20 | Structure: Add versioned database migrations with `sqlx::migrate!()` | PENDING | `improvements.md` §1.4 |
-| 21 | Robustness: Add CHECK constraints and indexes to database | PENDING | `improvements.md` §2.3 |
-| 22 | Robustness: Add `/ready` health/readiness endpoint | PENDING | `improvements.md` §2.5 |
-| 23 | Robustness: Add CORS and timeout middleware layers | PENDING | `improvements.md` §2.6 |
-| 24 | Serviceability: Add CLI progress bars (`indicatif` crate) | PENDING | `improvements.md` §3.2 |
+| 20 | Structure: Add versioned database migrations with `sqlx::migrate!()` | DONE | `improvements.md` §1.4, `infra/src/migrations/001-004` |
+| 21 | Robustness: Add CHECK constraints and indexes to database | DONE | `improvements.md` §2.3, migration 003 |
+| 22 | Robustness: Add `/ready` health/readiness endpoint | DONE | `improvements.md` §2.5, `web/src/api.rs` |
+| 23 | Robustness: Add CORS and timeout middleware layers | DONE | `improvements.md` §2.6, `web/src/api.rs` (2026-08-02) |
+| 24 | Serviceability: Add CLI progress bars (`indicatif` crate) | DONE | `improvements.md` §3.2 |
 | 25 | Serviceability: healthchecks.io heartbeat integration | DONE | Background task pings hc-ping.com/<uuid>; config + serve.rs + AppState handle |
-| 26 | Serviceability: Add config validation with `config` crate | PENDING | `improvements.md` §3.6 |
-| 27 | Feature: Library scanning (`riply library scan` command) | PENDING | `improvements.md` §4.2 |
-| 28 | Feature: Watch directory / filesystem events (`notify` crate) | PENDING | `improvements.md` §4.4 |
-| 29 | Feature: Metadata enrichment (genres, runtime, cast, content rating) | PENDING | `improvements.md` §4.3 |
-| 30 | Feature: Backup and restore commands | PENDING | `improvements.md` §4.5 |
-| 31 | Consider: Merge `web` crate into `cli` | PENDING | `improvements.md` §1.5 |
-| 32 | Consider: API versioning (`/api/v1` prefix) | PENDING | `improvements.md` §4.6 |
+| 26 | Serviceability: Add config validation with `config` crate | DONE | `improvements.md` §3.6, `infra/src/config.rs` |
+| 27 | Feature: Library scanning (`riply library scan` command) | DONE | `improvements.md` §4.2 |
+| 28 | Feature: Watch directory / filesystem events (`notify` crate) | DONE | `improvements.md` §4.4 |
+| 29 | Feature: Metadata enrichment (genres, runtime, cast, content rating) | DONE | `improvements.md` §4.3, migration 004 (2026-08-02) |
+| 30 | Feature: Backup and restore commands | DONE | `improvements.md` §4.5 (2026-08-02) |
+| 31 | Consider: Merge `web` crate into `cli` | PENDING | `improvements.md` §1.5 — only remaining item |
+| 32 | Consider: API versioning (`/api/v1` prefix) | DONE | `improvements.md` §4.6, ADR-017 (`/v1/` prefix) |
 
 ---
 
@@ -182,18 +193,7 @@ Source: `improvements.md`
 
 | # | Task | Status | Depends On | Plan File |
 |---|------|--------|------------|-----------|
-| 20 | Add versioned database migrations with `sqlx::migrate!()` | PENDING | — | — |
-| 21 | Add CHECK constraints and indexes to database | PENDING | — | — |
-| 22 | Add `/ready` health/readiness endpoint | PENDING | — | — |
-| 23 | Add CORS and timeout middleware layers | PENDING | — | — |
-| 24 | Add CLI progress bars (`indicatif` crate) | PENDING | — | — |
-| 26 | Add config validation with `config` crate | PENDING | — | — |
-| 27 | Library scanning (`riply library scan` command) | PENDING | — | — |
-| 28 | Watch directory / filesystem events (`notify` crate) | PENDING | — | — |
-| 29 | Metadata enrichment (genres, runtime, cast, rating) | PENDING | — | — |
-| 30 | Backup and restore commands | PENDING | — | — |
-| 31 | Consider: Merge `web` crate into `cli` | PENDING | — | — |
-| 32 | Consider: API versioning (`/api/v1` prefix) | PENDING | — | — |
+| 31 | Consider: Merge `web` crate into `cli` | PENDING | — | `improvements.md` §1.5 |
 
 ## Completed Tasks
 
@@ -212,6 +212,17 @@ Source: `improvements.md`
 | 11 | ffprobe metadata extraction | `ffprobe-metadata.md` |
 | 12 | Duplicate detection (hash-based) | `duplicate-detection.md` |
 | 18 | Split monolithic router into per-domain modules | `improvements.md` §1.2 |
+| 20 | Versioned DB migrations (`sqlx::migrate!()`) | `improvements.md` §1.4, `infra/src/migrations/001-004` |
+| 21 | CHECK constraints + indexes | `improvements.md` §2.3, migration 003 |
+| 22 | `/ready` health/readiness endpoint | `improvements.md` §2.5, `web/src/api.rs` |
+| 23 | CORS + request timeout middleware | `improvements.md` §2.6, `web/src/api.rs` (2026-08-02) |
+| 24 | CLI progress bars (`indicatif`) | `improvements.md` §3.2 |
+| 26 | Config validation | `improvements.md` §3.6, `infra/src/config.rs` |
+| 27 | Library scanning (`riply library scan`) | `improvements.md` §4.2 |
+| 28 | Watch directory (`notify` crate) | `improvements.md` §4.4 |
+| 29 | Metadata enrichment (genres, runtime, cast, rating) | `improvements.md` §4.3, migration 004 (2026-08-02) |
+| 30 | Backup and restore commands | `improvements.md` §4.5 (2026-08-02) |
+| 32 | API versioning (`/v1/` prefix, ADR-017) | `improvements.md` §4.6 |
 | 13–17, 19 | Architecture & robustness quick wins (instrument spans, TraceLayer, retry, graceful shutdown, `--json`, WebError) | `improvements.md` §2–3 |
 | 25 | healthchecks.io heartbeat integration | `improvements.md` §2.5, `infra/src/healthchecks.rs` |
 | 33–43 | Ripping overhaul (11 tasks) | `makemkv-implementation.md`, `makemkv-setup.md` |
