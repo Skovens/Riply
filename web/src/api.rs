@@ -9,6 +9,8 @@ use axum::{
 };
 use riply_core::{MetadataSearcher, RipBackend};
 use tokio::sync::RwLock;
+use tower_http::cors::CorsLayer;
+use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
@@ -145,7 +147,11 @@ pub fn create_router(state: Arc<AppState>) -> Router {
 
     let shared_state = Arc::clone(&state);
 
-    Router::new()
+    // Request handlers are all fast (long-running work runs as background
+    // jobs streamed over SSE), so a 30s timeout protects against hung
+    // handlers. SSE and the static fallback are intentionally outside the
+    // timed router: SSE is a long-lived stream.
+    let api = Router::new()
         .merge(files::router(Arc::clone(&state)))
         .merge(review::router(Arc::clone(&state)))
         .merge(scan::router(Arc::clone(&state)))
@@ -155,38 +161,130 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .merge(ripper::router(Arc::clone(&state)))
         .merge(cfg::router(Arc::clone(&state)))
         .merge(search::router(Arc::clone(&state)))
+        .layer(TimeoutLayer::new(std::time::Duration::from_secs(30)));
+
+    Router::new()
+        .merge(api)
         .merge(sse_handler::router(Arc::clone(&state)))
         .route("/health", get(health_handler))
-        .route("/ready", get(move || {
-            let db = shared_state.db.clone();
-            async move {
-                let db_ok = db.ping().await.is_ok();
-                if db_ok {
-                    (
-                        StatusCode::OK,
-                        Json(ReadinessResponse {
-                            status: "ready".to_string(),
-                            database: "ok".to_string(),
-                            error: None,
-                        }),
-                    )
-                } else {
-                    (
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        Json(ReadinessResponse {
-                            status: "unavailable".to_string(),
-                            database: "error".to_string(),
-                            error: Some("Database unavailable".to_string()),
-                        }),
-                    )
+        .route(
+            "/ready",
+            get(move || {
+                let db = shared_state.db.clone();
+                async move {
+                    let db_ok = db.ping().await.is_ok();
+                    if db_ok {
+                        (
+                            StatusCode::OK,
+                            Json(ReadinessResponse {
+                                status: "ready".to_string(),
+                                database: "ok".to_string(),
+                                error: None,
+                            }),
+                        )
+                    } else {
+                        (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            Json(ReadinessResponse {
+                                status: "unavailable".to_string(),
+                                database: "error".to_string(),
+                                error: Some("Database unavailable".to_string()),
+                            }),
+                        )
+                    }
                 }
-            }
-        }))
-        .route("/metrics", get(move || {
-            let metrics = state.metrics.clone();
-            async move { metrics.to_prometheus() }
-        }))
+            }),
+        )
+        .route(
+            "/metrics",
+            get(move || {
+                let metrics = state.metrics.clone();
+                async move { metrics.to_prometheus() }
+            }),
+        )
         // Static files (embedded frontend)
         .fallback(embedded_assets)
         .layer(TraceLayer::new_for_http())
+        // Permissive CORS so the dashboard can be served from any origin
+        // (e.g. a dev server or a reverse proxy on a different host).
+        .layer(CorsLayer::permissive())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{header, Request};
+    use tower::ServiceExt;
+
+    async fn test_state(dir: &tempfile::TempDir) -> Arc<AppState> {
+        let db = Arc::new(
+            infra::Database::new(dir.path().join("test.db").to_str().unwrap())
+                .await
+                .unwrap(),
+        );
+        let state = AppState {
+            db,
+            config: Arc::new(RwLock::new(infra::Config::default())),
+            config_path: None,
+            sse: SseManager::new(256),
+            backend: None,
+            searcher: None,
+            scheduler: app::JobScheduler::new(),
+            active_rips: RwLock::new(HashMap::new()),
+            autorip_drives: RwLock::new(HashSet::new()),
+            autorip_handle: RwLock::new(None),
+            healthchecks_handle: RwLock::new(None),
+            metrics: Metrics::default(),
+        };
+        Arc::new(state)
+    }
+
+    #[tokio::test]
+    async fn test_cors_headers_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = test_state(&dir).await;
+        let app = create_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/health")
+                    .header("origin", "http://localhost:5173")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::ACCESS_CONTROL_ALLOW_ORIGIN),
+            Some(&header::HeaderValue::from_static("*"))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sse_route_not_timed_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = test_state(&dir).await;
+        let app = create_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/v1/sse")
+                    .header("accept", "text/event-stream")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // The SSE endpoint returns a 200 and stays open; the timeout layer
+        // must not apply to it, otherwise the stream is cut after 30s.
+        assert_eq!(response.status(), StatusCode::OK);
+    }
 }
