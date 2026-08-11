@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use backon::{ExponentialBuilder, Retryable};
 use reqwest::Client;
-use riply_core::{MediaType, MetadataError, MetadataMatch, MetadataSearcher};
+use riply_core::{MediaType, MetadataEnrichment, MetadataError, MetadataMatch, MetadataSearcher};
 use tracing::info;
 
 use crate::rate_limiter::RateLimiter;
@@ -47,6 +47,59 @@ struct OmdbResponse {
     year: Option<String>,
     #[serde(default, rename = "Response")]
     response: Option<String>,
+}
+
+/// TMDb title details response (with credits and release dates appended).
+#[derive(Debug, Default, serde::Deserialize)]
+struct TmdbDetails {
+    #[serde(default)]
+    genres: Vec<TmdbGenre>,
+    #[serde(default)]
+    runtime: Option<i32>,
+    #[serde(default)]
+    overview: Option<String>,
+    #[serde(default)]
+    credits: Option<TmdbCredits>,
+    #[serde(default)]
+    release_dates: Option<TmdbReleaseDates>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct TmdbGenre {
+    #[serde(default)]
+    name: Option<String>,
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+struct TmdbCredits {
+    #[serde(default)]
+    cast: Vec<TmdbCastMember>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct TmdbCastMember {
+    #[serde(default)]
+    name: Option<String>,
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+struct TmdbReleaseDates {
+    #[serde(default)]
+    results: Vec<TmdbReleaseCountry>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct TmdbReleaseCountry {
+    #[serde(default)]
+    iso_3166_1: Option<String>,
+    #[serde(default)]
+    release_dates: Vec<TmdbReleaseDate>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct TmdbReleaseDate {
+    #[serde(default)]
+    certification: Option<String>,
 }
 
 /// TMDb episode detail result
@@ -335,6 +388,78 @@ impl HttpClient {
         let detail: TmdbEpisodeDetail = resp.json().await?;
         Ok(Some(detail))
     }
+
+    /// Fetch enrichment metadata (genres, runtime, overview, cast, content
+    /// rating) for a TMDb title. Uses `append_to_response` to bundle credits
+    /// and release dates into one request.
+    pub async fn fetch_tmdb_enrichment(
+        &self,
+        tmdb_id: i32,
+        media_type: &MediaType,
+    ) -> Result<MetadataEnrichment, anyhow::Error> {
+        let api_key = match &self.tmdb_api_key {
+            Some(key) => key.clone(),
+            None => return Ok(MetadataEnrichment::default()),
+        };
+
+        let kind = if media_type.is_tv() { "tv" } else { "movie" };
+        let url = format!("{}/{}/{}", self.tmdb_base_url, kind, tmdb_id);
+        let params = HashMap::from([
+            ("api_key".to_string(), api_key),
+            (
+                "append_to_response".to_string(),
+                "credits,release_dates".to_string(),
+            ),
+        ]);
+
+        let resp: TmdbDetails = self
+            .get_json(&url, &params, self.tmdb_limiter.as_ref())
+            .await?;
+
+        let genres = (!resp.genres.is_empty())
+            .then(|| {
+                resp.genres
+                    .into_iter()
+                    .filter_map(|g| g.name)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|v| !v.is_empty());
+
+        let cast_list = resp
+            .credits
+            .as_ref()
+            .map(|c| {
+                c.cast
+                    .iter()
+                    .filter_map(|m| m.name.clone())
+                    .take(5)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|v| !v.is_empty());
+
+        let content_rating = resp
+            .release_dates
+            .as_ref()
+            .and_then(|rd| {
+                rd.results
+                    .iter()
+                    .find(|c| c.iso_3166_1.as_deref() == Some("US"))
+            })
+            .and_then(|c| {
+                c.release_dates
+                    .iter()
+                    .find(|d| d.certification.as_deref().is_some_and(|s| !s.is_empty()))
+            })
+            .and_then(|d| d.certification.clone());
+
+        Ok(MetadataEnrichment {
+            genres,
+            runtime: resp.runtime.filter(|r| *r > 0),
+            content_rating,
+            overview: resp.overview.filter(|o| !o.is_empty()),
+            cast_list,
+        })
+    }
 }
 
 impl MetadataSearcher for HttpClient {
@@ -414,6 +539,26 @@ impl MetadataSearcher for HttpClient {
             };
             results.truncate(5);
             Ok(results)
+        })
+    }
+
+    fn fetch_enrichment(
+        &self,
+        tmdb_id: i32,
+        media_type: &MediaType,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<MetadataEnrichment, MetadataError>,
+                > + Send
+                + '_,
+        >,
+    > {
+        let media_type = media_type.clone();
+        Box::pin(async move {
+            self.fetch_tmdb_enrichment(tmdb_id, &media_type)
+                .await
+                .map_err(|e| MetadataError::ApiError(e.to_string()))
         })
     }
 }
@@ -507,6 +652,53 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].title, "The Matrix");
         assert_eq!(results[0].year, Some(1999));
+    }
+
+    #[tokio::test]
+    async fn test_tmdb_enrichment() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(".*/movie/550.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "genres": [{ "name": "Drama" }, { "name": "Thriller" }],
+                "runtime": 139,
+                "overview": "An insomniac office worker.",
+                "credits": {
+                    "cast": [
+                        { "name": "Brad Pitt" },
+                        { "name": "Edward Norton" },
+                        { "name": "Helena Bonham Carter" }
+                    ]
+                },
+                "release_dates": {
+                    "results": [
+                        { "iso_3166_1": "US", "release_dates": [{ "certification": "R" }] }
+                    ]
+                }
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = HttpClient::for_testing(mock_server.uri(), Some("test_key".to_string()), None);
+
+        let enrichment = client
+            .fetch_enrichment(550, &MediaType::Movie)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            enrichment.genres,
+            Some(vec!["Drama".to_string(), "Thriller".to_string()])
+        );
+        assert_eq!(enrichment.runtime, Some(139));
+        assert_eq!(enrichment.content_rating.as_deref(), Some("R"));
+        assert_eq!(enrichment.overview.as_deref(), Some("An insomniac office worker."));
+        assert_eq!(enrichment.cast_list.as_deref(), Some(&[
+            "Brad Pitt".to_string(),
+            "Edward Norton".to_string(),
+            "Helena Bonham Carter".to_string()
+        ][..]));
     }
 
     #[tokio::test]

@@ -11,7 +11,7 @@ pub mod title_group;
 
 pub use file_record::FileRecord;
 pub use media_type::MediaType;
-pub use metadata::{MetadataError, MetadataMatch, MetadataSearcher};
+pub use metadata::{MetadataEnrichment, MetadataError, MetadataMatch, MetadataSearcher};
 pub use name_cleaner::NameCleaner;
 pub use pipeline::PipelineStatus;
 pub use ripping::{DriveInfo, DriveState, RipBackend, RipError, RipEvent, RipHandle, RipSession};

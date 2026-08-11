@@ -22,6 +22,23 @@ pub struct MetadataMatch {
     pub episode_title: Option<String>,
 }
 
+/// Additional metadata fetched after a match is confirmed (genres, runtime,
+/// content rating, overview, cast). Populated during analysis so the review
+/// page and move step have richer information.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MetadataEnrichment {
+    /// Genres as returned by the provider (e.g. ["Drama", "Crime"]).
+    pub genres: Option<Vec<String>>,
+    /// Runtime in minutes.
+    pub runtime: Option<i32>,
+    /// Content rating (e.g. "PG-13", "TV-MA").
+    pub content_rating: Option<String>,
+    /// Plot overview.
+    pub overview: Option<String>,
+    /// Leading cast member names.
+    pub cast_list: Option<Vec<String>>,
+}
+
 /// Errors that can occur during metadata search operations.
 #[derive(Debug, thiserror::Error)]
 pub enum MetadataError {
@@ -62,5 +79,16 @@ pub trait MetadataSearcher: Send + Sync {
                 MediaType::Movie => self.search_movies(&query, year).await,
             }
         })
+    }
+
+    /// Fetch enrichment metadata (genres, runtime, rating, overview, cast) for
+    /// a matched title. Defaults to an empty result so mocks and providers that
+    /// don't support enrichment can ignore it.
+    fn fetch_enrichment(
+        &self,
+        _tmdb_id: i32,
+        _media_type: &MediaType,
+    ) -> Pin<Box<dyn Future<Output = Result<MetadataEnrichment, MetadataError>> + Send + '_>> {
+        Box::pin(async { Ok(MetadataEnrichment::default()) })
     }
 }

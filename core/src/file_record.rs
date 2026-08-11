@@ -55,6 +55,16 @@ pub struct FileRecord {
     pub duplicate_path: Option<PathBuf>,
     /// ID of the TitleGroup this file belongs to, if any.
     pub title_group_id: Option<String>,
+    /// Genres from metadata enrichment (e.g. ["Drama", "Crime"]).
+    pub genres: Option<Vec<String>>,
+    /// Runtime in minutes from metadata enrichment.
+    pub runtime: Option<i32>,
+    /// Content rating (e.g. "PG-13", "TV-MA").
+    pub content_rating: Option<String>,
+    /// Plot overview from metadata enrichment.
+    pub overview: Option<String>,
+    /// Leading cast member names from metadata enrichment.
+    pub cast_list: Option<Vec<String>>,
     /// Whether the file has been reviewed.
     pub reviewed: bool,
     /// Timestamp when the record was created.
@@ -93,6 +103,11 @@ impl FileRecord {
             subtitle_text: None,
             duplicate_path: None,
             title_group_id: None,
+            genres: None,
+            runtime: None,
+            content_rating: None,
+            overview: None,
+            cast_list: None,
             reviewed: false,
             created_at: now.clone(),
             updated_at: now,

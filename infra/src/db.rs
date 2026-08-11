@@ -4,6 +4,18 @@ use std::str::FromStr;
 use sqlx::{sqlite::SqlitePoolOptions, Acquire, Row};
 use tracing::info;
 
+/// Encode a string list (genres/cast) as a JSON TEXT column value.
+fn json_encode_list(value: &Option<Vec<String>>) -> Option<String> {
+    value
+        .as_ref()
+        .map(|v| serde_json::to_string(v).unwrap_or_default())
+}
+
+/// Decode a JSON TEXT column value back into a string list.
+fn json_decode_list(value: Option<String>) -> Option<Vec<String>> {
+    value.and_then(|s| serde_json::from_str(&s).ok())
+}
+
 /// Database adapter - handles SQLite connections and queries
 pub struct Database {
     pool: sqlx::SqlitePool,
@@ -101,10 +113,11 @@ impl Database {
                     content_type, media_type, series_name,
                     season_number, episode_number, episode_title,
                     source, subtitle_text, duplicate_path,
-                    title_group_id,
+                    title_group_id, genres, runtime, content_rating,
+                    overview, cast_list,
                     reviewed, created_at, updated_at
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 "#,
             )
@@ -135,6 +148,11 @@ impl Database {
                     .map(|p| p.to_string_lossy().to_string()),
             )
             .bind(&file.title_group_id)
+            .bind(json_encode_list(&file.genres))
+            .bind(file.runtime)
+            .bind(&file.content_rating)
+            .bind(&file.overview)
+            .bind(json_encode_list(&file.cast_list))
             .bind(file.reviewed)
             .bind(&file.created_at)
             .bind(&file.updated_at)
@@ -161,7 +179,8 @@ impl Database {
                 content_type, media_type, series_name,
                 season_number, episode_number, episode_title,
                 source, subtitle_text, duplicate_path,
-                title_group_id,
+                title_group_id, genres, runtime, content_rating,
+                overview, cast_list,
                 reviewed, created_at, updated_at
             FROM files
             WHERE status = ?
@@ -193,7 +212,8 @@ impl Database {
                 content_type, media_type, series_name,
                 season_number, episode_number, episode_title,
                 source, subtitle_text, duplicate_path,
-                title_group_id,
+                title_group_id, genres, runtime, content_rating,
+                overview, cast_list,
                 reviewed, created_at, updated_at
             FROM files
             "#,
@@ -239,6 +259,11 @@ impl Database {
                 subtitle_text = ?,
                 duplicate_path = ?,
                 title_group_id = ?,
+                genres = ?,
+                runtime = ?,
+                content_rating = ?,
+                overview = ?,
+                cast_list = ?,
                 reviewed = ?,
                 created_at = ?,
                 updated_at = ?
@@ -271,6 +296,11 @@ impl Database {
                 .map(|p| p.to_string_lossy().to_string()),
         )
         .bind(&file.title_group_id)
+        .bind(json_encode_list(&file.genres))
+        .bind(file.runtime)
+        .bind(&file.content_rating)
+        .bind(&file.overview)
+        .bind(json_encode_list(&file.cast_list))
         .bind(file.reviewed)
         .bind(&file.created_at)
         .bind(&file.updated_at)
@@ -314,6 +344,11 @@ impl Database {
                 .try_get::<Option<String>, _>("duplicate_path")?
                 .map(PathBuf::from),
             title_group_id: row.try_get::<Option<String>, _>("title_group_id")?,
+            genres: json_decode_list(row.try_get("genres")?),
+            runtime: row.try_get("runtime")?,
+            content_rating: row.try_get("content_rating")?,
+            overview: row.try_get("overview")?,
+            cast_list: json_decode_list(row.try_get("cast_list")?),
             reviewed: row.try_get("reviewed")?,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
@@ -356,7 +391,8 @@ impl Database {
                 content_type, media_type, series_name,
                 season_number, episode_number, episode_title,
                 source, subtitle_text, duplicate_path,
-                title_group_id,
+                title_group_id, genres, runtime, content_rating,
+                overview, cast_list,
                 reviewed, created_at, updated_at
             FROM files
             WHERE id = ?
@@ -460,7 +496,8 @@ impl Database {
                 content_type, media_type, series_name,
                 season_number, episode_number, episode_title,
                 source, subtitle_text, duplicate_path,
-                title_group_id,
+                title_group_id, genres, runtime, content_rating,
+                overview, cast_list,
                 reviewed, created_at, updated_at
             FROM files
         "#;
@@ -674,7 +711,8 @@ impl Database {
                 content_type, media_type, series_name,
                 season_number, episode_number, episode_title,
                 source, subtitle_text, duplicate_path,
-                title_group_id,
+                title_group_id, genres, runtime, content_rating,
+                overview, cast_list,
                 reviewed, created_at, updated_at
             FROM files
             WHERE hash = ?
@@ -701,7 +739,8 @@ impl Database {
                 content_type, media_type, series_name,
                 season_number, episode_number, episode_title,
                 source, subtitle_text, duplicate_path,
-                title_group_id,
+                title_group_id, genres, runtime, content_rating,
+                overview, cast_list,
                 reviewed, created_at, updated_at
             FROM files
             ORDER BY hash
@@ -962,5 +1001,35 @@ mod tests {
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].id, "backup-test");
         assert_eq!(files[0].filename, "backup.mkv");
+    }
+
+    #[tokio::test]
+    async fn test_enrichment_fields_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::new(dir.path().join("test.db").to_str().unwrap())
+            .await
+            .unwrap();
+        db.migrate().await.unwrap();
+
+        let mut file = riply_core::FileRecord::new(
+            "enriched".to_string(),
+            std::path::PathBuf::from("/test/enriched.mkv"),
+            "enriched.mkv".to_string(),
+            "hash-enriched".to_string(),
+        );
+        file.genres = Some(vec!["Drama".to_string(), "Crime".to_string()]);
+        file.runtime = Some(139);
+        file.content_rating = Some("R".to_string());
+        file.overview = Some("An insomniac office worker.".to_string());
+        file.cast_list = Some(vec!["Brad Pitt".to_string(), "Edward Norton".to_string()]);
+        db.save_file(&file).await.unwrap();
+
+        let files = db.get_all_files().await.unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].genres.as_deref(), Some(&["Drama".to_string(), "Crime".to_string()][..]));
+        assert_eq!(files[0].runtime, Some(139));
+        assert_eq!(files[0].content_rating.as_deref(), Some("R"));
+        assert_eq!(files[0].overview.as_deref(), Some("An insomniac office worker."));
+        assert_eq!(files[0].cast_list.as_deref(), Some(&["Brad Pitt".to_string(), "Edward Norton".to_string()][..]));
     }
 }

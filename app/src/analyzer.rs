@@ -107,6 +107,25 @@ impl AnalyzerService {
                             record.confidence = Some(0.95);
                             record.source = Some("tmdb".to_string());
                             record.update_status(riply_core::PipelineStatus::Matched);
+                            // Enrich with genres, runtime, rating, overview, cast.
+                            // Failures degrade gracefully — the match is still valid.
+                            if let Some(tmdb_id) = best.tmdb_id {
+                                match searcher
+                                    .fetch_enrichment(tmdb_id, &record.media_type)
+                                    .await
+                                {
+                                    Ok(enrichment) => {
+                                        record.genres = enrichment.genres;
+                                        record.runtime = enrichment.runtime;
+                                        record.content_rating = enrichment.content_rating;
+                                        record.overview = enrichment.overview;
+                                        record.cast_list = enrichment.cast_list;
+                                    }
+                                    Err(e) => {
+                                        warn!(error = %e, "Metadata enrichment failed");
+                                    }
+                                }
+                            }
                             return Ok(record);
                         }
                     }
@@ -514,6 +533,99 @@ mod tests {
         assert_eq!(result.confidence, Some(0.95));
         assert_eq!(result.source, Some("tmdb".to_string()));
         assert_eq!(result.status, PipelineStatus::Matched);
+    }
+
+    /// Test analyzer applies metadata enrichment after a match
+    #[tokio::test]
+    async fn test_analyze_applies_enrichment() {
+        struct EnrichingSearcher;
+
+        impl riply_core::MetadataSearcher for EnrichingSearcher {
+            fn search_movies(
+                &self,
+                _query: &str,
+                _year: Option<u32>,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<
+                                Vec<riply_core::MetadataMatch>,
+                                riply_core::MetadataError,
+                            >,
+                        > + Send
+                        + '_,
+                >,
+            > {
+                Box::pin(async move {
+                    Ok(vec![riply_core::MetadataMatch {
+                        title: "The Matrix".to_string(),
+                        year: Some(1999),
+                        tmdb_id: Some(603),
+                        is_tv: false,
+                        series_name: None,
+                        season_number: None,
+                        episode_number: None,
+                        episode_title: None,
+                    }])
+                })
+            }
+
+            fn search_tv(
+                &self,
+                _query: &str,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<
+                                Vec<riply_core::MetadataMatch>,
+                                riply_core::MetadataError,
+                            >,
+                        > + Send
+                        + '_,
+                >,
+            > {
+                Box::pin(async move { Ok(vec![]) })
+            }
+
+            fn fetch_enrichment(
+                &self,
+                _tmdb_id: i32,
+                _media_type: &MediaType,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<riply_core::MetadataEnrichment, riply_core::MetadataError>,
+                        > + Send
+                        + '_,
+                >,
+            > {
+                Box::pin(async move {
+                    Ok(riply_core::MetadataEnrichment {
+                        genres: Some(vec!["Sci-Fi".to_string(), "Action".to_string()]),
+                        runtime: Some(136),
+                        content_rating: Some("R".to_string()),
+                        overview: Some("A hacker discovers the truth.".to_string()),
+                        cast_list: Some(vec!["Keanu Reeves".to_string()]),
+                    })
+                })
+            }
+        }
+
+        let file = riply_core::FileRecord::new(
+            "test".to_string(),
+            std::path::PathBuf::from("/test/matrix.1999.mkv"),
+            "matrix.1999.mkv".to_string(),
+            "hash".to_string(),
+        );
+
+        let analyzer = AnalyzerService::new(Some(Box::new(EnrichingSearcher)));
+        let result = analyzer.analyze_file(&file).await.unwrap();
+
+        assert_eq!(result.genres.as_deref(), Some(&["Sci-Fi".to_string(), "Action".to_string()][..]));
+        assert_eq!(result.runtime, Some(136));
+        assert_eq!(result.content_rating.as_deref(), Some("R"));
+        assert_eq!(result.overview.as_deref(), Some("A hacker discovers the truth."));
+        assert_eq!(result.cast_list.as_deref(), Some(&["Keanu Reeves".to_string()][..]));
     }
 
     /// Test analyzer skips metadata search for extras
