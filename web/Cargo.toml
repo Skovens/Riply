@@ -24,4 +24,4 @@ rust-embed = { version = "8", features = ["mime-guess"] }
 [dev-dependencies]
 serde_json = { workspace = true }
 tempfile = "3"
-reqwest = { workspace = true }
+reqwest = { workspace = true, default-features = false, features = ["rustls-tls", "rustls-native-certs"] }
