@@ -280,3 +280,12 @@ the module. Write `warn!(error = %e, "Ping failed")` instead.
    implementation like `infra::HttpClient` adds such a method, mirror the
    feature in the `web::api`/`app::analyzer` wiring with graceful degradation
    (warn + fallback, never fail the pipeline).
+
+9. **Workspace can be wiped mid-session** — the checkout directory (and
+   its `.git`) may be reset to an empty repo with no commits, no remote,
+   and no git identity. Recovery: re-clone with `gh repo clone Skovens/Riply`
+   using `GH_TOKEN=$GITHUB_TOKEN` (gh is not otherwise authed), re-set the
+   remote URL to `https://${GITHUB_TOKEN}@github.com/Skovens/Riply.git`,
+   and re-set `git config user.name`/`user.email` (fresh clones have none,
+   so commits fail with "unable to auto-detect email address"). Everything
+   pushed to `origin/main` survives; everything uncommitted is lost.
