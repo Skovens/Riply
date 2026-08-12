@@ -62,6 +62,10 @@ What becomes easier or more difficult to do?
 | [016](016-sqlx-migration-system.md) | SQLx Migration System | Accepted | 2026-08-02 |
 | [017](017-api-versioning.md) | API Versioning | Accepted | 2026-08-02 |
 | [018](018-graceful-shutdown.md) | Graceful Shutdown | Accepted | 2026-08-02 |
+| [019](019-xdg-data-home.md) | XDG Data Home for Config and Database | Proposed | 2026-08-12 |
+| [020](020-rip-progress-bar.md) | Rip Progress Bar in Drive Panel | Proposed | 2026-08-12 |
+| [021](021-collapsible-folder-preview.md) | Collapsible Folder Preview in the Files Pane | Proposed | 2026-08-12 |
+| [022](022-single-media-naming-service.md) | Single Media-Naming Service | Proposed | 2026-08-12 |
 
 ## Creating a New ADR
 
