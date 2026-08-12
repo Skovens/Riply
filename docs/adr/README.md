@@ -66,6 +66,7 @@ What becomes easier or more difficult to do?
 | [020](020-rip-progress-bar.md) | Rip Progress Bar in Drive Panel | Proposed | 2026-08-12 |
 | [021](021-collapsible-folder-preview.md) | Collapsible Folder Preview in the Files Pane | Proposed | 2026-08-12 |
 | [022](022-single-media-naming-service.md) | Single Media-Naming Service | Proposed | 2026-08-12 |
+| [023](023-per-drive-autorip-session-scoped.md) | Per-Drive Autorip State Is Session-Scoped | Accepted | 2026-08-12 |
 
 ## Creating a New ADR
 
