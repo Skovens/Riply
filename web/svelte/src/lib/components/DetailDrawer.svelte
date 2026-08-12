@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { searchApi, filesApi } from '$lib/api';
+  import { filesApi, openMediaNamingModal } from '$lib/api';
   import { FileRecord, SearchResult } from '$lib/types';
 
   let { file, open, onClose, onConfirm, onReject } = $props();
@@ -12,12 +12,6 @@
   let series_name = $state('');
   let season_number = $state(null);
   let episode_number = $state(null);
-
-  // ── Search state ────────────────────────────────────────────
-  let searchQuery = $state('');
-  let searchResults = $state([]);
-  let searchLoading = $state(false);
-  let searchTimeout = $state(null);
 
   // ── Helpers ─────────────────────────────────────────────────
 
@@ -83,52 +77,23 @@
       series_name = file.series_name || '';
       season_number = file.season_number || null;
       episode_number = file.episode_number || null;
-      searchQuery = '';
-      searchResults = [];
     }
   });
 
-  // ── Search ──────────────────────────────────────────────────
+  // ── Media naming (ADR-022): shared modal, applies the choice here ──
 
-  async function handleSearch() {
-    if (searchTimeout) clearTimeout(searchTimeout);
-    if (!searchQuery.trim()) {
-      searchResults = [];
-      searchLoading = false;
-      return;
-    }
-    searchTimeout = setTimeout(async () => {
-      searchLoading = true;
-      try {
-        const results = await searchApi.search(
-          searchQuery.trim(),
-          media_type === 'Tv' ? 'tv' : 'movie',
-        );
-        searchResults = results;
-      } catch (e) {
-        console.error('Search failed:', e);
-        searchResults = [];
-      } finally {
-        searchLoading = false;
-      }
-    }, 300);
-  }
-
-  function selectResult(result) {
-    title = result.title;
-    year = result.year || null;
-    media_type = result.is_tv ? 'Tv' : 'Movie';
-    if (result.is_tv) {
-      series_name = result.series_name || '';
-      season_number = result.season_number || null;
-      episode_number = result.episode_number || null;
-    } else {
-      series_name = '';
-      season_number = null;
-      episode_number = null;
-    }
-    searchResults = [];
-    searchQuery = '';
+  async function handleOpenNaming() {
+    const choice = await openMediaNamingModal({
+      initialTitle: title || '',
+      mediaType: media_type === 'Tv' ? 'tv' : 'movie',
+    });
+    if (!choice) return;
+    title = choice.title;
+    year = choice.year || null;
+    media_type = choice.media_type;
+    series_name = choice.series_name || '';
+    season_number = choice.season_number || null;
+    episode_number = choice.episode_number || null;
   }
 
   // ── Actions ─────────────────────────────────────────────────
@@ -157,8 +122,6 @@
     series_name = '';
     season_number = null;
     episode_number = null;
-    searchQuery = '';
-    searchResults = [];
     onClose();
   }
 </script>
@@ -196,32 +159,14 @@
           </select>
         </div>
 
-        <!-- Search bar -->
-        <div style="position: relative; margin-bottom: var(--space-4);">
-          <input
-            class="select w-full"
-            placeholder="Search for title..."
-            bind:value={searchQuery}
-            oninput={handleSearch}
-            style="padding-right: 2.5rem;"
-          />
-          {#if searchLoading}
-            <div class="spinner" style="position: absolute; right: var(--space-2); top: 50%; transform: translateY(-50%); width: 16px; height: 16px;"></div>
-          {/if}
-          {#if searchResults.length > 0}
-            <div class="search-results">
-              {#each searchResults as result}
-                <div class="search-result-item" onclick={() => selectResult(result)}>
-                  <span class="search-result-item__title">{result.title}</span>
-                  {#if result.year}
-                    <span class="search-result-item__year">{result.year}</span>
-                  {/if}
-                  <span class="search-result-item__type">{result.is_tv ? 'TV' : 'Movie'}</span>
-                </div>
-              {/each}
-            </div>
-          {/if}
-        </div>
+        <!-- Search & name via the shared naming modal (ADR-022) -->
+        <button
+          class="btn btn--secondary btn--sm"
+          onclick={handleOpenNaming}
+          style="width: 100%; margin-bottom: var(--space-4);"
+        >
+          Search &amp; name title
+        </button>
 
         <!-- Matched suggestion -->
         {#if file.status === 'Matched' && file.canonical_title && file.confidence}
@@ -248,13 +193,7 @@
               >
                 Select this
               </button>
-              <button
-                class="btn btn--secondary btn--sm"
-                onclick={() => {
-                  searchQuery = title;
-                  handleSearch();
-                }}
-              >
+              <button class="btn btn--secondary btn--sm" onclick={handleOpenNaming}>
                 Browse alternatives
               </button>
             </div>
@@ -364,54 +303,6 @@
     to {
       transform: translateX(0);
     }
-  }
-
-  .search-results {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    background: var(--color-bg-elevated);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
-    margin-top: var(--space-1);
-    max-height: 240px;
-    overflow-y: auto;
-    z-index: 10;
-  }
-
-  .search-result-item {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-3);
-    cursor: pointer;
-    transition: background var(--transition-fast);
-  }
-
-  .search-result-item:hover {
-    background: var(--color-bg-tertiary);
-  }
-
-  .search-result-item__title {
-    flex: 1;
-    font-size: var(--text-sm);
-    color: var(--color-text-primary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .search-result-item__year {
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-    flex-shrink: 0;
-  }
-
-  .search-result-item__type {
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-    flex-shrink: 0;
   }
 
   @media (max-width: 512px) {

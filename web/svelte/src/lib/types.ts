@@ -150,6 +150,19 @@ export interface SearchResult {
   episode_title?: string;
 }
 
+// ── Title Group ──────────────────────────────────────────────
+
+export interface TitleGroup {
+  id: string;
+  source_directory: string;
+  title: string;
+  year?: number;
+  tmdb_id?: number;
+  media_type: MediaType;
+  series_name?: string;
+  status: string;
+}
+
 // ── API Response Wrappers ────────────────────────────────────
 
 export interface ApiResponse<T> {

@@ -8,3 +8,5 @@ export * from './config.js';
 export * from './move.js';
 export * from './sse.js';
 export * from './search.js';
+export * from './media-naming.js';
+export * from './title-groups.js';

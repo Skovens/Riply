@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { filesApi, reviewApi, ripperApi, jobsApi, moveApi, scanApi, configApi } from '$lib/api';
+  import { filesApi, reviewApi, ripperApi, jobsApi, moveApi, scanApi, configApi, openMediaNamingModal, titleGroupsApi } from '$lib/api';
   import { connectSSE } from '$lib/api/sse';
   import DetailDrawer from '$lib/components/DetailDrawer.svelte';
 
@@ -313,6 +313,37 @@
     }
   }
 
+  // ── Media naming (ADR-022) ─────────────────────────────────
+
+  /** Open the shared naming modal and apply the choice to a review item. */
+  async function handleNameReviewItem(item) {
+    const choice = await openMediaNamingModal({
+      initialTitle: item.canonical_title || item.suggested_title || item.filename,
+      mediaType: item.media_type === 'Tv' ? 'tv' : 'movie',
+    });
+    if (!choice) return;
+    try {
+      await filesApi.update(item.id, {
+        canonical_title: choice.title,
+        canonical_year: choice.year,
+        media_type: choice.media_type,
+        series_name: choice.series_name,
+        season_number: choice.season_number,
+        episode_number: choice.episode_number,
+      });
+      await reviewApi.accept(item.id);
+      reviewQueue = reviewQueue.filter(r => r.id !== item.id);
+      stats.review = Math.max(0, stats.review - 1);
+      stats.confirmed = stats.confirmed + 1;
+      pipeline.review = Math.max(0, pipeline.review - 1);
+      pipeline.confirmed = pipeline.confirmed + 1;
+      showToast('Named and accepted', 'success');
+    } catch (e) {
+      console.error('Failed to name review item:', e);
+      showToast('Failed to name file', 'error');
+    }
+  }
+
   // ── Helpers ────────────────────────────────────────────────
 
   function statusColor(status) {
@@ -549,6 +580,7 @@
                       {/if}
                     </div>
                     <div class="review-item__actions">
+                      <button class="btn btn--secondary btn--sm" onclick={() => handleNameReviewItem(item)}>Name</button>
                       <button class="btn btn--primary btn--sm" onclick={() => handleAccept(item.id)}>Accept</button>
                       <button class="btn btn--danger btn--sm" onclick={() => handleReject(item.id)}>Reject</button>
                     </div>
