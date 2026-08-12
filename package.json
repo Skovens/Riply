@@ -1,0 +1,29 @@
+{
+  "name": "99dd40e29c3641fbbb7380fa2901381b",
+  "version": "1.0.0",
+  "description": "A modern, type-safe media library organizer built in Rust with a SvelteKit frontend. Riply scans directories, identifies movies and TV shows using TMDb/OMDB, and organizes them into clean, standardized library structures.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://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@github.com/Skovens/Riply.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Skovens/Riply/issues"
+  },
+  "homepage": "https://github.com/Skovens/Riply#readme",
+  "dependencies": {
+    "playwright": "^1.62.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
+  }
+}
