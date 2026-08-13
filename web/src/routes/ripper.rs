@@ -184,6 +184,33 @@ async fn process_rip_events(
     Ok(())
 }
 
+/// If `candidate` (a full directory path) already exists and contains files,
+/// return a unique path by appending ` (Copy 1)`, ` (Copy 2)` etc.
+/// Prevents MakeMKV from blocking on its interactive overwrite prompt.
+/// `subdir_name` is the human-readable stem (e.g. "Inception (2010)").
+fn unique_rip_destination(candidate: &str, subdir_name: Option<&str>) -> String {
+    let candidate_path = std::path::Path::new(candidate);
+    if candidate_path.exists() && candidate_path.is_dir() {
+        let has_content = std::fs::read_dir(candidate_path)
+            .map(|mut iter| iter.next().is_some())
+            .unwrap_or(false);
+        if has_content {
+            let parent = candidate_path.parent().unwrap_or(candidate_path);
+            let stem = subdir_name.unwrap_or("Disc");
+            let mut copy_n = 1;
+            loop {
+                let copy_name = format!("{} (Copy {})", stem, copy_n);
+                let copy_path = parent.join(&copy_name);
+                if !copy_path.exists() {
+                    return copy_path.to_string_lossy().to_string();
+                }
+                copy_n += 1;
+            }
+        }
+    }
+    candidate.to_string()
+}
+
 /// Resolve a disc name to a title (+ year) for the output directory.
 /// If a metadata searcher is available, search TMDb/OMDb and use the
 /// matched title; otherwise fall back to the raw parsed disc name.
@@ -228,40 +255,63 @@ pub async fn start_rip(
 
     let explicit_dest = body.destination.as_ref().filter(|d| !d.is_empty()).cloned();
 
-    let mut dest = match &explicit_dest {
-        Some(d) => d.clone(),
+    let (base, subdir_hint) = match &explicit_dest {
+        Some(d) => {
+            // User explicitly named the destination; use as-is but uniquify
+            let p = std::path::Path::new(d);
+            let parent = p.parent().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| ".".to_string());
+            let name = p.file_name().map(|x| x.to_string_lossy().to_string());
+            (parent, name)
+        }
         None => {
             let config = state.config.read().await;
             config
                 .validate_for_ripping()
                 .map_err(WebError::BadRequest)?;
-            config
+            let r = config
                 .rip_output_directory
                 .clone()
-                .unwrap_or_else(|| ".".to_string())
+                .unwrap_or_else(|| ".".to_string());
+
+            // Look up disc name, search metadata, and create subdirectory
+            let backend_clone = Arc::clone(backend);
+            let drives = tokio::task::spawn_blocking(move || backend_clone.detect_drives())
+                .await
+                .unwrap_or(Ok(vec![]))
+                .unwrap_or(vec![]);
+
+            // Resolve title asynchronously
+            let subdir: Option<String> = if let Some(drive) = drives.iter().find(|d| d.index == index) {
+                if let Some(ref disc_name) = drive.disc_name {
+                    let (title, year) = resolve_rip_title(disc_name, state.searcher.as_deref()).await;
+                    if !title.is_empty() {
+                        Some(match year {
+                            Some(y) => format!("{} ({})", title, y),
+                            None => title,
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            match &subdir {
+                Some(s) => (r.clone(), Some(s.clone())),
+                None => (r, None),
+            }
         }
     };
 
-    // If no explicit destination, look up disc name, search metadata, and create subdirectory
-    if explicit_dest.is_none() {
-        let backend_clone = Arc::clone(backend);
-        let drives = tokio::task::spawn_blocking(move || backend_clone.detect_drives())
-            .await
-            .unwrap_or(Ok(vec![]))
-            .unwrap_or(vec![]);
+    let candidate = match &subdir_hint {
+        Some(s) => format!("{}/{}", base, s),
+        None => base.clone(),
+    };
 
-        if let Some(drive) = drives.iter().find(|d| d.index == index) {
-            if let Some(ref disc_name) = drive.disc_name {
-                let (title, year) = resolve_rip_title(disc_name, state.searcher.as_deref()).await;
-                if !title.is_empty() {
-                    dest = match year {
-                        Some(y) => format!("{}/{} ({})", dest, title, y),
-                        None => format!("{}/{}", dest, title),
-                    };
-                }
-            }
-        }
-    }
+    let dest = unique_rip_destination(&candidate, subdir_hint.as_deref());
 
     let mut handle = backend
         .start_rip(index, &dest)
@@ -461,34 +511,48 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
 async fn execute_rip(state: Arc<AppState>, index: usize, eject_after: bool) -> Result<(), String> {
     let backend = state.backend.as_ref().ok_or("No ripping backend")?;
 
-    // Resolve destination
+    // Resolve destination, auto-append (Copy N) if the directory already exists
     let dest = {
         let config = state.config.read().await;
         config.validate_for_ripping()?;
-        let mut d = config
+        let base = config
             .rip_output_directory
             .clone()
             .unwrap_or_else(|| ".".to_string());
 
-        // Auto-subdirectory from disc name with metadata search
-        let backend_clone = Arc::clone(backend);
-        let drives = tokio::task::spawn_blocking(move || backend_clone.detect_drives())
-            .await
-            .unwrap_or(Ok(vec![]))
-            .unwrap_or(vec![]);
+        // Resolve subdirectory from disc name with metadata search
+        let subdir_name = {
+            let backend_clone = Arc::clone(backend);
+            let drives = tokio::task::spawn_blocking(move || backend_clone.detect_drives())
+                .await
+                .unwrap_or(Ok(vec![]))
+                .unwrap_or(vec![]);
 
-        if let Some(drive) = drives.iter().find(|d| d.index == index) {
-            if let Some(ref disc_name) = drive.disc_name {
-                let (title, year) = resolve_rip_title(disc_name, state.searcher.as_deref()).await;
-                if !title.is_empty() {
-                    d = match year {
-                        Some(y) => format!("{}/{} ({})", d, title, y),
-                        None => format!("{}/{}", d, title),
-                    };
+            if let Some(drive) = drives.iter().find(|d| d.index == index) {
+                if let Some(ref disc_name) = drive.disc_name {
+                    let (title, year) = resolve_rip_title(disc_name, state.searcher.as_deref()).await;
+                    if !title.is_empty() {
+                        Some(match year {
+                            Some(y) => format!("{} ({})", title, y),
+                            None => title,
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
                 }
+            } else {
+                None
             }
-        }
-        d
+        };
+
+        let candidate = match &subdir_name {
+            Some(ref s) => format!("{}/{}", base, s),
+            None => base.clone(),
+        };
+
+        unique_rip_destination(&candidate, subdir_name.as_deref())
     };
 
     let mut handle = backend.start_rip(index, &dest).map_err(|e| e.to_string())?;

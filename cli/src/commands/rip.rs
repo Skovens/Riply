@@ -128,6 +128,31 @@ async fn resolve_rip_title(
     (title, year)
 }
 
+/// Generate a unique destination path by appending ` (Copy N)` if the
+/// candidate directory already exists and contains files.
+fn unique_rip_destination(candidate: &str, subdir_name: Option<&str>) -> String {
+    let candidate_path = std::path::Path::new(candidate);
+    if candidate_path.exists() && candidate_path.is_dir() {
+        let has_content = std::fs::read_dir(candidate_path)
+            .map(|mut iter| iter.next().is_some())
+            .unwrap_or(false);
+        if has_content {
+            let parent = candidate_path.parent().unwrap_or(candidate_path);
+            let stem = subdir_name.unwrap_or("Disc");
+            let mut copy_n = 1;
+            loop {
+                let copy_name = format!("{} (Copy {})", stem, copy_n);
+                let copy_path = parent.join(&copy_name);
+                if !copy_path.exists() {
+                    return copy_path.to_string_lossy().to_string();
+                }
+                copy_n += 1;
+            }
+        }
+    }
+    candidate.to_string()
+}
+
 /// Start ripping on a drive
 async fn start_rip(
     index: usize,
@@ -138,56 +163,84 @@ async fn start_rip(
     let backend = get_backend()?;
 
     // Look up disc name, search metadata, and create subdirectory if applicable
-    let mut dest = destination.to_string();
     let drives = backend.detect_drives()?;
-    if let Some(drive) = drives.iter().find(|d| d.index == index) {
+
+    // Resolve title asynchronously (separate from the synchronous closure)
+    let subdir_hint: Option<String> = if let Some(drive) = drives.iter().find(|d| d.index == index) {
         if let Some(ref disc_name) = drive.disc_name {
             let (title, year) = resolve_rip_title(disc_name, searcher).await;
             if !title.is_empty() {
-                dest = match year {
-                    Some(y) => format!("{}/{} ({})", dest, title, y),
-                    None => format!("{}/{}", dest, title),
-                };
+                Some(match year {
+                    Some(y) => format!("{} ({})", title, y),
+                    None => title,
+                })
+            } else {
+                None
             }
+        } else {
+            None
         }
-    }
+    } else {
+        None
+    };
+
+    let candidate = match &subdir_hint {
+        Some(ref s) => format!("{}/{}", destination, s),
+        None => destination.to_string(),
+    };
+
+    let dest = unique_rip_destination(&candidate, subdir_hint.as_deref());
 
     let mut handle = backend.start_rip(index, &dest)?;
 
     println!("Ripping started on drive {} → {}", index, dest);
     println!("Press Ctrl+C to cancel");
 
-    while let Some(event) = handle.next_event().await {
-        match event {
-            riply_core::RipEvent::Progress {
-                current,
-                total,
-                max,
-            } => {
-                let pct = if max > 0 {
-                    (current as f64 / total as f64) * 100.0
-                } else {
-                    0.0
-                };
-                print!("\rProgress: {:.1}%", pct);
-                use std::io::Write;
-                std::io::stdout().flush().ok();
+    // Set up Ctrl+C handling so the rip is cancelled cleanly
+    let (cancel_tx, mut cancel_rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        tokio::signal::ctrl_c().await.ok();
+        let _ = cancel_tx.send(());
+    });
+
+    loop {
+        tokio::select! {
+            event = handle.next_event() => {
+                match event {
+                    Some(riply_core::RipEvent::Progress { current, total, max }) => {
+                        let pct = if max > 0 {
+                            (current as f64 / total as f64) * 100.0
+                        } else {
+                            0.0
+                        };
+                        print!("\rProgress: {:.1}%", pct);
+                        use std::io::Write;
+                        std::io::stdout().flush().ok();
+                    }
+                    Some(riply_core::RipEvent::Complete) => {
+                        println!("\nRip complete!");
+                        return Ok(());
+                    }
+                    Some(riply_core::RipEvent::Error(e)) => {
+                        println!("\nError: {}", e);
+                        return Err(anyhow::anyhow!(e));
+                    }
+                    Some(riply_core::RipEvent::Message(msg)) => {
+                        println!("{}", msg);
+                    }
+                    None => {
+                        println!("\nRip finished (no more events)");
+                        return Ok(());
+                    }
+                }
             }
-            riply_core::RipEvent::Complete => {
-                println!("\nRip complete!");
-                break;
-            }
-            riply_core::RipEvent::Error(e) => {
-                println!("\nError: {}", e);
-                return Err(anyhow::anyhow!(e));
-            }
-            riply_core::RipEvent::Message(msg) => {
-                println!("{}", msg);
+            _ = cancel_rx.recv() => {
+                println!("\nCancelling rip...");
+                handle.cancel().await.unwrap_or_else(|e| eprintln!("  Cancel error: {}", e));
+                return Ok(());
             }
         }
     }
-
-    Ok(())
 }
 
 /// Eject disc from a drive

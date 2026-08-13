@@ -148,7 +148,7 @@ impl RipBackend for MakemkvBackend {
 
         info!(drive, dest = %dest, "Starting rip");
 
-        let child = tokio::process::Command::new(&self.command[0])
+        let mut child = tokio::process::Command::new(&self.command[0])
             .args(&self.command[1..])
             .args([
                 "-r",
@@ -159,10 +159,21 @@ impl RipBackend for MakemkvBackend {
                 "all",
                 dest,
             ])
+            .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true)
             .spawn()?;
+
+        // Pipe "n\n" to stdin so MakeMKV never blocks waiting for a user
+        // response to overwrite prompts (the destination dir is already
+        // unique, but this is a defensive safety net).
+        if let Some(mut stdin) = child.stdin.take() {
+            tokio::spawn(async move {
+                use tokio::io::AsyncWriteExt;
+                let _ = stdin.write_all(b"n\n").await;
+            });
+        }
 
         let session = MakemkvSession::new(child);
         Ok(RipHandle::new(Box::new(session)))
