@@ -289,3 +289,13 @@ the module. Write `warn!(error = %e, "Ping failed")` instead.
    and re-set `git config user.name`/`user.email` (fresh clones have none,
    so commits fail with "unable to auto-detect email address"). Everything
    pushed to `origin/main` survives; everything uncommitted is lost.
+
+10. **`web/svelte/build/` is gitignored and baked into the binary at compile
+    time** — after any `git pull`, the embedded frontend is stale (the pull
+    refreshes source but not the build folder). Running `cargo run -p cli -- serve`
+    after a pull serves the old frontend unless you first run `npm run build`
+    in `web/svelte` (or `make install`, which rebuilds). If a user reports
+    missing UI features right after pulling, this is the first thing to check.
+    Rip progress in the web UI comes from `rip:progress` SSE events (backend
+    `web/src/routes/ripper.rs`); the dashboard renders them inline in the
+    drive card via `ripProgress` state in `web/svelte/src/routes/+page.svelte`.

@@ -169,11 +169,22 @@ mod tests {
         let drives = backend.detect_drives().unwrap();
 
         assert_eq!(drives.len(), 2, "Should detect 2 fake drives");
-        assert_eq!(drives[0].state, DriveState::Ready, "DVD drive should be ready");
-        assert_eq!(drives[1].state, DriveState::Empty, "Blu-ray drive should be empty");
+        assert_eq!(
+            drives[0].state,
+            DriveState::Ready,
+            "DVD drive should be ready"
+        );
+        assert_eq!(
+            drives[1].state,
+            DriveState::Empty,
+            "Blu-ray drive should be empty"
+        );
 
         // Verify the DVD drive has a disc name
-        assert!(drives[0].disc_name.is_some(), "DVD drive should have a disc name");
+        assert!(
+            drives[0].disc_name.is_some(),
+            "DVD drive should have a disc name"
+        );
         let disc_name = drives[0].disc_name.as_ref().unwrap();
         assert_eq!(disc_name, "Test Movie (2024)");
 
@@ -258,7 +269,7 @@ mod tests {
         let mut handle = backend.start_rip(0, rip_dest.to_str().unwrap()).unwrap();
 
         // Wait for rip to complete
-        while let Some(_) = handle.next_event().await {}
+        while handle.next_event().await.is_some() {}
 
         // Create TV series directory structure
         let tv_dir = rip_dest.join("Breaking Bad S01");
@@ -386,13 +397,13 @@ mod tests {
             "Blu-ray rip should complete"
         );
     }
-}
 
-/// Helper function to collect all events from a rip handle
-async fn collect_events(handle: &mut RipHandle) -> Vec<RipEvent> {
-    let mut events = Vec::new();
-    while let Some(event) = handle.next_event().await {
-        events.push(event);
+    /// Helper function to collect all events from a rip handle
+    async fn collect_events(handle: &mut RipHandle) -> Vec<RipEvent> {
+        let mut events = Vec::new();
+        while let Some(event) = handle.next_event().await {
+            events.push(event);
+        }
+        events
     }
-    events
 }

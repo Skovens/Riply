@@ -21,6 +21,10 @@
   let ripOutputDir = $state('');
   let autoripDrives = $state([]);
 
+  // ── Rip progress ───────────────────────────────────────────
+  /** @type {Record<number, { pct: number, eta: number | null }>} */
+  let ripProgress = $state({});
+
   // ── Files ──────────────────────────────────────────────────
   let files = $state([]);
   let filesLoading = $state(true);
@@ -102,6 +106,13 @@
     try {
       const result = await ripperApi.listDrives();
       drives = result || [];
+      // Drop stale rip progress for drives that are no longer ripping.
+      for (const key of Object.keys(ripProgress)) {
+        const drive = drives.find(d => d.index === Number(key));
+        if (!drive || drive.state !== 'Ripping') {
+          delete ripProgress[key];
+        }
+      }
     } catch (e) {
       console.error('Failed to load drives:', e);
     } finally {
@@ -173,13 +184,36 @@
 
     const { kind, action, detail } = event;
 
-    // Rip events: show toast and auto-scan
-    if (kind === 'rip' && action === 'starting') {
-      showToast(`Ripping started on ${detail || 'drive'}`, 'success');
-      if (ripOutputDir) {
-        setTimeout(() => {
-          scanApi.start(ripOutputDir).catch(e => console.error('Auto-scan failed:', e));
-        }, 2000);
+    // Rip events: progress bar, toasts, and auto-scan
+    if (kind === 'rip') {
+      const index = parseInt(detail.split(':')[0], 10);
+      if (action === 'starting') {
+        if (!Number.isNaN(index)) {
+          ripProgress[index] = { pct: 0, eta: null };
+          markDriveRipping(index);
+        }
+        showToast(`Ripping started on ${detail || 'drive'}`, 'success');
+        if (ripOutputDir) {
+          setTimeout(() => {
+            scanApi.start(ripOutputDir).catch(e => console.error('Auto-scan failed:', e));
+          }, 2000);
+        }
+      } else if (action === 'progress') {
+        const [indexStr, pctStr, etaStr] = detail.split(':');
+        const idx = parseInt(indexStr, 10);
+        if (!Number.isNaN(idx)) {
+          ripProgress[idx] = {
+            pct: Math.min(100, Math.max(0, parseInt(pctStr, 10) || 0)),
+            eta: etaStr ? parseInt(etaStr, 10) : null,
+          };
+          markDriveRipping(idx);
+        }
+      } else if (action === 'complete') {
+        if (!Number.isNaN(index)) delete ripProgress[index];
+        showToast('Rip complete', 'success');
+      } else if (action === 'error') {
+        if (!Number.isNaN(index)) delete ripProgress[index];
+        showToast('Rip failed', 'error');
       }
       return;
     }
@@ -248,11 +282,67 @@
     }
   }
 
-  async function handleRip(index, destination) {
+  /** @param {number} index */
+  function markDriveRipping(index) {
+    const drive = drives.find(d => d.index === index);
+    if (drive) drive.state = 'Ripping';
+  }
+
+  /** Parse "Title (2020)" → { title: "Title", year: 2020 }. */
+  function parseDiscName(discName) {
+    const m = discName.match(/^(.*?)\s*\((\d{4})\)\s*$/);
+    if (m) return { title: m[1].trim(), year: parseInt(m[2], 10) };
+    return { title: discName.trim(), year: null };
+  }
+
+  /** @param {number} seconds */
+  function formatEta(seconds) {
+    if (!seconds || seconds <= 0) return '';
+    const m = Math.floor(seconds / 60);
+    const s = Math.round(seconds % 60);
+    if (m >= 60) {
+      const h = Math.floor(m / 60);
+      return `${h}h ${m % 60}m`;
+    }
+    return m > 0 ? `${m}m ${s}s` : `${s}s`;
+  }
+
+  /** @param {number} index */
+  function ripLabel(index) {
+    const p = ripProgress[index];
+    if (!p) return '';
+    let label = `${p.pct}%`;
+    if (p.eta && p.eta > 0 && p.pct < 100) label += ` · ~${formatEta(p.eta)} left`;
+    return label;
+  }
+
+  /** @param {number} index */
+  async function handleRip(index) {
+    const drive = drives.find(d => d.index === index);
+    const discName = (drive && drive.disc_name) || '';
+    const parsed = parseDiscName(discName);
+    if (parsed.title) {
+      // Ask for a name before ripping; prefill from the disc name (ADR-022: prefill, not commit).
+      const choice = await openMediaNamingModal({
+        mediaType: 'movie',
+        suggest: async () => ({ title: parsed.title, year: parsed.year }),
+      });
+      if (!choice) return;
+      const folderName = choice.year ? `${choice.title} (${choice.year})` : choice.title;
+      try {
+        await ripperApi.start(index, `${ripOutputDir}/${folderName}`);
+        return;
+      } catch (e) {
+        console.error('Failed to start rip:', e);
+        showToast('Failed to start rip', 'error');
+        return;
+      }
+    }
     try {
-      await ripperApi.start(index, destination);
+      await ripperApi.start(index, ripOutputDir);
     } catch (e) {
       console.error('Failed to start rip:', e);
+      showToast('Failed to start rip', 'error');
     }
   }
 
@@ -514,12 +604,26 @@
                       <div class="drive-card__disc">{drive.disc_name || 'No disc'}</div>
                       <span class="badge badge--{drive.state === 'Ready' ? 'success' : 'default'}">{drive.state}</span>
                     </div>
+                    {#if drive.state === 'Ripping' && ripProgress[drive.index]}
+                      <div class="drive-card__progress">
+                        <div class="progress">
+                          <div
+                            class="progress__bar"
+                            class:progress__bar--done={ripProgress[drive.index].pct >= 100}
+                            style="width: {ripProgress[drive.index].pct}%;"
+                          ></div>
+                        </div>
+                        <div class="text-xs text-muted" style="margin-top: var(--space-1);">
+                          {ripLabel(drive.index)}
+                        </div>
+                      </div>
+                    {/if}
                     <div class="drive-card__actions">
                       <div class="drive-card__action-row">
                         {#if drive.state === 'Ready'}
                           <button
                             class="btn btn--primary btn--sm"
-                            onclick={() => handleRip(drive.index, ripOutputDir)}
+                            onclick={() => handleRip(drive.index)}
                             disabled={!ripOutputDir}
                           >
                             Rip
@@ -915,6 +1019,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: var(--space-2);
     padding: var(--space-3) 0;
     border-bottom: 1px solid var(--color-border);
@@ -927,6 +1032,11 @@
   .drive-card__info {
     flex: 1;
     min-width: 0;
+  }
+
+  .drive-card__progress {
+    width: 100%;
+    margin-top: var(--space-2);
   }
 
   .drive-card__name {

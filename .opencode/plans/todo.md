@@ -8,16 +8,22 @@
 > keeping `web` separate preserves the option of a future second binary (daemon /
 > other UI) sharing the router. The roadmap is now fully closed out.
 >
-> **Last session (2026-08-02):** Finished the last roadmap gaps in three commits:
-> - `feat(web): add CORS and request timeout middleware` (#23) — permissive CORS +
->   30s `TimeoutLayer` on API routes only (SSE and static fallback excluded so
->   long-lived streams aren't cut); router tests for both.
-> - `style: apply rustfmt across workspace` — repo had pre-existing format debt.
-> - `chore(cli): remove unused command re-exports` (clippy warning fix).
->
-> Earlier same session: `feat: add database backup and restore commands` (#30) and
-> `feat: metadata enrichment from TMDb` (#29, migration 004). Full suite: 216 tests
-> pass, clippy clean.
+> **Last session (2026-08-13):** Fixed two web-UI gaps a user hit after pulling:
+> - **Rip progress bars in the web UI** — backend already emitted `rip:progress`
+>   SSE events with % and ETA, but the dashboard never handled them. Wired them up
+>   in `web/svelte/src/routes/+page.svelte` (`ripProgress` state + inline striped
+>   bar in the Drives card). No backend change.
+> - **Name media when starting a rip** — the Rip button now opens the shared
+>   `openMediaNamingModal` (ADR-022) pre-filled from the parsed disc name; the
+>   chosen title (+year) becomes the rip subdirectory name.
+> - Root cause of the user's symptom: `web/svelte/build/` is gitignored, so after
+>   `git pull` the embedded frontend was stale — added gotcha 10 in AGENTS.md
+>   (run `npm run build` in `web/svelte` before `cargo run -p cli -- serve`).
+> - Also fixed pre-existing failures the latest commits left behind: vitest
+>   `request.test.ts` still asserted `/api/` paths after the `/v1/` migration,
+>   and clippy errors in `infra/src/makemkv/dryrun.rs` (moved `collect_events`
+>   into `mod tests`, `while let Some(_)` → `.is_some()`).
+> Full suite green: 220 tests pass, clippy clean, frontend vitest 14/14.
 
 ### Batch 1: Quick Frontend & Config Fixes ✅
 
@@ -161,6 +167,36 @@ tradeoff that every frontend change requires `npm run build` + Rust rebuild.
 | 62 | Docs: README quick start/deploy + AGENTS.md note | DONE |
 | 63 | Verify: full test suite + release build + single-file smoke test | DONE |
 | 64 | `make` / `make install`: build release + symlink to `~/.local/bin/riply` | DONE |
+
+### Batch 10: Web-UI Rip Progress + Rip-time Naming ✅
+
+**Date:** 2026-08-13 — User pulled latest, ran `cargo run -p cli -- serve`, and saw
+no rip progress bars and no way to name a rip.
+
+**Root cause:** `web/svelte/build/` is gitignored and baked into the binary at
+compile time, so after `git pull` the embedded frontend was stale (missing the
+ADR-022 naming UI). Fix documented as gotcha 10 in AGENTS.md: always run
+`npm run build` in `web/svelte` before `cargo run -p cli -- serve`.
+
+**Changes (frontend only, `web/svelte/src/routes/+page.svelte`):**
+- Rip progress bar inline in the Drives card: handles `rip:progress:<index>:<pct>[:<eta]>`
+  and `rip:starting`/`rip:complete`/`rip:error` SSE events into a new
+  `ripProgress` map; renders the striped `.progress__bar` with % + "~Xm Ys left"
+  ETA; prunes stale entries on `fetchDrives`. Backend already emitted these events.
+- Rip-time naming: the Rip button opens `openMediaNamingModal` pre-filled from the
+  parsed disc name (`Title (YYYY)` → title + year) via the `suggest` callback
+  (ADR-022 prefill-not-commit); the chosen title (+year) is used as the rip
+  subdirectory name under the configured rip output dir. Cancelling aborts the rip.
+
+**Pre-existing failures fixed along the way:**
+- `web/svelte/src/lib/api/request.test.ts` still asserted `/api/...` paths after
+  the `/v1/` migration (5 failing vitest tests) — updated to `/v1/`.
+- Clippy `-D warnings` errors in `infra/src/makemkv/dryrun.rs` left by the last
+  commit: moved `collect_events` into `mod tests` (dead-code +
+  items-after-test-module) and `while let Some(_)` → `.is_some()`.
+
+**Verify:** 220 Rust tests pass, clippy clean, frontend `npm test` 14/14,
+`npm run build` succeeds.
 
 ### Batch 5: Architecture & Robustness Improvements 🔄
 

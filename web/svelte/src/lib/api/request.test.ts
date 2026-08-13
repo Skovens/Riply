@@ -33,9 +33,9 @@ describe('request', () => {
   it('performs a GET request', async () => {
     global.fetch = vi.fn().mockResolvedValue(mockWrappedResponse('ok'));
 
-    const result = await request<string>('/api/test');
+    const result = await request<string>('/v1/test');
     expect(result).toBe('ok');
-    expect(global.fetch).toHaveBeenCalledWith('/api/test', expect.objectContaining({
+    expect(global.fetch).toHaveBeenCalledWith('/v1/test', expect.objectContaining({
       headers: expect.any(Object),
     }));
   });
@@ -43,7 +43,7 @@ describe('request', () => {
   it('sends JSON body for POST', async () => {
     global.fetch = vi.fn().mockResolvedValue(mockWrappedResponse({ id: 1 }));
 
-    const result = await request('/api/test', {
+    const result = await request('/v1/test', {
       method: 'POST',
       body: JSON.stringify({ key: 'value' }),
     });
@@ -58,7 +58,7 @@ describe('request', () => {
   it('removes Content-Type for GET without body', async () => {
     global.fetch = vi.fn().mockResolvedValue(mockWrappedResponse(null));
 
-    await request('/api/test', { method: 'GET' });
+    await request('/v1/test', { method: 'GET' });
 
     const callArgs = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1];
     expect(callArgs.headers!['Content-Type']).toBeUndefined();
@@ -67,7 +67,7 @@ describe('request', () => {
   it('removes Content-Type for DELETE without body', async () => {
     global.fetch = vi.fn().mockResolvedValue(mockWrappedResponse(null));
 
-    await request('/api/test', { method: 'DELETE' });
+    await request('/v1/test', { method: 'DELETE' });
 
     const callArgs = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1];
     expect(callArgs.headers!['Content-Type']).toBeUndefined();
@@ -76,8 +76,8 @@ describe('request', () => {
   it('throws ApiError on non-ok response', async () => {
     global.fetch = vi.fn().mockResolvedValue(mockErrorResponse(404, 'Not Found'));
 
-    await expect(request('/api/test')).rejects.toThrow(ApiError);
-    await expect(request('/api/test')).rejects.toThrow('Not Found');
+    await expect(request('/v1/test')).rejects.toThrow(ApiError);
+    await expect(request('/v1/test')).rejects.toThrow('Not Found');
   });
 
   it('throws ApiError when ApiResponse.success is false', async () => {
@@ -85,27 +85,27 @@ describe('request', () => {
       mockOkResponse({ success: false, error: 'Validation failed', data: null }),
     );
 
-    await expect(request('/api/test')).rejects.toThrow(ApiError);
-    await expect(request('/api/test')).rejects.toThrow('Validation failed');
+    await expect(request('/v1/test')).rejects.toThrow(ApiError);
+    await expect(request('/v1/test')).rejects.toThrow('Validation failed');
   });
 
   it('returns raw data when response is not wrapped', async () => {
     global.fetch = vi.fn().mockResolvedValue(mockOkResponse({ raw: 'data' }));
 
-    const result = await request('/api/test');
+    const result = await request('/v1/test');
     expect(result).toEqual({ raw: 'data' });
   });
 });
 
 describe('configApi', () => {
-  it('configApi.get calls GET /api/config', async () => {
+  it('configApi.get calls GET /v1/config', async () => {
     global.fetch = vi.fn().mockResolvedValue(
       mockWrappedResponse({ host: '0.0.0.0', port: 3000 }),
     );
 
     const result = await configApi.get();
     expect(result).toEqual({ host: '0.0.0.0', port: 3000 });
-    expect(global.fetch).toHaveBeenCalledWith('/api/config', expect.any(Object));
+    expect(global.fetch).toHaveBeenCalledWith('/v1/config', expect.any(Object));
   });
 
   it('configApi.update calls PUT /api/config with body', async () => {
@@ -128,7 +128,7 @@ describe('filesApi', () => {
     await filesApi.list({ status: 'Scanned', page: 2, per_page: 10 });
 
     expect(global.fetch).toHaveBeenCalledWith(
-      '/api/files?status=Scanned&page=2&per_page=10',
+      '/v1/files?status=Scanned&page=2&per_page=10',
       expect.any(Object),
     );
   });
@@ -140,7 +140,7 @@ describe('filesApi', () => {
 
     await filesApi.list();
 
-    expect(global.fetch).toHaveBeenCalledWith('/api/files', expect.any(Object));
+    expect(global.fetch).toHaveBeenCalledWith('/v1/files', expect.any(Object));
   });
 
   it('filesApi.get calls GET /api/files/:id', async () => {
@@ -150,7 +150,7 @@ describe('filesApi', () => {
 
     const result = await filesApi.get('abc');
     expect(result).toEqual({ id: 'abc', filename: 'test.mkv' });
-    expect(global.fetch).toHaveBeenCalledWith('/api/files/abc', expect.any(Object));
+    expect(global.fetch).toHaveBeenCalledWith('/v1/files/abc', expect.any(Object));
   });
 
   it('filesApi.update calls POST /api/files/:id', async () => {
@@ -168,7 +168,7 @@ describe('filesApi', () => {
 
     await filesApi.delete('abc');
 
-    expect(global.fetch).toHaveBeenCalledWith('/api/files/abc', expect.objectContaining({
+    expect(global.fetch).toHaveBeenCalledWith('/v1/files/abc', expect.objectContaining({
       method: 'DELETE',
     }));
   });
