@@ -48,6 +48,53 @@ use riply_core::{FileRecord, MediaType, RipBackend};
 
 ---
 
+## Toolchain Installation
+
+**Always install toolchains before working on the project.** Never assume
+they are present. Check availability first, install if missing.
+
+### Rust
+
+```bash
+# Check if available
+rustc --version 2>/dev/null || echo "NOT INSTALLED"
+
+# Install
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+# Make available in current session
+source "$HOME/.cargo/env"
+
+# Add required components
+rustup component add clippy
+```
+
+### Node.js
+
+```bash
+# Check if available
+node --version 2>/dev/null || echo "NOT INSTALLED"
+npm --version 2>/dev/null || echo "NOT INSTALLED"
+
+# Install via nvm if needed
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
+source "$HOME/.nvm/nvm.sh"
+nvm install --lts
+```
+
+### After Installation
+
+After installing any toolchain, **verify the build succeeds** before starting
+work:
+
+```bash
+cargo build && cd web/svelte && npm run build && cd ../..
+```
+
+If the build fails, fix the pre-existing issues before proceeding.
+
+---
+
 ## Build & Test Commands
 
 Before completing any Rust changes, run:
@@ -137,6 +184,12 @@ workspace resets.
 3. Run `git --no-pager log --oneline -15` — the git history is the final
    source of truth for what has already been done. **Never re-implement or
    re-commit work that git already shows as done.**
+4. **Install missing toolchains.** If the project uses Rust, Python, Node,
+   etc., check if the toolchain is available. If not, install it immediately.
+   See "Toolchain Installation" below.
+5. **Verify the codebase builds before starting work.** Run the full build
+   pipeline (Rust: `cargo build`; Svelte: `npm run build` in `web/svelte/`)
+   to catch any pre-existing issues.
 
 **Session-end handoff checklist** (before finishing or being compacted):
 
@@ -299,3 +352,96 @@ the module. Write `warn!(error = %e, "Ping failed")` instead.
     Rip progress in the web UI comes from `rip:progress` SSE events (backend
     `web/src/routes/ripper.rs`); the dashboard renders them inline in the
     drive card via `ripProgress` state in `web/svelte/src/routes/+page.svelte`.
+
+---
+
+## Workflow Rules — Preventing "I Said It's Done But It Isn't"
+
+These rules exist to prevent the pattern where the agent claims work is complete
+and verified, but the user finds it doesn't actually work. **Follow them strictly.**
+
+### Claim Levels — Never Say "Done" Without the Right Level
+
+| Claim | What it means | What you MUST do |
+|-------|---------------|------------------|
+| **Draft** | Code written, unverified | Show the diff, explain changes |
+| **Verified** | Compiles, tests pass, output shown | Actually run build/tests and paste output |
+| **Ready** | Verified + user has reviewed | Wait for user approval before moving on |
+
+**Never claim "done" or "tested" unless you've actually run verification.**
+If you can't verify something (e.g., no toolchain installed), say:
+> "I wrote the code but couldn't verify it locally because [reason].
+> Please check on your machine: [list of commands]."
+
+### Before Coding — Write Acceptance Criteria
+
+For every task, write acceptance criteria **before** writing code:
+
+```markdown
+Acceptance criteria:
+- [ ] `unique_rip_destination("Rips/Inception", Some("Inception"))` returns
+      "Rips/Inception (Copy 1)" when dir exists with files
+- [ ] CLI `riply rip start` on Ctrl+C cancels the rip and exits cleanly
+- [ ] `cargo clippy -- -D warnings` passes with 0 warnings
+- [ ] `cargo test` passes with no failures
+```
+
+Show these to the user for approval before starting implementation.
+
+### After Coding — Show Diff + Verification
+
+Instead of:
+> Done, pushed.
+
+Say:
+> Here's what I changed:
+> ```
+> cli/src/commands/rip.rs: +50 lines
+> infra/src/makemkv/backend.rs: +10 lines
+> ```
+>
+> Verification:
+> ```
+> $ cargo build && cargo clippy --all-targets -- -D warnings && cargo test
+> Finished `dev` profile... 0 warnings, 216 tests passed
+> ```
+>
+> I couldn't verify X because [reason]. Check on your machine:
+> - `command to run`
+>
+> Acceptance criteria status:
+> - [x] Criterion 1 — verified
+> - [x] Criterion 2 — verified
+> - [ ] Criterion 3 — I can't check this, please verify
+>
+> Ready for your review.
+
+### What NOT to Do
+
+- **Don't** say "I tested it" without showing test output
+- **Don't** say "clippy is clean" without running clippy
+- **Don't** say "the build passes" without running the build
+- **Don't** write code based on assumptions about what the user described —
+  confirm ambiguous requirements before implementing
+- **Don't** skip the build/test step even if it takes time
+
+### When the User Says "It's Still Wrong"
+
+Respond with:
+1. What I changed vs what you asked for (diff or description)
+2. What I actually verified vs what I assumed
+3. What I can't verify without your machine
+4. What exactly needs to change
+
+No more "I tested it" claims unless I actually ran the tests.
+
+### Toolchain Installation — Always Check First
+
+Never assume a toolchain is installed. Always check and install if missing:
+
+1. Check: `rustc --version` (or equivalent for the language)
+2. If not installed: install it (see "Toolchain Installation" section above)
+3. After installing: verify the build succeeds
+4. Only then: start working on the task
+
+This is part of the session start ritual (step 4).
