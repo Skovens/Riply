@@ -107,11 +107,16 @@
       const result = await ripperApi.listDrives();
       drives = result || [];
       // Drop stale rip progress for drives that are no longer ripping.
-      for (const key of Object.keys(ripProgress)) {
+      const staleKeys = Object.keys(ripProgress).filter(key => {
         const drive = drives.find(d => d.index === Number(key));
-        if (!drive || drive.state !== 'Ripping') {
-          delete ripProgress[key];
+        return !drive || drive.state !== 'Ripping';
+      });
+      if (staleKeys.length > 0) {
+        const cleaned = { ...ripProgress };
+        for (const key of staleKeys) {
+          delete cleaned[key];
         }
+        ripProgress = cleaned;
       }
     } catch (e) {
       console.error('Failed to load drives:', e);
@@ -189,30 +194,44 @@
       const index = parseInt(detail.split(':')[0], 10);
       if (action === 'starting') {
         if (!Number.isNaN(index)) {
-          ripProgress[index] = { pct: 0, eta: null };
+          ripProgress = { ...ripProgress, [index]: { pct: 0, eta: null } };
           markDriveRipping(index);
         }
         showToast(`Ripping started on ${detail || 'drive'}`, 'success');
+      } else if (action === 'progress') {
+        const [indexStr, pctStr, etaStr] = detail.split(':');
+        const idx = parseInt(indexStr, 10);
+        if (!Number.isNaN(idx)) {
+          ripProgress = { ...ripProgress, [idx]: {
+            pct: Math.min(100, Math.max(0, parseInt(pctStr, 10) || 0)),
+            eta: etaStr ? parseInt(etaStr, 10) : null,
+          }};
+          markDriveRipping(idx);
+        }
+      } else if (action === 'complete') {
+        // Show 100% briefly so the user sees the filled bar before it vanishes
+        if (!Number.isNaN(index)) {
+          ripProgress = { ...ripProgress, [index]: { pct: 100, eta: null } };
+        }
+        showToast('Rip complete', 'success');
+        // Auto-scan after rip completes (not when it starts)
         if (ripOutputDir) {
           setTimeout(() => {
             scanApi.start(ripOutputDir).catch(e => console.error('Auto-scan failed:', e));
           }, 2000);
         }
-      } else if (action === 'progress') {
-        const [indexStr, pctStr, etaStr] = detail.split(':');
-        const idx = parseInt(indexStr, 10);
-        if (!Number.isNaN(idx)) {
-          ripProgress[idx] = {
-            pct: Math.min(100, Math.max(0, parseInt(pctStr, 10) || 0)),
-            eta: etaStr ? parseInt(etaStr, 10) : null,
-          };
-          markDriveRipping(idx);
-        }
-      } else if (action === 'complete') {
-        if (!Number.isNaN(index)) delete ripProgress[index];
-        showToast('Rip complete', 'success');
+        // Remove the progress bar after a brief pause
+        setTimeout(() => {
+          if (!Number.isNaN(index)) {
+            const { [index]: _, ...rest } = ripProgress;
+            ripProgress = rest;
+          }
+        }, 2000);
       } else if (action === 'error') {
-        if (!Number.isNaN(index)) delete ripProgress[index];
+        if (!Number.isNaN(index)) {
+          const { [index]: _, ...rest } = ripProgress;
+          ripProgress = rest;
+        }
         showToast('Rip failed', 'error');
       }
       return;
@@ -230,6 +249,7 @@
         fetchJobs();
       } else if (action === 'complete' || action === 'cancelled') {
         fetchJobs();
+        if (kind === 'scan') fetchFiles(); // Refresh file list after scan completes
       }
       return;
     }
@@ -263,6 +283,7 @@
       pipeline.review = Math.max(0, pipeline.review - 1);
       pipeline.confirmed = pipeline.confirmed + 1;
       pipeline.total = pipeline.total;
+      fetchFiles(); // Refresh file list
       showToast('File accepted', 'success');
     } catch (e) {
       console.error('Failed to accept:', e);
@@ -275,6 +296,7 @@
       await reviewApi.reject(id);
       reviewQueue = reviewQueue.filter(r => r.id !== id);
       stats.review = Math.max(0, stats.review - 1);
+      fetchFiles(); // Refresh file list
       showToast('File rejected', 'success');
     } catch (e) {
       console.error('Failed to reject:', e);
@@ -427,6 +449,7 @@
       stats.confirmed = stats.confirmed + 1;
       pipeline.review = Math.max(0, pipeline.review - 1);
       pipeline.confirmed = pipeline.confirmed + 1;
+      fetchFiles(); // Refresh file list to show updated status
       showToast('Named and accepted', 'success');
     } catch (e) {
       console.error('Failed to name review item:', e);

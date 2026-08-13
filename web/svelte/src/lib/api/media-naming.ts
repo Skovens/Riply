@@ -37,7 +37,6 @@ export async function openMediaNamingModal(
     host.style.position = 'fixed';
     host.style.inset = '0';
     host.style.zIndex = '9999';
-    host.style.pointerEvents = 'none';
     document.body.appendChild(host);
 
     const app = mount(MediaNamingModal, {
