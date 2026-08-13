@@ -1,5 +1,8 @@
 import { lastEvent } from '$lib/stores';
 
+export { parseEvent, ripEventIndex, ripProgressFields } from './parse-event';
+export type { ParsedSSEEvent } from './parse-event';
+
 export function connectSSE(onMessage: (data: string) => void) {
   const eventSource = new EventSource('/v1/sse');
 

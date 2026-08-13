@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { filesApi, reviewApi, ripperApi, jobsApi, moveApi, scanApi, configApi, openMediaNamingModal, titleGroupsApi } from '$lib/api';
   import { connectSSE } from '$lib/api/sse';
+  import { parseEvent, ripEventIndex, ripProgressFields } from '$lib/api/parse-event';
   import DetailDrawer from '$lib/components/DetailDrawer.svelte';
 
   // ── Sidebar ────────────────────────────────────────────────
@@ -177,12 +178,6 @@
 
   // ── SSE handler ───────────────────────────────────────────
 
-  function parseEvent(data) {
-    const parts = data.split(':');
-    if (parts.length < 2) return null;
-    return { kind: parts[0], action: parts[1], detail: parts.slice(2).join(':') };
-  }
-
   function handleSSEEvent(data) {
     const event = parseEvent(data);
     if (!event) return;
@@ -191,7 +186,7 @@
 
     // Rip events: progress bar, toasts, and auto-scan
     if (kind === 'rip') {
-      const index = parseInt(detail.split(':')[0], 10);
+      const index = ripEventIndex(detail);
       if (action === 'starting') {
         if (!Number.isNaN(index)) {
           ripProgress = { ...ripProgress, [index]: { pct: 0, eta: null } };
@@ -199,14 +194,10 @@
         }
         showToast(`Ripping started on ${detail || 'drive'}`, 'success');
       } else if (action === 'progress') {
-        const [indexStr, pctStr, etaStr] = detail.split(':');
-        const idx = parseInt(indexStr, 10);
-        if (!Number.isNaN(idx)) {
-          ripProgress = { ...ripProgress, [idx]: {
-            pct: Math.min(100, Math.max(0, parseInt(pctStr, 10) || 0)),
-            eta: etaStr ? parseInt(etaStr, 10) : null,
-          }};
-          markDriveRipping(idx);
+        const fields = ripProgressFields(detail);
+        if (!Number.isNaN(fields.index)) {
+          ripProgress = { ...ripProgress, [fields.index]: { pct: fields.pct, eta: fields.eta } };
+          markDriveRipping(fields.index);
         }
       } else if (action === 'complete') {
         // Show 100% briefly so the user sees the filled bar before it vanishes
