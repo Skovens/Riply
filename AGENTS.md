@@ -355,93 +355,139 @@ the module. Write `warn!(error = %e, "Ping failed")` instead.
 
 ---
 
-## Workflow Rules — Preventing "I Said It's Done But It Isn't"
+## Workflow: The Spec → Build → Demo Loop
 
-These rules exist to prevent the pattern where the agent claims work is complete
-and verified, but the user finds it doesn't actually work. **Follow them strictly.**
+This is the **only** workflow for delivering features. It exists to prevent
+the pattern where the user describes something, the agent builds the wrong
+thing, and the user discovers it only after "done" is claimed.
 
-### Claim Levels — Never Say "Done" Without the Right Level
+**The loop has 5 steps. Do not skip or merge any of them.**
 
-| Claim | What it means | What you MUST do |
-|-------|---------------|------------------|
-| **Draft** | Code written, unverified | Show the diff, explain changes |
-| **Verified** | Compiles, tests pass, output shown | Actually run build/tests and paste output |
-| **Ready** | Verified + user has reviewed | Wait for user approval before moving on |
+### Step 1: Clarify — Turn the user's description into a concrete spec
 
-**Never claim "done" or "tested" unless you've actually run verification.**
-If you can't verify something (e.g., no toolchain installed), say:
-> "I wrote the code but couldn't verify it locally because [reason].
-> Please check on your machine: [list of commands]."
+The user describes a feature or fix. They may be vague. Your job is to
+reflect your understanding back in clear natural language, NOT code.
 
-### Before Coding — Write Acceptance Criteria
+**Template:**
 
-For every task, write acceptance criteria **before** writing code:
+```
+Here's what I understand you want:
 
-```markdown
-Acceptance criteria:
-- [ ] `unique_rip_destination("Rips/Inception", Some("Inception"))` returns
-      "Rips/Inception (Copy 1)" when dir exists with files
-- [ ] CLI `riply rip start` on Ctrl+C cancels the rip and exits cleanly
-- [ ] `cargo clippy -- -D warnings` passes with 0 warnings
-- [ ] `cargo test` passes with no failures
+[2-3 sentence description of the feature, what it does, and what problem it solves]
+
+**UI/behavior (if applicable):**
+- [state/action 1]
+- [state/action 2]
+- [state/action 3]
+
+**What I'm not sure about:**
+- [ambiguity 1]
+- [ambiguity 2]
+
+Does this match what you're looking for? If yes, I'll write the spec.
 ```
 
-Show these to the user for approval before starting implementation.
+Post this and **wait for confirmation** before moving to Step 2.
 
-### After Coding — Show Diff + Verification
+### Step 2: Spec — Write the detailed plan with acceptance criteria
 
-Instead of:
-> Done, pushed.
+Once the user confirms the direction, write a short spec with specific,
+testable acceptance criteria.
 
-Say:
-> Here's what I changed:
-> ```
-> cli/src/commands/rip.rs: +50 lines
-> infra/src/makemkv/backend.rs: +10 lines
-> ```
->
-> Verification:
-> ```
-> $ cargo build && cargo clippy --all-targets -- -D warnings && cargo test
-> Finished `dev` profile... 0 warnings, 216 tests passed
-> ```
->
-> I couldn't verify X because [reason]. Check on your machine:
-> - `command to run`
->
-> Acceptance criteria status:
-> - [x] Criterion 1 — verified
-> - [x] Criterion 2 — verified
-> - [ ] Criterion 3 — I can't check this, please verify
->
-> Ready for your review.
+**Template:**
 
-### What NOT to Do
+```
+## Feature: [name]
 
-- **Don't** say "I tested it" without showing test output
-- **Don't** say "clippy is clean" without running clippy
-- **Don't** say "the build passes" without running the build
-- **Don't** write code based on assumptions about what the user described —
-  confirm ambiguous requirements before implementing
-- **Don't** skip the build/test step even if it takes time
+### Purpose
+[One line — what user problem does this solve?]
 
-### When the User Says "It's Still Wrong"
+### Behavior
+- When [state A]: [do X, show Y]
+- When [state B]: [do Z]
+- Edge case [E]: [handle by...]
 
-Respond with:
-1. What I changed vs what you asked for (diff or description)
-2. What I actually verified vs what I assumed
-3. What I can't verify without your machine
-4. What exactly needs to change
+### Acceptance Criteria
+- [ ] AC1: [specific observable behavior]
+- [ ] AC2: [another observable behavior]
+- [ ] AC3: [build/tests pass]
+- [ ] AC4: [screenshot or CLI output shown to user]
 
-No more "I tested it" claims unless I actually ran the tests.
+### Files likely affected
+- [file1] — [what changes]
+- [file2] — [what changes]
+```
 
-### Toolchain Installation — Always Check First
+Post this for approval. **Do not write code until the user approves the spec.**
 
-Never assume a toolchain is installed. Always check and install if missing:
+### Step 3: Build — One feature at a time, with verification
 
-1. Check: `rustc --version` (or equivalent for the language)
-2. If not installed: install it (see "Toolchain Installation" section above)
-3. After installing: verify the build succeeds
-4. Only then: start working on the task
+After spec approval:
 
-This is part of the session start ritual (step 4).
+1. Write the code
+2. Run the full build and test suite
+3. **Screenshot the running app** (using the browser tool for web UI,
+   terminal for CLI) so the user can SEE the result without checking out
+   and building
+4. Commit and push
+
+**Never batch independent features in one commit.** If the user described
+multiple things, slow down and do them one at a time, returning to Step 1
+for each.
+
+### Step 4: Demo — Present the finished product
+
+**Template:**
+
+```
+## Ready for review (commit abc1234)
+
+### What I built
+[1-2 sentences]
+
+### Verification
+```
+$ cargo build && cargo clippy --all-targets -- -D warnings
+... 0 warnings
+
+$ cargo test
+... N tests passed
+```
+
+### Screenshots
+[If web: description of what the screenshot shows]
+
+### Acceptance Criteria Status
+- [x] AC1: [how verified]
+- [x] AC2: [how verified]
+- [ ] AC3: [not yet — needs your check]
+
+### What I can't verify
+[List anything that needs the user's physical hardware to verify,
+e.g. actual MakeMKV, a DVD drive]
+```
+
+Post this and **wait for the user to review.** Do not move to the next
+feature until the user says the current one is complete.
+
+### Step 5: Iterate — If the user says it's wrong
+
+If the user reviews and says it doesn't match what they wanted:
+
+1. Restate what I built vs what they described
+2. Identify where the interpretation drifted
+3. **Go back to Step 1** (clarify) before making any changes
+
+Do NOT skip the clarification step even for "small" fixes. If the
+interpretation was wrong once, my understanding is still unreliable.
+
+### Rules of thumb
+
+- **One feature at a time.** No batching.
+- **Each feature goes through all 5 steps.** No shortcuts.
+- **No "done" without a demo.** The user sees screenshots/CLI output
+  before they have to check anything themselves.
+- **If ambiguous, ask.** Writing code based on an assumption is always
+  more expensive than confirming.
+- **Install toolchains first.** You can't verify without them. See
+  "Toolchain Installation" above.
