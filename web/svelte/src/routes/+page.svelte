@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { filesApi, reviewApi, ripperApi, jobsApi, moveApi, scanApi, configApi, openMediaNamingModal, titleGroupsApi } from '$lib/api';
   import { connectSSE } from '$lib/api/sse';
-  import { parseEvent, ripEventIndex, ripProgressFields } from '$lib/api/parse-event';
+  import { parseEvent, ripEventIndex, ripProgressFields, ripMessageText } from '$lib/api/parse-event';
   import DetailDrawer from '$lib/components/DetailDrawer.svelte';
 
   // ── Sidebar ────────────────────────────────────────────────
@@ -23,7 +23,7 @@
   let autoripDrives = $state([]);
 
   // ── Rip progress ───────────────────────────────────────────
-  /** @type {Record<number, { pct: number, eta: number | null }>} */
+  /** @type {Record<number, { pct: number, eta: number | null, stage: string, doneAt?: number }>} */
   let ripProgress = $state({});
 
   // ── Files ──────────────────────────────────────────────────
@@ -107,10 +107,15 @@
     try {
       const result = await ripperApi.listDrives();
       drives = result || [];
-      // Drop stale rip progress for drives that are no longer ripping.
+      // Drop stale rip progress for drives that are no longer ripping
+      // and whose doneAt is older than 5 seconds (grace period).
+      const now = Date.now();
       const staleKeys = Object.keys(ripProgress).filter(key => {
         const drive = drives.find(d => d.index === Number(key));
-        return !drive || drive.state !== 'Ripping';
+        if (!drive) return true;
+        if (drive.state === 'Ripping') return false;
+        const prog = ripProgress[Number(key)];
+        return prog && prog.doneAt && now - prog.doneAt > 5000;
       });
       if (staleKeys.length > 0) {
         const cleaned = { ...ripProgress };
@@ -184,25 +189,30 @@
 
     const { kind, action, detail } = event;
 
-    // Rip events: progress bar, toasts, and auto-scan
+    // Rip events: progress bar, stage messages, toasts, and auto-scan
     if (kind === 'rip') {
       const index = ripEventIndex(detail);
       if (action === 'starting') {
         if (!Number.isNaN(index)) {
-          ripProgress = { ...ripProgress, [index]: { pct: 0, eta: null } };
+          ripProgress = { ...ripProgress, [index]: { pct: 0, eta: null, stage: 'Getting disc info…' } };
           markDriveRipping(index);
         }
-        showToast(`Ripping started on ${detail || 'drive'}`, 'success');
+        showToast('Rip started', 'success');
+      } else if (action === 'message') {
+        const msg = ripMessageText(detail);
+        if (!Number.isNaN(index)) {
+          const cur = ripProgress[index];
+          ripProgress = { ...ripProgress, [index]: { pct: cur?.pct ?? 0, eta: cur?.eta ?? null, stage: msg } };
+        }
       } else if (action === 'progress') {
         const fields = ripProgressFields(detail);
         if (!Number.isNaN(fields.index)) {
-          ripProgress = { ...ripProgress, [fields.index]: { pct: fields.pct, eta: fields.eta } };
+          ripProgress = { ...ripProgress, [fields.index]: { pct: fields.pct, eta: fields.eta, stage: 'Ripping…' } };
           markDriveRipping(fields.index);
         }
       } else if (action === 'complete') {
-        // Show 100% briefly so the user sees the filled bar before it vanishes
         if (!Number.isNaN(index)) {
-          ripProgress = { ...ripProgress, [index]: { pct: 100, eta: null } };
+          ripProgress = { ...ripProgress, [index]: { pct: 100, eta: null, stage: 'Rip complete!', doneAt: Date.now() } };
         }
         showToast('Rip complete', 'success');
         // Auto-scan after rip completes (not when it starts)
@@ -211,17 +221,9 @@
             scanApi.start(ripOutputDir).catch(e => console.error('Auto-scan failed:', e));
           }, 2000);
         }
-        // Remove the progress bar after a brief pause
-        setTimeout(() => {
-          if (!Number.isNaN(index)) {
-            const { [index]: _, ...rest } = ripProgress;
-            ripProgress = rest;
-          }
-        }, 2000);
       } else if (action === 'error') {
         if (!Number.isNaN(index)) {
-          const { [index]: _, ...rest } = ripProgress;
-          ripProgress = rest;
+          ripProgress = { ...ripProgress, [index]: { pct: 0, eta: null, stage: 'Rip failed', doneAt: Date.now() } };
         }
         showToast('Rip failed', 'error');
       }
@@ -320,6 +322,14 @@
     return m > 0 ? `${m}m ${s}s` : `${s}s`;
   }
 
+  /** @param {number} index */
+  function ripStage(index) {
+    return ripProgress[index]?.stage || '';
+  }
+  /** @param {number} index */
+  function ripPct(index) {
+    return ripProgress[index]?.pct ?? 0;
+  }
   /** @param {number} index */
   function ripLabel(index) {
     const p = ripProgress[index];
@@ -618,8 +628,11 @@
                       <div class="drive-card__disc">{drive.disc_name || 'No disc'}</div>
                       <span class="badge badge--{drive.state === 'Ready' ? 'success' : 'default'}">{drive.state}</span>
                     </div>
-                    {#if drive.state === 'Ripping' && ripProgress[drive.index]}
+                    {#if (drive.state === 'Ripping' || ripProgress[drive.index]?.doneAt) && ripProgress[drive.index]}
                       <div class="drive-card__progress">
+                        <div class="text-sm font-semibold" style="margin-bottom: var(--space-1);">
+                          {ripStage(drive.index)}
+                        </div>
                         <div class="progress">
                           <div
                             class="progress__bar"

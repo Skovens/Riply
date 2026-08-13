@@ -36,3 +36,8 @@ export function ripProgressFields(detail: string): { index: number; pct: number;
     eta: etaStr ? parseInt(etaStr, 10) : null,
   };
 }
+
+/** Extract the message text from a `rip:message` detail (`index:text`). */
+export function ripMessageText(detail: string): string {
+  return detail.split(':').slice(1).join(':');
+}

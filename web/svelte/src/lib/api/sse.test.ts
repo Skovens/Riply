@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseEvent, ripEventIndex, ripProgressFields } from './parse-event';
+import { parseEvent, ripEventIndex, ripProgressFields, ripMessageText } from './parse-event';
 
 describe('parseEvent', () => {
   it('parses simple kind:action', () => {
@@ -117,5 +117,32 @@ describe('ripProgressFields', () => {
     expect(result.index).toBeNaN();
     expect(result.pct).toBe(0);
     expect(result.eta).toBeNull();
+  });
+});
+
+describe('ripMessageText', () => {
+  it('extracts message after index', () => {
+    expect(ripMessageText('0:Getting disc info…')).toBe('Getting disc info…');
+  });
+
+  it('extracts multi-word message', () => {
+    expect(ripMessageText('0:Scanning title 5 of 12')).toBe('Scanning title 5 of 12');
+  });
+
+  it('handles empty message', () => {
+    expect(ripMessageText('0:')).toBe('');
+  });
+});
+
+describe('rip:message event integration', () => {
+  it('rip:message payload parseEvent + ripMessageText round-trips', () => {
+    const raw = 'rip:message:0:Getting disc info…';
+    const event = parseEvent(raw);
+    expect(event).not.toBeNull();
+    expect(event!.kind).toBe('rip');
+    expect(event!.action).toBe('message');
+    expect(event!.detail).toBe('0:Getting disc info…');
+    expect(ripEventIndex(event!.detail)).toBe(0);
+    expect(ripMessageText(event!.detail)).toBe('Getting disc info…');
   });
 });
