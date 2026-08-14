@@ -369,6 +369,32 @@
     }
   }
 
+  /** @param {number} index */
+  async function handleNameDisc(index) {
+    const drive = drives.find(d => d.index === index);
+    if (!drive || !drive.disc_name) return;
+
+    const parsed = parseDiscName(drive.disc_name);
+    const choice = await openMediaNamingModal({
+      mediaType: 'movie',
+      initialTitle: parsed.title || drive.disc_name,
+      suggest: parsed.title
+        ? async () => ({ title: parsed.title, year: parsed.year })
+        : undefined,
+    });
+
+    if (!choice) return;
+
+    try {
+      await ripperApi.rename(index, choice);
+      // Refresh drives to pick up the new derived_name
+      await loadDrives();
+    } catch (e) {
+      console.error('Failed to rename disc:', e);
+      showToast('Failed to set disc name', 'error');
+    }
+  }
+
   async function handleCancelRip(index) {
     try {
       await ripperApi.cancel(index);
@@ -625,7 +651,17 @@
                   <div class="drive-card">
                     <div class="drive-card__info">
                       <div class="drive-card__name">{drive.name}</div>
-                      <div class="drive-card__disc">{drive.disc_name || 'No disc'}</div>
+                      {#if drive.disc_name}
+                        <div class="drive-card__disc" onclick={() => handleNameDisc(drive.index)} title="Click to set media name">
+                          {drive.disc_name}
+                          {#if drive.derived_name && drive.derived_name !== drive.disc_name}
+                            <span class="drive-card__arrow"> → </span>
+                            <span class="drive-card__derived-name">{drive.derived_name}</span>
+                          {/if}
+                        </div>
+                      {:else}
+                        <div class="drive-card__disc">No disc</div>
+                      {/if}
                       <span class="badge badge--{drive.state === 'Ready' ? 'success' : 'default'}">{drive.state}</span>
                     </div>
                     {#if (drive.state === 'Ripping' || ripProgress[drive.index]?.doneAt) && ripProgress[drive.index]}
@@ -1076,6 +1112,23 @@
     font-size: var(--text-xs);
     color: var(--color-text-muted);
     margin-bottom: var(--space-1);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .drive-card__disc:hover {
+    text-decoration: underline;
+  }
+
+  .drive-card__arrow {
+    color: var(--color-text-muted);
+    margin: 0 var(--space-1);
+    opacity: 0.6;
+  }
+
+  .drive-card__derived-name {
+    color: var(--color-primary);
+    font-weight: 500;
   }
 
   .drive-card__actions {
