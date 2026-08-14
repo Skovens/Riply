@@ -713,11 +713,13 @@
 
       <!-- Drives Panel -->
       <div class="sidebar-panel">
-        <button class="sidebar-panel-header" onclick={() => sidebarPanel.drives = !sidebarPanel.drives}>
-          <h4 class="sidebar-panel-title">Drives</h4>
-          <span class="sidebar-panel-chevron">{#if sidebarPanel.drives}&#9660;{:else}&#9654;{/if}</span>
+        <div class="sidebar-panel-header-row">
+          <button class="sidebar-panel-header" onclick={() => sidebarPanel.drives = !sidebarPanel.drives}>
+            <h4 class="sidebar-panel-title">Drives</h4>
+            <span class="sidebar-panel-chevron">{#if sidebarPanel.drives}&#9660;{:else}&#9654;{/if}</span>
+          </button>
           <button class="btn btn--ghost btn--xs" onclick={() => fetchDrives()} title="Refresh drives">↻</button>
-        </button>
+        </div>
         {#if sidebarPanel.drives}
           <div class="sidebar-panel-body">
             {#if drivesLoading}
@@ -1169,6 +1171,16 @@
   .sidebar-panel-chevron {
     font-size: var(--text-xs);
     color: var(--color-text-muted);
+  }
+
+  .sidebar-panel-header-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .sidebar-panel-header-row .sidebar-panel-header {
+    flex: 1;
   }
 
   .sidebar-panel-body {
