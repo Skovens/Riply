@@ -166,6 +166,7 @@ Scope options: `core`, `app`, `infra`, `web`, `cli`, `scanner`, `metadata`,
 | Task board / project plan | `.opencode/plans/todo.md` (always update this first) |
 | Detailed plan files | `.opencode/plans/<name>.md` |
 | Architecture decisions | `docs/adr/` |
+| Feature / system specs (design contracts) | `docs/designs/` |
 | Project overview | `README.md` |
 | Improvement roadmap | `improvements.md` |
 
@@ -184,10 +185,15 @@ workspace resets.
 3. Run `git --no-pager log --oneline -15` — the git history is the final
    source of truth for what has already been done. **Never re-implement or
    re-commit work that git already shows as done.**
-4. **Install missing toolchains.** If the project uses Rust, Python, Node,
+4. **Read `docs/designs/` for the specs relevant to the current task.** These
+   are design contracts that describe the *current* behavior of each subsystem.
+   They are the source of truth for what the code does — use them to verify
+   that any changes you make don't break existing behavior. If the current task
+   touches a subsystem without a spec, write one first.
+5. **Install missing toolchains.** If the project uses Rust, Python, Node,
    etc., check if the toolchain is available. If not, install it immediately.
    See "Toolchain Installation" below.
-5. **Verify the codebase builds before starting work.** Run the full build
+6. **Verify the codebase builds before starting work.** Run the full build
    pipeline (Rust: `cargo build`; Svelte: `npm run build` in `web/svelte/`)
    to catch any pre-existing issues.
 
