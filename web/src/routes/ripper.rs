@@ -482,10 +482,8 @@ pub async fn autorip_toggle(
     Ok(Json(ApiResponse::ok(enabled)))
 }
 
-/// Background polling loop that detects disc insertion on drives with auto-rip
-/// enabled and starts ripping them. Runs for the lifetime of the server but
-/// does no work (no `detect_drives` calls) while a rip is active or when no
-/// drive has auto-rip enabled.
+/// Polls drives for state changes and broadcasts SSE events.
+/// Also handles auto-rip when a disc is inserted on an autorip-enabled drive.
 pub async fn autorip_poll_loop(state: Arc<AppState>) {
     use riply_core::DriveState;
     use std::collections::HashMap;
@@ -502,11 +500,6 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
             continue;
         }
 
-        // Nothing to watch if no drive has auto-rip enabled.
-        if state.autorip_drives.read().await.is_empty() {
-            continue;
-        }
-
         let backend = match &state.backend {
             Some(b) => Arc::clone(b),
             None => continue,
@@ -517,6 +510,37 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
             Ok(Ok(drives)) => drives,
             _ => continue,
         };
+
+        // Broadcast drive state changes via SSE (all drives, not just autorip)
+        let enabled = state.autorip_drives.read().await;
+        let sse = &state.sse;
+        for drive in &drives {
+            let prev = prev_states.insert(drive.index, drive.state.clone());
+            match (prev, &drive.state) {
+                (Some(DriveState::Empty) | None, &DriveState::Ready) => {
+                    sse.send_status(&format!("drive:inserted:{}", drive.index));
+                }
+                (Some(DriveState::Ready), &DriveState::Empty) => {
+                    sse.send_status(&format!("drive:ejected:{}", drive.index));
+                }
+                _ => {}
+            }
+        }
+
+        // Track removed drives so we emit a removal event
+        let current_indices: std::collections::HashSet<usize> =
+            drives.iter().map(|d| d.index).collect();
+        for idx in prev_states.keys().copied() {
+            if !current_indices.contains(&idx) {
+                sse.send_status(&format!("drive:removed:{}", idx));
+            }
+        }
+        drop(enabled);
+
+        // Auto-rip: only watch autorip-enabled drives
+        if state.autorip_drives.read().await.is_empty() {
+            continue;
+        }
 
         let autorip_eject = state.config.read().await.ripping.autorip_eject_after;
         let active = state.active_rips.read().await;

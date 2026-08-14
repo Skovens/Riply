@@ -24,6 +24,12 @@ export const ripperApi = {
     });
   },
 
+  eject(index: number) {
+    return request<void>(`/v1/ripper/${index}/eject`, {
+      method: 'POST',
+    });
+  },
+
   rename(index: number, choice: MediaNamingChoice) {
     return request(`/v1/ripper/drives/${index}/rename`, {
       method: 'POST',

@@ -22,6 +22,18 @@
   let ripOutputDir = $state('');
   let autoripDrives = $state([]);
 
+  // ── Drive reordering (drag-and-drop) ──────────────────────
+  let driveOrder = $state(() => {
+    try {
+      const saved = localStorage.getItem('riply:driveOrder');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  let dragIndex = $state(null);
+  let dropIndex = $state(null);
+
   // ── Rip progress ───────────────────────────────────────────
   /** @type {Record<number, { pct: number, eta: number | null, stage: string, doneAt?: number }>} */
   let ripProgress = $state({});
@@ -54,16 +66,31 @@
   // ── Lifecycle ──────────────────────────────────────────────
 
   onMount(async () => {
+    // Smart polling: if drives are cached in localStorage and no rips are active,
+    // reuse them instead of making a redundant API call.
+    let drivesCached = false;
+    try {
+      const cached = localStorage.getItem('riply:drives');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        const hasActiveRip = parsed.some(d => d.state === 'Ripping');
+        if (!hasActiveRip) {
+          drives = parsed;
+          drivesCached = true;
+        }
+      }
+    } catch { /* ignore */ }
+
     await Promise.all([
       fetchStats(),
-      fetchDrives(),
+      drivesCached ? Promise.resolve() : fetchDrives(),
       fetchAutoripStatus(),
       fetchFiles(),
       fetchReviewQueue(),
       fetchJobs(),
       fetchConfig(),
     ]);
-
+    applyDriveOrder();
     sseDisconnect = connectSSE(handleSSEEvent);
   });
 
@@ -106,12 +133,12 @@
   async function fetchDrives() {
     try {
       const result = await ripperApi.listDrives();
-      drives = result || [];
+      const newDrives = result || [];
       // Drop stale rip progress for drives that are no longer ripping
       // and whose doneAt is older than 5 seconds (grace period).
       const now = Date.now();
       const staleKeys = Object.keys(ripProgress).filter(key => {
-        const drive = drives.find(d => d.index === Number(key));
+        const drive = newDrives.find(d => d.index === Number(key));
         if (!drive) return true;
         if (drive.state === 'Ripping') return false;
         const prog = ripProgress[Number(key)];
@@ -124,11 +151,47 @@
         }
         ripProgress = cleaned;
       }
+      drives = newDrives;
+      // Cache drives in localStorage for smart polling on refresh
+      try {
+        localStorage.setItem('riply:drives', JSON.stringify(newDrives));
+      } catch { /* ignore */ }
     } catch (e) {
       console.error('Failed to load drives:', e);
     } finally {
       drivesLoading = false;
     }
+  }
+
+  /** Apply saved drive order to the drives array. */
+  function applyDriveOrder() {
+    if (driveOrder.length === 0) return;
+    const sorted = [...drives].sort((a, b) => {
+      const aIdx = driveOrder.indexOf(a.index);
+      const bIdx = driveOrder.indexOf(b.index);
+      // Drives not in the order list go to the end
+      if (aIdx === -1 && bIdx === -1) return 0;
+      if (aIdx === -1) return 1;
+      if (bIdx === -1) return -1;
+      return aIdx - bIdx;
+    });
+    drives = sorted;
+  }
+
+  /** Save current drive order to localStorage. */
+  function saveDriveOrder() {
+    driveOrder = drives.map(d => d.index);
+    try {
+      localStorage.setItem('riply:driveOrder', JSON.stringify(driveOrder));
+    } catch { /* ignore */ }
+  }
+
+  /** Reset drive order to backend default. */
+  function resetDriveOrder() {
+    driveOrder = [];
+    try {
+      localStorage.removeItem('riply:driveOrder');
+    } catch { /* ignore */ }
   }
 
   async function fetchAutoripStatus() {
@@ -230,9 +293,15 @@
       return;
     }
 
-    // Drive changed: refresh drives panel
-    if (kind === 'drive' && action === 'changed') {
-      fetchDrives();
+    // Drive events: handle insertion, ejection, removal, or full state change
+    if (kind === 'drive') {
+      const index = parseInt(detail, 10);
+      if (Number.isNaN(index)) return;
+      if (action === 'inserted' || action === 'ejected' || action === 'removed') {
+        fetchDrives();
+      } else if (action === 'changed') {
+        fetchDrives();
+      }
       return;
     }
 
@@ -388,7 +457,7 @@
     try {
       await ripperApi.rename(index, choice);
       // Refresh drives to pick up the new derived_name
-      await loadDrives();
+      await fetchDrives();
     } catch (e) {
       console.error('Failed to rename disc:', e);
       showToast('Failed to set disc name', 'error');
@@ -400,6 +469,18 @@
       await ripperApi.cancel(index);
     } catch (e) {
       console.error('Failed to cancel rip:', e);
+    }
+  }
+
+  /** @param {number} index */
+  async function handleEject(index) {
+    try {
+      await ripperApi.eject(index);
+      showToast('Disc ejected', 'success');
+      await fetchDrives();
+    } catch (e) {
+      console.error('Failed to eject:', e);
+      showToast('Failed to eject', 'error');
     }
   }
 
@@ -635,6 +716,7 @@
         <button class="sidebar-panel-header" onclick={() => sidebarPanel.drives = !sidebarPanel.drives}>
           <h4 class="sidebar-panel-title">Drives</h4>
           <span class="sidebar-panel-chevron">{#if sidebarPanel.drives}&#9660;{:else}&#9654;{/if}</span>
+          <button class="btn btn--ghost btn--xs" onclick={() => fetchDrives()} title="Refresh drives">↻</button>
         </button>
         {#if sidebarPanel.drives}
           <div class="sidebar-panel-body">
@@ -647,9 +729,28 @@
               <div class="sidebar-empty">No drives found</div>
             {:else}
               <div class="drives-list">
-                {#each drives as drive}
-                  <div class="drive-card">
+                {#each drives as drive, i}
+                  <div
+                    class="drive-card"
+                    class:drive-card--drag-over={dropIndex === i}
+                    draggable="true"
+                    ondragstart={() => { dragIndex = i; }}
+                    ondragover={(e) => { e.preventDefault(); dropIndex = i; }}
+                    ondragleave={() => { dropIndex = null; }}
+                    ondragend={() => {
+                      if (dragIndex !== null && dropIndex !== null && dragIndex !== dropIndex) {
+                        const reordered = [...drives];
+                        const [dragged] = reordered.splice(dragIndex, 1);
+                        reordered.splice(dropIndex, 0, dragged);
+                        drives = reordered;
+                        saveDriveOrder();
+                      }
+                      dragIndex = null;
+                      dropIndex = null;
+                    }}
+                  >
                     <div class="drive-card__info">
+                      <div class="drive-card__drag-handle" title="Drag to reorder">⠿</div>
                       <div class="drive-card__name">{drive.name}</div>
                       {#if drive.disc_name}
                         <div class="drive-card__disc" onclick={() => handleNameDisc(drive.index)} title="Click to set media name">
@@ -691,6 +792,15 @@
                           >
                             Rip
                           </button>
+                          {#if drive.disc_name}
+                            <button
+                              class="btn btn--secondary btn--sm"
+                              onclick={() => handleEject(drive.index)}
+                              title="Eject disc"
+                            >
+                              Eject
+                            </button>
+                          {/if}
                         {/if}
                         {#if drive.state === 'Ripping'}
                           <button
@@ -712,6 +822,9 @@
                     </div>
                   </div>
                 {/each}
+                {#if driveOrder.length > 0}
+                  <button class="btn btn--ghost btn--xs" onclick={resetDriveOrder} style="margin: var(--space-2) auto; display: block;">Reset order</button>
+                {/if}
               </div>
             {/if}
           </div>
@@ -1086,6 +1199,16 @@
     gap: var(--space-2);
     padding: var(--space-3) 0;
     border-bottom: 1px solid var(--color-border);
+    cursor: grab;
+    transition: opacity var(--transition-fast), border-color var(--transition-fast);
+  }
+
+  .drive-card:active {
+    cursor: grabbing;
+  }
+
+  .drive-card--drag-over {
+    border: 2px dashed var(--color-primary);
   }
 
   .drive-card:last-child {
@@ -1095,6 +1218,20 @@
   .drive-card__info {
     flex: 1;
     min-width: 0;
+  }
+
+  .drive-card__drag-handle {
+    cursor: grab;
+    color: var(--color-text-muted);
+    user-select: none;
+    font-size: var(--text-sm);
+    opacity: 0.5;
+    margin-right: var(--space-2);
+    transition: opacity var(--transition-fast);
+  }
+
+  .drive-card:hover .drive-card__drag-handle {
+    opacity: 1;
   }
 
   .drive-card__progress {
