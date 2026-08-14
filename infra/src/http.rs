@@ -511,10 +511,13 @@ impl MetadataSearcher for HttpClient {
         Box::pin(async move {
             let mut results = match media_type {
                 MediaType::Tv => {
-                    let mut tv = self
-                        .search_tmdb_tv(&query)
-                        .await
-                        .map_err(|e| MetadataError::ApiError(e.to_string()))?;
+                    let mut tv = match self.search_tmdb_tv(&query).await {
+                        Ok(r) => r,
+                        Err(e) => {
+                            tracing::warn!(error = %e, query = %query, "TMDb TV search failed, falling back to OMDb");
+                            vec![]
+                        }
+                    };
                     if tv.is_empty() {
                         tv = self
                             .search_omdb_tv(&query, year)
@@ -524,10 +527,13 @@ impl MetadataSearcher for HttpClient {
                     tv
                 }
                 MediaType::Movie => {
-                    let mut movies = self
-                        .search_tmdb_movies(&query, year)
-                        .await
-                        .map_err(|e| MetadataError::ApiError(e.to_string()))?;
+                    let mut movies = match self.search_tmdb_movies(&query, year).await {
+                        Ok(r) => r,
+                        Err(e) => {
+                            tracing::warn!(error = %e, query = %query, "TMDb movie search failed, falling back to OMDb");
+                            vec![]
+                        }
+                    };
                     if movies.is_empty() {
                         movies = self
                             .search_omdb(&query, year)
