@@ -125,10 +125,20 @@ impl RipBackend for MakemkvBackend {
                         DriveState::Error
                     };
 
+                    let derived_name = parsed
+                        .disc_name
+                        .as_deref()
+                        .and_then(parser::derive_name)
+                        .map(|(title, year)| match year {
+                            Some(y) => format!("{title} ({y})"),
+                            None => title,
+                        });
+
                     drives.push(DriveInfo {
                         index: parsed.index,
                         name: parsed.drive_name,
                         disc_name: parsed.disc_name,
+                        derived_name,
                         device_path: parsed.device_path,
                         state,
                     });

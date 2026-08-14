@@ -8,6 +8,7 @@ use axum::{
     Json, Router,
 };
 use riply_core::{MetadataSearcher, RipBackend};
+use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tower_http::cors::CorsLayer;
 use tower_http::timeout::TimeoutLayer;
@@ -30,6 +31,15 @@ use crate::routes::scan;
 use crate::routes::search;
 use crate::routes::sse_handler;
 
+/// Stored disc name info (derived or user-set).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscNameInfo {
+    /// The original disc name from MakeMKV.
+    pub disc_name: String,
+    /// Derived name (e.g., "Inception (2007)") or user-set name.
+    pub final_name: String,
+}
+
 /// Shared application state
 pub struct AppState {
     pub db: Arc<Database>,
@@ -49,6 +59,9 @@ pub struct AppState {
     pub healthchecks_handle: RwLock<Option<tokio::task::JoinHandle<()>>>,
     /// Prometheus metrics collector.
     pub metrics: Metrics,
+    /// User-set or derived disc names, keyed by drive index.
+    /// Session-only, in-memory.
+    pub disc_names: RwLock<HashMap<usize, DiscNameInfo>>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -236,6 +249,7 @@ mod tests {
             autorip_handle: RwLock::new(None),
             healthchecks_handle: RwLock::new(None),
             metrics: Metrics::default(),
+            disc_names: RwLock::new(HashMap::new()),
         };
         Arc::new(state)
     }

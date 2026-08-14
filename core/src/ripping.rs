@@ -11,6 +11,7 @@ pub struct DriveInfo {
     pub index: usize,
     pub name: String,
     pub disc_name: Option<String>,
+    pub derived_name: Option<String>,
     pub device_path: Option<String>,
     pub state: DriveState,
 }

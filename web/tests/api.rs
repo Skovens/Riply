@@ -35,6 +35,7 @@ async fn setup() -> TestContext {
         autorip_handle: RwLock::new(None),
         healthchecks_handle: RwLock::new(None),
         metrics: Metrics::default(),
+        disc_names: RwLock::new(HashMap::new()),
     });
 
     let router = create_router(state.clone());

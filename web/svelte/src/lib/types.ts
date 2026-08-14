@@ -65,6 +65,7 @@ export interface DriveInfo {
   index: number;
   name: string;
   disc_name?: string;
+  derived_name?: string;
   state: DriveState;
 }
 

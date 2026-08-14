@@ -10,13 +10,22 @@ use riply_core::{DriveInfo, DriveState, MetadataSearcher, RipEvent, RipHandle};
 use serde::Deserialize;
 use tracing::{info, warn};
 
-use crate::api::{ApiResponse, AppState};
+use crate::api::{ApiResponse, AppState, DiscNameInfo};
 use crate::error::WebError;
+
+/// Request body for the rename endpoint
+#[derive(Debug, Deserialize)]
+pub struct RenameDriveBody {
+    pub title: String,
+    pub year: Option<u16>,
+    pub media_type: Option<String>,
+}
 
 /// Router for the ripper domain
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/v1/ripper/drives", get(list_drives))
+        .route("/v1/ripper/drives/:index/rename", post(rename_disc))
         .route("/v1/ripper/status", get(ripper_status))
         .route("/v1/ripper/:index/start", post(start_rip))
         .route("/v1/ripper/:index/cancel", post(cancel_rip))
@@ -59,9 +68,14 @@ pub async fn list_drives(
     match drives {
         Ok(mut drives) => {
             let rips = state.active_rips.read().await;
+            let disc_names = state.disc_names.read().await;
             for drive in &mut drives {
                 if rips.contains_key(&drive.index) {
                     drive.state = DriveState::Ripping;
+                }
+                // Apply user-set name if it exists
+                if let Some(info) = disc_names.get(&drive.index) {
+                    drive.derived_name = Some(info.final_name.clone());
                 }
             }
             Ok(Json(ApiResponse::ok(drives)))
@@ -74,6 +88,58 @@ pub async fn list_drives(
             )))
         }
     }
+}
+
+/// Rename a disc's final name. Called when the user selects a media match
+/// from the search results via the naming modal.
+pub async fn rename_disc(
+    State(state): State<Arc<AppState>>,
+    Path(index): Path<usize>,
+    Json(body): Json<RenameDriveBody>,
+) -> Result<Json<ApiResponse<()>>, WebError> {
+    let backend = state
+        .backend
+        .as_ref()
+        .ok_or(WebError::NotFound("No ripping backend".to_string()))?;
+
+    // Verify the drive exists and has a disc
+    let backend_clone = Arc::clone(backend);
+    let drives = tokio::task::spawn_blocking(move || backend_clone.detect_drives())
+        .await
+        .map_err(|e| WebError::Internal(format!("Task failed: {}", e)))?
+        .map_err(|e| WebError::Internal(e.to_string()))?;
+
+    let drive = drives
+        .iter()
+        .find(|d| d.index == index)
+        .ok_or_else(|| WebError::NotFound(format!("Drive {} not found", index)))?;
+
+    let disc_name = drive
+        .disc_name
+        .clone()
+        .ok_or_else(|| WebError::NotFound(format!("No disc in drive {}", index)))?;
+
+    let final_name = match body.year {
+        Some(y) => format!("{} ({})", body.title, y),
+        None => body.title.clone(),
+    };
+
+    info!(
+        drive = index,
+        disc = %disc_name,
+        final_name = %final_name,
+        "User set disc name"
+    );
+
+    state.disc_names.write().await.insert(
+        index,
+        DiscNameInfo {
+            disc_name,
+            final_name,
+        },
+    );
+
+    Ok(Json(ApiResponse::ok(())))
 }
 
 #[derive(Debug, Deserialize)]
@@ -512,7 +578,7 @@ async fn execute_rip(state: Arc<AppState>, index: usize, eject_after: bool) -> R
     let backend = state.backend.as_ref().ok_or("No ripping backend")?;
 
     // Resolve destination, auto-append (Copy N) if the directory already exists
-    let dest = {
+    let (dest, final_name) = {
         let config = state.config.read().await;
         config.validate_for_ripping()?;
         let base = config
@@ -520,8 +586,14 @@ async fn execute_rip(state: Arc<AppState>, index: usize, eject_after: bool) -> R
             .clone()
             .unwrap_or_else(|| ".".to_string());
 
-        // Resolve subdirectory from disc name with metadata search
-        let subdir_name = {
+        // Check for user-set name first
+        let user_name = state.disc_names.read().await.get(&index).map(|info| info.final_name.clone());
+
+        let subdir_name = if let Some(name) = user_name {
+            // User set a name — use it directly
+            Some(name)
+        } else {
+            // Fall back to derived name from drive detection
             let backend_clone = Arc::clone(backend);
             let drives = tokio::task::spawn_blocking(move || backend_clone.detect_drives())
                 .await
@@ -529,7 +601,11 @@ async fn execute_rip(state: Arc<AppState>, index: usize, eject_after: bool) -> R
                 .unwrap_or(vec![]);
 
             if let Some(drive) = drives.iter().find(|d| d.index == index) {
-                if let Some(ref disc_name) = drive.disc_name {
+                // Use derived name if available, otherwise raw disc name
+                if let Some(ref derived) = drive.derived_name {
+                    Some(derived.clone())
+                } else if let Some(ref disc_name) = drive.disc_name {
+                    // No derived name — use raw disc name as fallback
                     let (title, year) = resolve_rip_title(disc_name, state.searcher.as_deref()).await;
                     if !title.is_empty() {
                         Some(match year {
@@ -547,12 +623,15 @@ async fn execute_rip(state: Arc<AppState>, index: usize, eject_after: bool) -> R
             }
         };
 
+        let rip_folder_name = subdir_name.clone().unwrap_or_else(|| "Disc".to_string());
+
         let candidate = match &subdir_name {
             Some(ref s) => format!("{}/{}", base, s),
             None => base.clone(),
         };
 
-        unique_rip_destination(&candidate, subdir_name.as_deref())
+        let dest = unique_rip_destination(&candidate, Some(&rip_folder_name));
+        (dest, subdir_name)
     };
 
     let mut handle = backend.start_rip(index, &dest).map_err(|e| e.to_string())?;
@@ -565,7 +644,64 @@ async fn execute_rip(state: Arc<AppState>, index: usize, eject_after: bool) -> R
     // Remove from active rips (whether success or error)
     state.active_rips.write().await.remove(&index);
 
-    result?;
+    // Post-rip: move or cleanup
+    let rip_folder = dest.clone();
+    match result {
+        Ok(()) => {
+            // Successful rip — move if final name differs from rip folder
+            if let Some(ref final_name) = final_name {
+                // If the rip folder differs from the expected final folder, move it
+                let rip_parent = std::path::Path::new(&rip_folder)
+                    .parent()
+                    .unwrap_or(std::path::Path::new("."));
+                let dest_path = rip_parent.join(final_name);
+
+                if dest_path != std::path::Path::new(&rip_folder) {
+                    // Apply (Copy N) if destination exists
+                    let final_dest = if dest_path.exists() {
+                        let parent = dest_path.parent().unwrap_or(std::path::Path::new("."));
+                        let mut copy_n = 1;
+                        loop {
+                            let copy_name = format!("{} (Copy {})", final_name, copy_n);
+                            let copy_path = parent.join(&copy_name);
+                            if !copy_path.exists() {
+                                break copy_path.to_string_lossy().to_string();
+                            }
+                            copy_n += 1;
+                        }
+                    } else {
+                        dest_path.to_string_lossy().to_string()
+                    };
+
+                    match std::fs::rename(&rip_folder, &final_dest) {
+                        Ok(()) => {
+                            info!(
+                                from = %rip_folder,
+                                to = %final_dest,
+                                "Post-rip move completed"
+                            );
+                            sse.send_status(&format!("rip:message:{}:Moved to {}", index, final_name));
+                        }
+                        Err(e) => {
+                            warn!(error = %e, from = %rip_folder, to = %final_dest, "Post-rip move failed");
+                            sse.send_status(&format!("rip:message:{}:Move failed: {}", index, e));
+                        }
+                    }
+                } else {
+                    sse.send_status(&format!("rip:message:{}:Rip complete", index));
+                }
+            } else {
+                // No final name — rip folder is the final state
+                sse.send_status(&format!("rip:message:{}:Rip complete", index));
+            }
+        }
+        Err(_) => {
+            // Rip failed — clean up
+            info!(rip_folder = %rip_folder, "Cleaning up failed rip");
+            let _ = std::fs::remove_dir_all(&rip_folder);
+            sse.send_status(&format!("rip:message:{}:Rip failed, cleaned up", index));
+        }
+    }
 
     // Eject if configured
     if eject_after {

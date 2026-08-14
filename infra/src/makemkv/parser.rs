@@ -187,6 +187,39 @@ pub fn is_completion_line(line: &str) -> bool {
     line.starts_with("MSG:201003,")
 }
 
+/// Derive a clean media name from a MakeMKV disc name.
+///
+/// Returns `Some((title, year))` if the disc name follows a parseable pattern
+/// (e.g., `INCEPTION_2010` → `("Inception", Some(2010))`), or `None` if the
+/// name cannot be parsed (e.g., "My Home Video").
+///
+/// This is a convenience wrapper around [`parse_disc_name`] that returns
+/// `Option` instead of a tuple, making it easier to use in contexts where
+/// a non-parseable name should be silently ignored.
+///
+/// A name is considered parseable if it contains underscores (MakeMKV's
+/// convention for disc names). Names with spaces are treated as user-made
+/// labels and are not derived.
+///
+/// # Examples
+/// ```
+/// use infra::makemkv::parser::derive_name;
+///
+/// assert_eq!(derive_name("INCEPTION_2010"), Some(("Inception".to_string(), Some(2010))));
+/// assert_eq!(derive_name("THE_DARK_KNIGHT"), Some(("The Dark Knight".to_string(), None)));
+/// assert_eq!(derive_name("MY HOME VIDEO"), None);
+/// ```
+pub fn derive_name(name: &str) -> Option<(String, Option<u16>)> {
+    let (title, year) = parse_disc_name(name);
+    // If the title is empty, the name is not parseable.
+    // MakeMKV disc names use underscores; names with spaces are user labels.
+    if title.is_empty() || !name.contains('_') {
+        None
+    } else {
+        Some((title, year))
+    }
+}
+
 /// Parse a MakeMKV disc name into a title and optional year.
 ///
 /// MakeMKV disc names follow patterns like `INCEPTION_2010`, `THE_DARK_KNIGHT`,

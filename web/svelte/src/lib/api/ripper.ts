@@ -1,5 +1,6 @@
 import { request } from './request';
 import type { DriveInfo, InstallationStatus } from '$lib/types';
+import type { MediaNamingChoice } from './media-naming';
 
 export const ripperApi = {
   getStatus() {
@@ -20,6 +21,13 @@ export const ripperApi = {
   cancel(index: number) {
     return request<void>(`/v1/ripper/${index}/cancel`, {
       method: 'POST',
+    });
+  },
+
+  rename(index: number, choice: MediaNamingChoice) {
+    return request(`/v1/ripper/drives/${index}/rename`, {
+      method: 'POST',
+      body: JSON.stringify(choice),
     });
   },
 
