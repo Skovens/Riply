@@ -296,23 +296,55 @@ pub struct TitleGroup {
 
 ### Destination Path Calculation
 
-**Movies:**
+**Movies (Jellyfin convention):**
 ```
-{movies_dir}/{Title} ({Year})/{filename}
+{movies_dir}/{Title} ({Year})/{Title}.{ext}
 ```
-- Year added only if available
-- Extras go into `{movies_dir}/{Title} ({Year})/extras/`
+- Main title file is **renamed** to `{Title}.{ext}` (e.g., `Inception.mkv`)
+- Year added to directory name if available
+- Extras go into `{movies_dir}/{Title} ({Year})/Extras/` (Jellyfin convention: capitalized `Extras/`)
+- Supported extras: behind-the-scenes, trailers, interviews, deleted scenes
 
-**TV:**
+**TV (Jellyfin convention):**
 ```
-{tv_dir}/{Series} ({Year})/Season {NN}/{filename}
+{tv_dir}/{Series} ({Year})/Season {NN}/{Title} - S{NN}E{NN}.{ext}
 ```
+- Main title file is **renamed** to `{Title} - S{NN}E{NN}.{ext}` (e.g., `Breaking Bad - S01E01.mkv`)
 - Season zero-padded (e.g., `Season 01`)
 - Year added to series name if available
-- Extras go into `Season {NN}/extras/`
+- Extras go into `Season {NN}/Extras/` (Jellyfin convention: capitalized `Extras/`)
 - Series name from metadata; falls back to title
 
 **Fallback:** If `canonical_title` unavailable, uses `suggested_title`
+
+### Filename Renaming
+
+During the move step, the original filename is replaced with a Jellyfin-compatible name:
+
+**Movies:**
+- Extract extension from original filename (`inception_2010.1080p.bluray.x264.mkv` → `.mkv`)
+- Use `canonical_title` (or `suggested_title` as fallback) as the new base name
+- Result: `Inception.mkv`
+
+**TV episodes:**
+- Extract extension from original filename
+- Use `canonical_title` (or `suggested_title` as fallback) as the show name
+- Format: `{Title} - S{season:02}E{episode:02}.{ext}`
+- Result: `Breaking Bad - S01E01.mkv`
+
+**Extras:**
+- Keep original filename (extras are not renamed)
+- Only the destination folder changes (moved into `Extras/` subfolder)
+
+### Extras Detection
+
+The `content_type` field distinguishes main titles from extras:
+
+- **Detection via ffprobe:** Duration-based classification
+  - Duration > 3600s (1 hour) → `content_type = "main"`
+  - Duration ≤ 3600s → `content_type = "extra"`
+- **Manual override:** User can set `content_type` during review
+- **Extras skip metadata search:** Files with `content_type == "extra"` bypass TMDb/OMDb search to avoid false matches on commentary/behind-the-scenes content
 
 ---
 
@@ -493,3 +525,5 @@ Genres and cast are stored as JSON-encoded TEXT using `cast_list` (not `CAST` �
 - **Extras skip metadata search:** Files with `content_type == "extra"` bypass TMDb/OMDb search to avoid false matches on commentary/behind-the-scenes content.
 - **Cross-device move:** `fs::rename()` used first; falls back to `copy` + `delete` with size verification on `CrossesDevices` error.
 - **Folder-first scan:** Immediate subdirectories are treated as title groups. Root-level files without a group are included but have `title_group_id = None`.
+- **Jellyfin naming:** Movies: `{Title}.{ext}` in `{Title} ({Year})/`. TV: `{Title} - S{NN}E{NN}.{ext}` in `{Series} ({Year})/Season {NN}/`. Extras kept as-is in `Extras/` subfolder.
+- **Extras detection:** Duration-based — main titles > 3600s, extras ≤ 3600s. User can override during review.
