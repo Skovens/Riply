@@ -1396,6 +1396,7 @@ dependencies = [
  "app",
  "backon",
  "core",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

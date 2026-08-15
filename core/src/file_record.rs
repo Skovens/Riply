@@ -3,6 +3,53 @@ use std::path::PathBuf;
 
 use crate::{MediaType, PipelineStatus};
 
+/// Whether a file is the main title or an extra (bonus feature).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ContentType {
+    /// Main feature (typically > 1 hour runtime).
+    Main,
+    /// Bonus content (trailers, behind-the-scenes, commentary, etc.).
+    Extra,
+    /// Not yet classified.
+    #[default]
+    Unknown,
+}
+
+impl ContentType {
+    /// Check if this is an extra/bonus feature.
+    pub fn is_extra(&self) -> bool {
+        matches!(self, ContentType::Extra)
+    }
+
+    /// Parse from a string value (for deserialization).
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "extra" | "bonus" => ContentType::Extra,
+            "main" | "title" => ContentType::Main,
+            _ => ContentType::Unknown,
+        }
+    }
+}
+
+impl std::fmt::Display for ContentType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ContentType::Main => write!(f, "main"),
+            ContentType::Extra => write!(f, "extra"),
+            ContentType::Unknown => write!(f, "unknown"),
+        }
+    }
+}
+
+/// Convert ContentType to a string for database storage.
+pub fn content_type_to_str(ct: &ContentType) -> &str {
+    match ct {
+        ContentType::Main => "main",
+        ContentType::Extra => "extra",
+        ContentType::Unknown => "unknown",
+    }
+}
+
 /// Represents a scanned media file in the pipeline.
 ///
 /// This struct holds all metadata for a file as it progresses through
@@ -35,8 +82,8 @@ pub struct FileRecord {
     pub canonical_year: Option<u32>,
     /// TMDb ID for the media.
     pub tmdb_id: Option<i32>,
-    /// Content type (main or extra).
-    pub content_type: String,
+    /// Whether this is the main feature or a bonus/extras file.
+    pub content_type: ContentType,
     /// Media type (movie or tv).
     pub media_type: MediaType,
     /// Series name (for TV shows).
@@ -93,7 +140,7 @@ impl FileRecord {
             canonical_title: None,
             canonical_year: None,
             tmdb_id: None,
-            content_type: "unknown".to_string(),
+            content_type: ContentType::Unknown,
             media_type: MediaType::default(),
             series_name: None,
             season_number: None,
@@ -128,7 +175,7 @@ impl FileRecord {
 
     /// Check if this file is marked as an extra.
     pub fn is_extra(&self) -> bool {
-        self.content_type == "extra"
+        self.content_type.is_extra()
     }
 
     /// Check if this file needs review.
@@ -163,7 +210,7 @@ mod tests {
         assert_eq!(record.hash, "hash123");
         assert_eq!(record.status, PipelineStatus::Scanned);
         assert_eq!(record.media_type, MediaType::Movie);
-        assert_eq!(record.content_type, "unknown");
+        assert_eq!(record.content_type, ContentType::Unknown);
         assert!(!record.reviewed);
         assert!(record.created_at.contains("T"));
         assert_eq!(record.created_at, record.updated_at);
@@ -218,8 +265,30 @@ mod tests {
 
         assert!(!record.is_extra());
 
-        record.content_type = "extra".to_string();
+        record.content_type = ContentType::Extra;
         assert!(record.is_extra());
+
+        record.content_type = ContentType::Main;
+        assert!(!record.is_extra());
+    }
+
+    #[test]
+    fn test_content_type_from_str() {
+        assert_eq!(ContentType::from_str("extra"), ContentType::Extra);
+        assert_eq!(ContentType::from_str("EXTRA"), ContentType::Extra);
+        assert_eq!(ContentType::from_str("bonus"), ContentType::Extra);
+        assert_eq!(ContentType::from_str("main"), ContentType::Main);
+        assert_eq!(ContentType::from_str("MAIN"), ContentType::Main);
+        assert_eq!(ContentType::from_str("title"), ContentType::Main);
+        assert_eq!(ContentType::from_str("unknown"), ContentType::Unknown);
+        assert_eq!(ContentType::from_str("foo"), ContentType::Unknown);
+    }
+
+    #[test]
+    fn test_content_type_display() {
+        assert_eq!(ContentType::Main.to_string(), "main");
+        assert_eq!(ContentType::Extra.to_string(), "extra");
+        assert_eq!(ContentType::Unknown.to_string(), "unknown");
     }
 
     #[test]

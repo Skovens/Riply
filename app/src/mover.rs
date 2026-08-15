@@ -297,7 +297,7 @@ mod tests {
         );
         file.canonical_title = Some("Test Movie".to_string());
         file.canonical_year = Some(2023);
-        file.content_type = "extra".to_string();
+        file.content_type = riply_core::ContentType::Extra;
         file.status = PipelineStatus::Confirmed;
 
         let mover = MoverService::new();
@@ -331,7 +331,7 @@ mod tests {
         file.canonical_title = Some("Test Show".to_string());
         file.series_name = Some("Test Show".to_string());
         file.season_number = Some(1);
-        file.content_type = "extra".to_string();
+        file.content_type = riply_core::ContentType::Extra;
         file.status = PipelineStatus::Confirmed;
 
         let mover = MoverService::new();
@@ -367,7 +367,7 @@ mod tests {
         file.series_name = Some("Test Show".to_string());
         file.season_number = Some(1);
         file.episode_number = Some(1);
-        file.content_type = "main".to_string();
+        file.content_type = riply_core::ContentType::Main;
         file.status = PipelineStatus::Confirmed;
 
         let mover = MoverService::new();

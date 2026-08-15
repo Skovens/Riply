@@ -132,7 +132,7 @@ impl Database {
             .bind(&file.canonical_title)
             .bind(file.canonical_year)
             .bind(file.tmdb_id)
-            .bind(&file.content_type)
+            .bind(riply_core::content_type_to_str(&file.content_type))
             .bind(file.media_type.to_string())
             .bind(&file.series_name)
             .bind(file.season_number)
@@ -280,7 +280,7 @@ impl Database {
         .bind(&file.canonical_title)
         .bind(file.canonical_year)
         .bind(file.tmdb_id)
-        .bind(&file.content_type)
+        .bind(riply_core::content_type_to_str(&file.content_type))
         .bind(file.media_type.to_string())
         .bind(&file.series_name)
         .bind(file.season_number)
@@ -330,7 +330,7 @@ impl Database {
             canonical_title: row.try_get("canonical_title")?,
             canonical_year: row.try_get("canonical_year")?,
             tmdb_id: row.try_get("tmdb_id")?,
-            content_type: row.try_get("content_type")?,
+            content_type: riply_core::ContentType::from_str(&row.try_get::<String, _>("content_type")?),
             media_type: self.parse_media_type(row.try_get::<String, _>("media_type")?),
             series_name: row.try_get("series_name")?,
             season_number: row.try_get("season_number")?,

@@ -68,7 +68,7 @@ impl AnalyzerService {
         let search_year = parsed.year;
 
         // Skip metadata search for extras - they don't need title matching
-        let skip_metadata_search = record.content_type == "extra";
+        let skip_metadata_search = record.content_type.is_extra();
 
         // Try external metadata search if available
         if !skip_metadata_search {
@@ -255,7 +255,7 @@ fn parse_filename(filename: &str) -> ParsedFilename {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use riply_core::PipelineStatus;
+    use riply_core::{ContentType, PipelineStatus};
 
     #[test]
     fn test_parse_filename_with_year() {
@@ -697,7 +697,7 @@ mod tests {
             "hash".to_string(),
         );
         let mut file = file;
-        file.content_type = "extra".to_string();
+        file.content_type = ContentType::Extra;
 
         let analyzer = AnalyzerService::new(Some(Box::new(MockSearcher)));
         let result = analyzer.analyze_file(&file).await.unwrap();

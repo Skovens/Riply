@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::process::Command;
 
+use riply_core::ContentType;
 use serde::Deserialize;
 use tracing::instrument;
 
@@ -29,7 +30,7 @@ pub struct FfprobeMetadata {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub codec: Option<String>,
-    pub content_type: Option<String>,
+    pub content_type: Option<ContentType>,
 }
 
 #[instrument]
@@ -72,8 +73,8 @@ pub fn extract_metadata(path: &Path) -> Result<FfprobeMetadata, anyhow::Error> {
     let codec = video_stream.and_then(|s| s.codec_name.clone());
 
     let content_type = match duration_secs {
-        Some(d) if d > 3600.0 => Some("main".to_string()),
-        Some(_) => Some("extra".to_string()),
+        Some(d) if d > 3600.0 => Some(ContentType::Main),
+        Some(_) => Some(ContentType::Extra),
         None => None,
     };
 

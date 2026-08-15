@@ -329,22 +329,21 @@ fn run_sudo(args: &[&str]) -> anyhow::Result<()> {
 
 fn prompt_yes_no(message: &str, default_yes: bool) -> anyhow::Result<bool> {
     let hint = if default_yes { "Y/n" } else { "y/N" };
-    print!("{} [{}]: ", message, hint);
-    io::stdout().flush()?;
+    loop {
+        print!("{} [{}]: ", message, hint);
+        io::stdout().flush()?;
 
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    let input = input.trim().to_lowercase();
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        let input = input.trim().to_lowercase();
 
-    Ok(match input.as_str() {
-        "y" | "yes" => true,
-        "n" | "no" => false,
-        "" => default_yes,
-        _ => {
-            println!("Please enter y or n.");
-            prompt_yes_no(message, default_yes)?
+        match input.as_str() {
+            "y" | "yes" => return Ok(true),
+            "n" | "no" => return Ok(false),
+            "" => return Ok(default_yes),
+            _ => println!("Please enter y or n."),
         }
-    })
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────

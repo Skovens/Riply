@@ -9,7 +9,7 @@ pub mod pipeline;
 pub mod ripping;
 pub mod title_group;
 
-pub use file_record::FileRecord;
+pub use file_record::{content_type_to_str, ContentType, FileRecord};
 pub use media_type::MediaType;
 pub use metadata::{MetadataEnrichment, MetadataError, MetadataMatch, MetadataSearcher};
 pub use name_cleaner::NameCleaner;

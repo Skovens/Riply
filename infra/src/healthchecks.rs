@@ -52,40 +52,13 @@ impl HealthchecksClient {
 }
 
 fn extract_uuid(input: &str) -> Option<String> {
-    let uuid_len = 36usize;
-    let bytes = input.as_bytes();
-    if bytes.len() < uuid_len {
-        return None;
-    }
-    for start in 0..=bytes.len() - uuid_len {
-        let slice = &bytes[start..start + uuid_len];
-        if matches_uuid_pattern(slice) {
-            return Some(input[start..start + uuid_len].to_string());
-        }
-    }
-    None
-}
-
-fn matches_uuid_pattern(s: &[u8]) -> bool {
-    if s.len() != 36 {
-        return false;
-    }
-    // UUID: 8-4-4-4-12 hex digits
-    for (i, &b) in s.iter().enumerate() {
-        match i {
-            8 | 13 | 18 | 23 => {
-                if b != b'-' {
-                    return false;
-                }
-            }
-            _ => {
-                if !b.is_ascii_hexdigit() {
-                    return false;
-                }
-            }
-        }
-    }
-    true
+    static UUID_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+            .unwrap()
+    });
+    UUID_RE
+        .find(input)
+        .map(|m| m.as_str().to_string())
 }
 
 #[cfg(test)]
@@ -138,23 +111,5 @@ mod tests {
     #[test]
     fn test_extract_uuid_too_short() {
         assert_eq!(extract_uuid("abc"), None);
-    }
-
-    #[test]
-    fn test_matches_uuid_pattern_valid() {
-        let uuid = b"b6fb34e0-de2d-4b37-8edc-c32c6745f03f";
-        assert!(matches_uuid_pattern(uuid));
-    }
-
-    #[test]
-    fn test_matches_uuid_pattern_uppercase() {
-        let uuid = b"B6FB34E0-DE2D-4B37-8EDC-C32C6745F03F";
-        assert!(matches_uuid_pattern(uuid));
-    }
-
-    #[test]
-    fn test_matches_uuid_pattern_bad_hyphen_pos() {
-        let uuid = b"b6fb34e0de2d-4b37-8edc-c32c6745f03f";
-        assert!(!matches_uuid_pattern(uuid));
     }
 }
