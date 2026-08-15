@@ -118,9 +118,9 @@ impl MoverService {
                 }
             }
 
-            // Extras go into an extras/ subdirectory within the season
+            // Extras go into an Extras/ subdirectory within the season (Jellyfin convention)
             if file.is_extra() {
-                base.join("extras")
+                base.join("Extras")
             } else {
                 base
             }
@@ -140,16 +140,40 @@ impl MoverService {
                 }
             }
 
-            // Movie extras go into an extras/ subdirectory
+            // Movie extras go into an Extras/ subdirectory (Jellyfin convention)
             if file.is_extra() {
-                base.join("extras")
+                base.join("Extras")
             } else {
                 base
             }
         };
 
-        // Add filename
-        let dest_path = base_path.join(&file.filename);
+        // Determine the output filename
+        // - Extras keep their original filename
+        // - Main titles are renamed per Jellyfin convention
+        let output_filename = if file.is_extra() {
+            file.filename.clone()
+        } else if file.media_type.is_tv() {
+            // TV: {Title} - S{NN}E{NN}.{ext}
+            let ext = file
+                .filename
+                .rsplit_once('.')
+                .map(|(_, ext)| format!(".{}", ext))
+                .unwrap_or_default();
+            let season = file.season_number.unwrap_or(1);
+            let episode = file.episode_number.unwrap_or(1);
+            format!("{} - S{:02}E{:02}{}", title, season, episode, ext)
+        } else {
+            // Movie: {Title}.{ext}
+            let ext = file
+                .filename
+                .rsplit_once('.')
+                .map(|(_, ext)| format!(".{}", ext))
+                .unwrap_or_default();
+            format!("{}{}", title, ext)
+        };
+
+        let dest_path = base_path.join(&output_filename);
 
         Ok(dest_path)
     }
@@ -181,12 +205,12 @@ mod tests {
 
         let mut file = riply_core::FileRecord::new(
             "test".to_string(),
-            std::path::PathBuf::from("/test/movie.mkv"),
-            "movie.mkv".to_string(),
+            std::path::PathBuf::from("/test/inception_2010.1080p.bluray.mkv"),
+            "inception_2010.1080p.bluray.mkv".to_string(),
             "hash".to_string(),
         );
-        file.canonical_title = Some("Test Movie".to_string());
-        file.canonical_year = Some(2023);
+        file.canonical_title = Some("Inception".to_string());
+        file.canonical_year = Some(2010);
         file.status = PipelineStatus::Confirmed;
 
         let mover = MoverService::new();
@@ -194,7 +218,11 @@ mod tests {
             .calculate_destination(&file, &movies_dir, &tv_dir)
             .unwrap();
 
-        assert_eq!(dest, movies_dir.join("Test Movie (2023)").join("movie.mkv"));
+        // Jellyfin: main movie renamed to {Title}.{ext}
+        assert_eq!(
+            dest,
+            movies_dir.join("Inception (2010)").join("Inception.mkv")
+        );
     }
 
     #[test]
@@ -205,13 +233,13 @@ mod tests {
 
         let mut file = riply_core::FileRecord::new(
             "test".to_string(),
-            std::path::PathBuf::from("/test/show.s01e01.mkv"),
-            "show.s01e01.mkv".to_string(),
+            std::path::PathBuf::from("/test/breaking.bad.s01e01.720p.hdtv.mkv"),
+            "breaking.bad.s01e01.720p.hdtv.mkv".to_string(),
             "hash".to_string(),
         );
         file.media_type = MediaType::Tv;
-        file.canonical_title = Some("Test Show".to_string());
-        file.series_name = Some("Test Show".to_string());
+        file.canonical_title = Some("Breaking Bad".to_string());
+        file.series_name = Some("Breaking Bad".to_string());
         file.season_number = Some(1);
         file.episode_number = Some(1);
         file.status = PipelineStatus::Confirmed;
@@ -221,12 +249,13 @@ mod tests {
             .calculate_destination(&file, &movies_dir, &tv_dir)
             .unwrap();
 
+        // Jellyfin: TV episode renamed to {Title} - S{NN}E{NN}.{ext}
         assert_eq!(
             dest,
             tv_dir
-                .join("Test Show")
+                .join("Breaking Bad")
                 .join("Season 01")
-                .join("show.s01e01.mkv")
+                .join("Breaking Bad - S01E01.mkv")
         );
     }
 
@@ -237,27 +266,27 @@ mod tests {
         let tv_dir = dir.path().join("tv");
 
         // Create source file
-        let source_path = dir.path().join("test.mkv");
+        let source_path = dir.path().join("matrix.1999.1080p.bluray.mkv");
         fs::write(&source_path, "test content").unwrap();
 
         let mut file = riply_core::FileRecord::new(
             "test".to_string(),
             source_path.clone(),
-            "test.mkv".to_string(),
+            "matrix.1999.1080p.bluray.mkv".to_string(),
             "hash".to_string(),
         );
-        file.canonical_title = Some("Test Movie".to_string());
-        file.canonical_year = Some(2023);
+        file.canonical_title = Some("The Matrix".to_string());
+        file.canonical_year = Some(1999);
         file.status = PipelineStatus::Confirmed;
 
         let mover = MoverService::new();
         let result = mover.move_file(&file, &movies_dir, &tv_dir).await.unwrap();
 
-        // Verify file was moved
+        // Verify file was moved and renamed to Jellyfin format
         assert!(!source_path.exists());
         assert!(movies_dir
-            .join("Test Movie (2023)")
-            .join("test.mkv")
+            .join("The Matrix (1999)")
+            .join("The Matrix.mkv")
             .exists());
         assert_eq!(result.status, PipelineStatus::Moved);
     }
@@ -284,11 +313,12 @@ mod tests {
             .calculate_destination(&file, &movies_dir, &tv_dir)
             .unwrap();
 
+        // Extras keep original filename, go into capitalized Extras/ (Jellyfin convention)
         assert_eq!(
             dest,
             movies_dir
                 .join("Test Movie (2023)")
-                .join("extras")
+                .join("Extras")
                 .join("behind_scenes.mkv")
         );
     }
@@ -317,12 +347,13 @@ mod tests {
             .calculate_destination(&file, &movies_dir, &tv_dir)
             .unwrap();
 
+        // Extras keep original filename, go into capitalized Extras/ (Jellyfin convention)
         assert_eq!(
             dest,
             tv_dir
                 .join("Test Show")
                 .join("Season 01")
-                .join("extras")
+                .join("Extras")
                 .join("commentary.mkv")
         );
     }
@@ -352,12 +383,13 @@ mod tests {
             .calculate_destination(&file, &movies_dir, &tv_dir)
             .unwrap();
 
+        // Main TV episode renamed per Jellyfin convention
         assert_eq!(
             dest,
             tv_dir
                 .join("Test Show")
                 .join("Season 01")
-                .join("show.s01e01.mkv")
+                .join("Test Show - S01E01.mkv")
         );
     }
 }
