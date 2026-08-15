@@ -118,7 +118,7 @@ impl MoverService {
                 }
             }
 
-            // Extras go into an Extras/ subdirectory within the season (Jellyfin convention)
+            // Extras go into an Extras/ subdirectory within the season.
             if file.is_extra() {
                 base.join("Extras")
             } else {
@@ -127,7 +127,7 @@ impl MoverService {
         } else {
             let mut base = movies_dir.join(&title);
 
-            // Add year to title directory if available
+            // Add year to title directory if available.
             if let Some(year) = year {
                 let parent = base.parent().unwrap_or(&base).to_path_buf();
                 let base_name = base
@@ -140,7 +140,7 @@ impl MoverService {
                 }
             }
 
-            // Movie extras go into an Extras/ subdirectory (Jellyfin convention)
+            // Movie extras go into an Extras/ subdirectory.
             if file.is_extra() {
                 base.join("Extras")
             } else {
@@ -148,28 +148,20 @@ impl MoverService {
             }
         };
 
-        // Determine the output filename
-        // - Extras keep their original filename
-        // - Main titles are renamed per Jellyfin convention
+        // Determine the output filename: extras keep original name, main titles
+        // are renamed per Jellyfin convention.
+        let ext = file
+            .filename
+            .rsplit_once('.')
+            .map(|(_, ext)| format!(".{}", ext))
+            .unwrap_or_default();
         let output_filename = if file.is_extra() {
             file.filename.clone()
         } else if file.media_type.is_tv() {
-            // TV: {Title} - S{NN}E{NN}.{ext}
-            let ext = file
-                .filename
-                .rsplit_once('.')
-                .map(|(_, ext)| format!(".{}", ext))
-                .unwrap_or_default();
             let season = file.season_number.unwrap_or(1);
             let episode = file.episode_number.unwrap_or(1);
             format!("{} - S{:02}E{:02}{}", title, season, episode, ext)
         } else {
-            // Movie: {Title}.{ext}
-            let ext = file
-                .filename
-                .rsplit_once('.')
-                .map(|(_, ext)| format!(".{}", ext))
-                .unwrap_or_default();
             format!("{}{}", title, ext)
         };
 
@@ -390,6 +382,33 @@ mod tests {
                 .join("Test Show")
                 .join("Season 01")
                 .join("Test Show - S01E01.mkv")
+        );
+    }
+
+    #[test]
+    fn test_calculate_destination_no_extension() {
+        let dir = tempdir().unwrap();
+        let movies_dir = dir.path().join("movies");
+        let tv_dir = dir.path().join("tv");
+
+        let mut file = riply_core::FileRecord::new(
+            "test".to_string(),
+            std::path::PathBuf::from("/test/inception"),
+            "inception".to_string(),
+            "hash".to_string(),
+        );
+        file.canonical_title = Some("Inception".to_string());
+        file.status = PipelineStatus::Confirmed;
+
+        let mover = MoverService::new();
+        let dest = mover
+            .calculate_destination(&file, &movies_dir, &tv_dir)
+            .unwrap();
+
+        // File with no extension gets title-only name (no trailing dot)
+        assert_eq!(
+            dest,
+            movies_dir.join("Inception").join("Inception")
         );
     }
 }
