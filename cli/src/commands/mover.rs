@@ -69,18 +69,18 @@ pub async fn move_files(
                 Ok(updated_record) => {
                     moved += 1;
                     db.update_file(&updated_record).await?;
-                    println!("  ✓ {} -> {:?}", record.filename, updated_record.path);
+                    println!("  ✓ {} -> {:?}", record.filename(), updated_record.path());
                     results.push(MoveResult {
-                        filename: record.filename.clone(),
+                        filename: record.filename().to_string(),
                         status: "moved".to_string(),
-                        path: Some(updated_record.path.to_string_lossy().to_string()),
+                        path: Some(updated_record.path().to_string_lossy().to_string()),
                     });
                 }
                 Err(e) => {
                     errors += 1;
-                    println!("  ✗ {} (error: {})", record.filename, e);
+                    println!("  ✗ {} (error: {})", record.filename(), e);
                     results.push(MoveResult {
-                        filename: record.filename.clone(),
+                        filename: record.filename().to_string(),
                         status: format!("error: {}", e),
                         path: None,
                     });
@@ -107,15 +107,15 @@ pub async fn move_files(
                     moved += 1;
                     db.update_file(&updated_record).await?;
                     results.push(MoveResult {
-                        filename: record.filename.clone(),
+                        filename: record.filename().to_string(),
                         status: "moved".to_string(),
-                        path: Some(updated_record.path.to_string_lossy().to_string()),
+                        path: Some(updated_record.path().to_string_lossy().to_string()),
                     });
                 }
                 Err(e) => {
                     errors += 1;
                     results.push(MoveResult {
-                        filename: record.filename.clone(),
+                        filename: record.filename().to_string(),
                         status: format!("error: {}", e),
                         path: None,
                     });

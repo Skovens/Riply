@@ -50,12 +50,14 @@ pub fn content_type_to_str(ct: &ContentType) -> &str {
     }
 }
 
-/// Represents a scanned media file in the pipeline.
+// ── Split FileRecord into domain-focused sub-records ──────────────────────────
+
+/// Core scanning data: file identity, location, and pipeline state.
 ///
-/// This struct holds all metadata for a file as it progresses through
-/// the scanning, analysis, and review phases.
+/// Populated first by the scanner, then gradually enriched by analysis
+/// and enrichment stages.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileRecord {
+pub struct ScanRecord {
     /// Unique identifier (SHA-256 hash of file content).
     pub id: String,
     /// Full path to the file on disk.
@@ -70,6 +72,27 @@ pub struct FileRecord {
     pub hash: String,
     /// Current pipeline status.
     pub status: PipelineStatus,
+    /// Whether this is the main feature or a bonus/extras file.
+    pub content_type: ContentType,
+    /// Media type (movie or tv).
+    pub media_type: MediaType,
+    /// ID of the TitleGroup this file belongs to, if any.
+    pub title_group_id: Option<String>,
+    /// Path to a duplicate file (if detected).
+    pub duplicate_path: Option<PathBuf>,
+    /// Whether the file has been reviewed.
+    pub reviewed: bool,
+    /// Timestamp when the record was created.
+    pub created_at: String,
+    /// Timestamp when the record was last updated.
+    pub updated_at: String,
+}
+
+/// Title and episode metadata from search or manual review.
+///
+/// Populated by the analyzer (TMDb/OMDb lookups) and the review step.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MetadataRecord {
     /// Suggested title from metadata search.
     pub suggested_title: Option<String>,
     /// Suggested year from metadata search.
@@ -82,10 +105,6 @@ pub struct FileRecord {
     pub canonical_year: Option<u32>,
     /// TMDb ID for the media.
     pub tmdb_id: Option<i32>,
-    /// Whether this is the main feature or a bonus/extras file.
-    pub content_type: ContentType,
-    /// Media type (movie or tv).
-    pub media_type: MediaType,
     /// Series name (for TV shows).
     pub series_name: Option<String>,
     /// Season number (for TV shows).
@@ -96,12 +115,15 @@ pub struct FileRecord {
     pub episode_title: Option<String>,
     /// Source of the metadata (TMDb, OMDb, Manual).
     pub source: Option<String>,
+}
+
+/// Enrichment data from metadata providers (genres, cast, etc.).
+///
+/// Populated after a match is confirmed, via TMDb/OMb enrichment calls.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct EnrichmentRecord {
     /// Subtitle text extracted via OCR.
     pub subtitle_text: Option<String>,
-    /// Path to a duplicate file (if detected).
-    pub duplicate_path: Option<PathBuf>,
-    /// ID of the TitleGroup this file belongs to, if any.
-    pub title_group_id: Option<String>,
     /// Genres from metadata enrichment (e.g. ["Drama", "Crime"]).
     pub genres: Option<Vec<String>>,
     /// Runtime in minutes from metadata enrichment.
@@ -112,83 +134,154 @@ pub struct FileRecord {
     pub overview: Option<String>,
     /// Leading cast member names from metadata enrichment.
     pub cast_list: Option<Vec<String>>,
-    /// Whether the file has been reviewed.
-    pub reviewed: bool,
-    /// Timestamp when the record was created.
-    pub created_at: String,
-    /// Timestamp when the record was last updated.
-    pub updated_at: String,
 }
 
+/// Represents a scanned media file in the pipeline.
+///
+/// Composed of three focused sub-records:
+/// - `scan`: file identity and pipeline state (always populated)
+/// - `metadata`: title/episode info (populated by analysis/review)
+/// - `enrichment`: genres/cast/runtime (populated after match)
+///
+/// Convenience accessors delegate to the sub-records so existing code
+/// (`file.filename`, `file.canonical_title`, etc.) continues to work.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileRecord {
+    pub scan: ScanRecord,
+    pub metadata: MetadataRecord,
+    pub enrichment: EnrichmentRecord,
+}
+
+// ── FileRecord convenience accessors (delegate to sub-records) ────────────────
+
 impl FileRecord {
+    // ── ScanRecord accessors ──────────────────────────────────────────────
+    pub fn id(&self) -> &str { &self.scan.id }
+    pub fn path(&self) -> &PathBuf { &self.scan.path }
+    pub fn filename(&self) -> &str { &self.scan.filename }
+    pub fn size(&self) -> Option<i64> { self.scan.size }
+    pub fn duration(&self) -> Option<i64> { self.scan.duration }
+    pub fn hash(&self) -> &str { &self.scan.hash }
+    pub fn status(&self) -> &PipelineStatus { &self.scan.status }
+    pub fn content_type(&self) -> &ContentType { &self.scan.content_type }
+    pub fn media_type(&self) -> &MediaType { &self.scan.media_type }
+    pub fn title_group_id(&self) -> &Option<String> { &self.scan.title_group_id }
+    pub fn duplicate_path(&self) -> &Option<PathBuf> { &self.scan.duplicate_path }
+    pub fn reviewed(&self) -> bool { self.scan.reviewed }
+    pub fn created_at(&self) -> &str { &self.scan.created_at }
+    pub fn updated_at(&self) -> &str { &self.scan.updated_at }
+
+    // ── MetadataRecord accessors ──────────────────────────────────────────
+    pub fn suggested_title(&self) -> &Option<String> { &self.metadata.suggested_title }
+    pub fn suggested_year(&self) -> &Option<u32> { &self.metadata.suggested_year }
+    pub fn confidence(&self) -> &Option<f64> { &self.metadata.confidence }
+    pub fn canonical_title(&self) -> &Option<String> { &self.metadata.canonical_title }
+    pub fn canonical_year(&self) -> &Option<u32> { &self.metadata.canonical_year }
+    pub fn tmdb_id(&self) -> &Option<i32> { &self.metadata.tmdb_id }
+    pub fn series_name(&self) -> &Option<String> { &self.metadata.series_name }
+    pub fn season_number(&self) -> &Option<u32> { &self.metadata.season_number }
+    pub fn episode_number(&self) -> &Option<u32> { &self.metadata.episode_number }
+    pub fn episode_title(&self) -> &Option<String> { &self.metadata.episode_title }
+    pub fn source(&self) -> &Option<String> { &self.metadata.source }
+
+    // ── EnrichmentRecord accessors ────────────────────────────────────────
+    pub fn subtitle_text(&self) -> &Option<String> { &self.enrichment.subtitle_text }
+    pub fn genres(&self) -> &Option<Vec<String>> { &self.enrichment.genres }
+    pub fn runtime(&self) -> &Option<i32> { &self.enrichment.runtime }
+    pub fn content_rating(&self) -> &Option<String> { &self.enrichment.content_rating }
+    pub fn overview(&self) -> &Option<String> { &self.enrichment.overview }
+    pub fn cast_list(&self) -> &Option<Vec<String>> { &self.enrichment.cast_list }
+
+    // ── Mutators ──────────────────────────────────────────────────────────
+    pub fn id_mut(&mut self) -> &mut String { &mut self.scan.id }
+    pub fn path_mut(&mut self) -> &mut PathBuf { &mut self.scan.path }
+    pub fn filename_mut(&mut self) -> &mut String { &mut self.scan.filename }
+    pub fn size_mut(&mut self) -> &mut Option<i64> { &mut self.scan.size }
+    pub fn duration_mut(&mut self) -> &mut Option<i64> { &mut self.scan.duration }
+    pub fn hash_mut(&mut self) -> &mut String { &mut self.scan.hash }
+    pub fn status_mut(&mut self) -> &mut PipelineStatus { &mut self.scan.status }
+    pub fn content_type_mut(&mut self) -> &mut ContentType { &mut self.scan.content_type }
+    pub fn media_type_mut(&mut self) -> &mut MediaType { &mut self.scan.media_type }
+    pub fn title_group_id_mut(&mut self) -> &mut Option<String> { &mut self.scan.title_group_id }
+    pub fn duplicate_path_mut(&mut self) -> &mut Option<PathBuf> { &mut self.scan.duplicate_path }
+    pub fn reviewed_mut(&mut self) -> &mut bool { &mut self.scan.reviewed }
+    pub fn created_at_mut(&mut self) -> &mut String { &mut self.scan.created_at }
+    pub fn updated_at_mut(&mut self) -> &mut String { &mut self.scan.updated_at }
+
+    pub fn suggested_title_mut(&mut self) -> &mut Option<String> { &mut self.metadata.suggested_title }
+    pub fn suggested_year_mut(&mut self) -> &mut Option<u32> { &mut self.metadata.suggested_year }
+    pub fn confidence_mut(&mut self) -> &mut Option<f64> { &mut self.metadata.confidence }
+    pub fn canonical_title_mut(&mut self) -> &mut Option<String> { &mut self.metadata.canonical_title }
+    pub fn canonical_year_mut(&mut self) -> &mut Option<u32> { &mut self.metadata.canonical_year }
+    pub fn tmdb_id_mut(&mut self) -> &mut Option<i32> { &mut self.metadata.tmdb_id }
+    pub fn series_name_mut(&mut self) -> &mut Option<String> { &mut self.metadata.series_name }
+    pub fn season_number_mut(&mut self) -> &mut Option<u32> { &mut self.metadata.season_number }
+    pub fn episode_number_mut(&mut self) -> &mut Option<u32> { &mut self.metadata.episode_number }
+    pub fn episode_title_mut(&mut self) -> &mut Option<String> { &mut self.metadata.episode_title }
+    pub fn source_mut(&mut self) -> &mut Option<String> { &mut self.metadata.source }
+
+    pub fn subtitle_text_mut(&mut self) -> &mut Option<String> { &mut self.enrichment.subtitle_text }
+    pub fn genres_mut(&mut self) -> &mut Option<Vec<String>> { &mut self.enrichment.genres }
+    pub fn runtime_mut(&mut self) -> &mut Option<i32> { &mut self.enrichment.runtime }
+    pub fn content_rating_mut(&mut self) -> &mut Option<String> { &mut self.enrichment.content_rating }
+    pub fn overview_mut(&mut self) -> &mut Option<String> { &mut self.enrichment.overview }
+    pub fn cast_list_mut(&mut self) -> &mut Option<Vec<String>> { &mut self.enrichment.cast_list }
+
+    // ── Factory ───────────────────────────────────────────────────────────
     /// Create a new FileRecord for a scanned file.
     pub fn new(id: String, path: PathBuf, filename: String, hash: String) -> Self {
         use chrono::Utc;
         let now = Utc::now().to_rfc3339();
 
         FileRecord {
-            id,
-            path,
-            filename,
-            size: None,
-            duration: None,
-            hash,
-            status: PipelineStatus::Scanned,
-            suggested_title: None,
-            suggested_year: None,
-            confidence: None,
-            canonical_title: None,
-            canonical_year: None,
-            tmdb_id: None,
-            content_type: ContentType::Unknown,
-            media_type: MediaType::default(),
-            series_name: None,
-            season_number: None,
-            episode_number: None,
-            episode_title: None,
-            source: None,
-            subtitle_text: None,
-            duplicate_path: None,
-            title_group_id: None,
-            genres: None,
-            runtime: None,
-            content_rating: None,
-            overview: None,
-            cast_list: None,
-            reviewed: false,
-            created_at: now.clone(),
-            updated_at: now,
+            scan: ScanRecord {
+                id,
+                path,
+                filename,
+                size: None,
+                duration: None,
+                hash,
+                status: PipelineStatus::Scanned,
+                content_type: ContentType::Unknown,
+                media_type: MediaType::default(),
+                title_group_id: None,
+                duplicate_path: None,
+                reviewed: false,
+                created_at: now.clone(),
+                updated_at: now,
+            },
+            metadata: MetadataRecord::default(),
+            enrichment: EnrichmentRecord::default(),
         }
     }
 
     /// Update the pipeline status.
     pub fn update_status(&mut self, new_status: PipelineStatus) {
         use chrono::Utc;
-        self.status = new_status;
-        self.updated_at = Utc::now().to_rfc3339();
+        self.scan.status = new_status;
+        self.scan.updated_at = Utc::now().to_rfc3339();
     }
 
     /// Check if this file is a TV show episode.
     pub fn is_tv_episode(&self) -> bool {
-        self.media_type.is_tv() && self.episode_number.is_some()
+        self.scan.media_type.is_tv() && self.metadata.episode_number.is_some()
     }
 
     /// Check if this file is marked as an extra.
     pub fn is_extra(&self) -> bool {
-        self.content_type.is_extra()
+        self.scan.content_type.is_extra()
     }
 
     /// Check if this file needs review.
     pub fn needs_review(&self) -> bool {
-        self.status.requires_review()
+        self.scan.status.requires_review()
     }
 
     /// Check if this file is ready to be moved.
     pub fn is_ready_to_move(&self) -> bool {
-        matches!(self.status, PipelineStatus::Confirmed)
+        matches!(self.scan.status, PipelineStatus::Confirmed)
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,16 +297,16 @@ mod tests {
             "hash123".to_string(),
         );
 
-        assert_eq!(record.id, "abc123");
-        assert_eq!(record.path, path);
-        assert_eq!(record.filename, "movie.mkv");
-        assert_eq!(record.hash, "hash123");
-        assert_eq!(record.status, PipelineStatus::Scanned);
-        assert_eq!(record.media_type, MediaType::Movie);
-        assert_eq!(record.content_type, ContentType::Unknown);
-        assert!(!record.reviewed);
-        assert!(record.created_at.contains("T"));
-        assert_eq!(record.created_at, record.updated_at);
+        assert_eq!(record.id(), "abc123");
+        assert_eq!(record.path(), &path);
+        assert_eq!(record.filename(), "movie.mkv");
+        assert_eq!(record.hash(), "hash123");
+        assert_eq!(*record.status(), PipelineStatus::Scanned);
+        assert_eq!(*record.media_type(), MediaType::Movie);
+        assert_eq!(*record.content_type(), ContentType::Unknown);
+        assert!(!record.reviewed());
+        assert!(record.created_at().contains("T"));
+        assert_eq!(record.created_at(), record.updated_at());
     }
 
     #[test]
@@ -225,12 +318,12 @@ mod tests {
             "hash123".to_string(),
         );
 
-        let original_updated = record.updated_at.clone();
+        let original_updated = record.updated_at().to_string();
         std::thread::sleep(std::time::Duration::from_millis(10));
 
         record.update_status(PipelineStatus::Matched);
-        assert_eq!(record.status, PipelineStatus::Matched);
-        assert!(record.updated_at > original_updated);
+        assert_eq!(*record.status(), PipelineStatus::Matched);
+        assert!(record.updated_at() > &original_updated);
     }
 
     #[test]
@@ -246,11 +339,11 @@ mod tests {
         assert!(!record.is_tv_episode());
 
         // TV show but no episode number
-        record.media_type = MediaType::Tv;
+        *record.media_type_mut() = MediaType::Tv;
         assert!(!record.is_tv_episode());
 
         // TV show with episode number
-        record.episode_number = Some(1);
+        *record.episode_number_mut() = Some(1);
         assert!(record.is_tv_episode());
     }
 
@@ -265,10 +358,10 @@ mod tests {
 
         assert!(!record.is_extra());
 
-        record.content_type = ContentType::Extra;
+        *record.content_type_mut() = ContentType::Extra;
         assert!(record.is_extra());
 
-        record.content_type = ContentType::Main;
+        *record.content_type_mut() = ContentType::Main;
         assert!(!record.is_extra());
     }
 
@@ -335,5 +428,28 @@ mod tests {
         // Moved files are not ready to move (already moved)
         record.update_status(PipelineStatus::Moved);
         assert!(!record.is_ready_to_move());
+    }
+
+    #[test]
+    fn test_record_split_accessors() {
+        let mut record = FileRecord::new(
+            "split-test".to_string(),
+            PathBuf::from("/test/movie.mkv"),
+            "movie.mkv".to_string(),
+            "hash-split".to_string(),
+        );
+
+        // ScanRecord fields
+        assert_eq!(record.id(), "split-test");
+        assert_eq!(record.filename(), "movie.mkv");
+        assert_eq!(*record.status(), PipelineStatus::Scanned);
+
+        // Set metadata fields via mutators
+        *record.canonical_title_mut() = Some("Test Movie".to_string());
+        assert_eq!(*record.canonical_title(), Some("Test Movie".to_string()));
+
+        // Set enrichment fields via mutators
+        *record.genres_mut() = Some(vec!["Drama".to_string()]);
+        assert_eq!(*record.genres(), Some(vec!["Drama".to_string()]));
     }
 }

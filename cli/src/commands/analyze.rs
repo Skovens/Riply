@@ -69,16 +69,16 @@ pub async fn analyze_files(
                 Ok(updated_record) => {
                     db.update_file(&updated_record).await?;
 
-                    let title = updated_record.suggested_title.clone();
-                    let year = updated_record.suggested_year;
-                    let confidence = updated_record.confidence;
+                    let title = updated_record.suggested_title().clone();
+                    let year = updated_record.suggested_year().as_ref().copied();
+                    let confidence = updated_record.confidence().as_ref().copied();
 
-                    match updated_record.status {
+                    match updated_record.status() {
                         riply_core::PipelineStatus::Matched => {
                             matched += 1;
                             println!(
                                 "  {} -> {}",
-                                record.filename,
+                                record.filename(),
                                 title.clone().unwrap_or_default()
                             );
                         }
@@ -86,20 +86,20 @@ pub async fn analyze_files(
                             needs_review += 1;
                             println!(
                                 "  {} -> {} (needs review)",
-                                record.filename,
+                                record.filename(),
                                 title.clone().unwrap_or_default()
                             );
                         }
                         riply_core::PipelineStatus::Failed => {
                             failed += 1;
-                            println!("  {} (failed)", record.filename);
+                            println!("  {} (failed)", record.filename());
                         }
                         _ => {}
                     }
 
                     results.push(AnalyzeResult {
-                        filename: record.filename.clone(),
-                        status: format!("{}", updated_record.status),
+                        filename: record.filename().to_string(),
+                        status: format!("{}", updated_record.status()),
                         suggested_title: title,
                         suggested_year: year,
                         confidence,
@@ -107,9 +107,9 @@ pub async fn analyze_files(
                 }
                 Err(e) => {
                     failed += 1;
-                    println!("  {} (error: {})", record.filename, e);
+                    println!("  {} (error: {})", record.filename(), e);
                     results.push(AnalyzeResult {
-                        filename: record.filename.clone(),
+                        filename: record.filename().to_string(),
                         status: format!("Error: {}", e),
                         suggested_title: None,
                         suggested_year: None,
@@ -134,11 +134,11 @@ pub async fn analyze_files(
                 Ok(updated_record) => {
                     db.update_file(&updated_record).await?;
 
-                    let title = updated_record.suggested_title.clone();
-                    let year = updated_record.suggested_year;
-                    let confidence = updated_record.confidence;
+                    let title = updated_record.suggested_title().clone();
+                    let year = updated_record.suggested_year().as_ref().copied();
+                    let confidence = updated_record.confidence().as_ref().copied();
 
-                    match updated_record.status {
+                    match updated_record.status() {
                         riply_core::PipelineStatus::Matched => matched += 1,
                         riply_core::PipelineStatus::NeedsReview => needs_review += 1,
                         riply_core::PipelineStatus::Failed => failed += 1,
@@ -146,8 +146,8 @@ pub async fn analyze_files(
                     }
 
                     results.push(AnalyzeResult {
-                        filename: record.filename.clone(),
-                        status: format!("{}", updated_record.status),
+                        filename: record.filename().to_string(),
+                        status: format!("{}", updated_record.status()),
                         suggested_title: title,
                         suggested_year: year,
                         confidence,
@@ -156,7 +156,7 @@ pub async fn analyze_files(
                 Err(e) => {
                     failed += 1;
                     results.push(AnalyzeResult {
-                        filename: record.filename.clone(),
+                        filename: record.filename().to_string(),
                         status: format!("Error: {}", e),
                         suggested_title: None,
                         suggested_year: None,

@@ -42,13 +42,13 @@ pub async fn accept_file(
         .ok_or_else(|| WebError::NotFound(format!("File not found: {}", id)))?;
 
     let valid = matches!(
-        file.status,
+        file.status(),
         riply_core::PipelineStatus::Matched | riply_core::PipelineStatus::NeedsReview
     );
     if !valid {
         return Err(WebError::BadRequest(format!(
             "Cannot accept file in '{}' status (must be Matched or NeedsReview)",
-            file.status
+            file.status()
         )));
     }
 
@@ -76,10 +76,10 @@ pub async fn reject_file(
         .map_err(|e| WebError::Internal(e.to_string()))?
         .ok_or_else(|| WebError::NotFound(format!("File not found: {}", id)))?;
 
-    if file.status != riply_core::PipelineStatus::NeedsReview {
+    if *file.status() != riply_core::PipelineStatus::NeedsReview {
         return Err(WebError::BadRequest(format!(
             "Cannot reject file in '{}' status (must be NeedsReview)",
-            file.status
+            file.status()
         )));
     }
 

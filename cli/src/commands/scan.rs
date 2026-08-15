@@ -112,10 +112,10 @@ pub async fn scan_directory(
             .iter()
             .map(|r| {
                 serde_json::json!({
-                    "id": r.id,
-                    "filename": r.filename,
-                    "status": format!("{}", r.status),
-                    "size": r.size,
+                    "id": r.id(),
+                    "filename": r.filename(),
+                    "status": format!("{}", r.status()),
+                    "size": r.size(),
                 })
             })
             .collect();

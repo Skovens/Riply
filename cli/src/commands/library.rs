@@ -65,7 +65,7 @@ pub async fn scan_library(
 
     for record in &result.records {
         // Check if file already exists by hash
-        let existing = db.find_file_by_hash(&record.hash).await?;
+        let existing = db.find_file_by_hash(&record.hash()).await?;
         if existing.is_some() {
             // Update existing record
             db.update_file(record).await?;
@@ -85,12 +85,12 @@ pub async fn scan_library(
             .iter()
             .map(|r| {
                 serde_json::json!({
-                    "id": r.id,
-                    "filename": r.filename,
-                    "path": r.path.to_string_lossy().to_string(),
-                    "status": format!("{}", r.status),
-                    "size": r.size,
-                    "title_group_id": r.title_group_id,
+                    "id": r.id(),
+                    "filename": r.filename(),
+                    "path": r.path().to_string_lossy().to_string(),
+                    "status": format!("{}", r.status()),
+                    "size": r.size(),
+                    "title_group_id": r.title_group_id(),
                 })
             })
             .collect();

@@ -58,7 +58,7 @@ pub async fn start_analyze(
                     }
                     match analyzer.analyze_file(record).await {
                         Ok(updated) => {
-                            match updated.status {
+                            match updated.status() {
                                 riply_core::PipelineStatus::Matched => matched += 1,
                                 riply_core::PipelineStatus::NeedsReview => review += 1,
                                 _ => {}
@@ -68,7 +68,7 @@ pub async fn start_analyze(
                         Err(e) => {
                             sse.send_log(
                                 "warn",
-                                &format!("Failed to analyze {}: {}", record.filename, e),
+                                &format!("Failed to analyze {}: {}", record.filename(), e),
                             );
                         }
                     }
@@ -150,7 +150,7 @@ pub async fn retry_failed(
                     }
                     match analyzer.analyze_file(record).await {
                         Ok(updated) => {
-                            match updated.status {
+                            match updated.status() {
                                 riply_core::PipelineStatus::Matched => matched += 1,
                                 riply_core::PipelineStatus::NeedsReview => review += 1,
                                 _ => {}
@@ -160,7 +160,7 @@ pub async fn retry_failed(
                         Err(e) => {
                             sse.send_log(
                                 "warn",
-                                &format!("Failed to analyze {}: {}", record.filename, e),
+                                &format!("Failed to analyze {}: {}", record.filename(), e),
                             );
                         }
                     }

@@ -95,7 +95,7 @@ pub async fn start_move(
                             if let Err(e) = db.update_file(&updated).await {
                                 sse.send_log(
                                     "warn",
-                                    &format!("Failed to update {}: {}", file.filename, e),
+                                    &format!("Failed to update {}: {}", file.filename(), e),
                                 );
                                 errors += 1;
                             } else {
@@ -105,7 +105,7 @@ pub async fn start_move(
                         Err(e) => {
                             sse.send_log(
                                 "warn",
-                                &format!("Failed to move {}: {}", file.filename, e),
+                                &format!("Failed to move {}: {}", file.filename(), e),
                             );
                             errors += 1;
                         }
@@ -174,14 +174,14 @@ pub async fn preview_move(
             .await
         {
             Ok(dest_path) => previews.push(MovePreviewItem {
-                id: file.id.clone(),
-                filename: file.filename.clone(),
-                source_path: file.path.to_string_lossy().to_string(),
+                id: file.id().to_string(),
+                filename: file.filename().to_string(),
+                source_path: file.path().to_string_lossy().to_string(),
                 dest_path: dest_path.to_string_lossy().to_string(),
-                media_type: file.media_type.to_string(),
+                media_type: file.media_type().to_string(),
             }),
             Err(e) => {
-                tracing::warn!(file = %file.filename, error = %e, "Failed to preview move");
+                tracing::warn!(file = %file.filename(), error = %e, "Failed to preview move");
             }
         }
     }

@@ -94,22 +94,22 @@ pub async fn update_file(
         .ok_or_else(|| WebError::NotFound(format!("File not found: {}", id)))?;
 
     if let Some(title) = body.canonical_title {
-        file.canonical_title = Some(title);
+        *file.canonical_title_mut() = Some(title);
     }
     if let Some(year) = body.canonical_year {
-        file.canonical_year = Some(year);
+        *file.canonical_year_mut() = Some(year);
     }
     if let Some(name) = body.series_name {
-        file.series_name = Some(name);
+        *file.series_name_mut() = Some(name);
     }
     if let Some(season) = body.season_number {
-        file.season_number = Some(season);
+        *file.season_number_mut() = Some(season);
     }
     if let Some(episode) = body.episode_number {
-        file.episode_number = Some(episode);
+        *file.episode_number_mut() = Some(episode);
     }
     if let Some(mt) = body.media_type {
-        file.media_type = match mt.as_str() {
+        *file.media_type_mut() = match mt.as_str() {
             "tv" | "Tv" | "TV" => riply_core::MediaType::Tv,
             _ => riply_core::MediaType::Movie,
         };

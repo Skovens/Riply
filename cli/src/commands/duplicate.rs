@@ -34,7 +34,7 @@ pub async fn find_duplicates(
         std::collections::HashMap::new();
     for file in &all_files {
         hash_groups
-            .entry(file.hash.clone())
+            .entry(file.hash().to_string())
             .or_default()
             .push(file.clone());
     }
@@ -51,14 +51,14 @@ pub async fn find_duplicates(
         let groups: Vec<DuplicateGroupOutput> = duplicates
             .iter()
             .map(|g| DuplicateGroupOutput {
-                hash: g[0].hash.clone(),
+                hash: g[0].hash().to_string(),
                 files: g
                     .iter()
                     .map(|f| FileOutput {
-                        id: f.id.clone(),
-                        filename: f.filename.clone(),
-                        path: f.path.to_string_lossy().to_string(),
-                        size: f.size,
+                        id: f.id().to_string(),
+                        filename: f.filename().to_string(),
+                        path: f.path().to_string_lossy().to_string(),
+                        size: f.size(),
                     })
                     .collect(),
             })
@@ -83,15 +83,16 @@ pub async fn find_duplicates(
             println!();
 
             for (i, group) in duplicates.iter().enumerate() {
+                let hash_str = group[0].hash();
                 println!(
                     "Group {} ({} files, hash: {}...):",
                     i + 1,
                     group.len(),
-                    &group[0].hash[..12]
+                    &hash_str[..12.min(hash_str.len())]
                 );
                 for (j, file) in group.iter().enumerate() {
                     let marker = if j == 0 { "[original]" } else { "[duplicate]" };
-                    println!("  {} {} ({:?})", marker, file.filename, file.path);
+                    println!("  {} {} ({:?})", marker, file.filename(), file.path());
                 }
                 println!();
             }

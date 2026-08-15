@@ -39,12 +39,12 @@ pub async fn review_files(yolo: bool, db: &Database) -> Result<(), anyhow::Error
 
         println!("\n{} file(s) remaining:", remaining.len());
         for (original_idx, record) in &remaining {
-            let confidence = record.confidence.unwrap_or(0.0);
-            println!("  [{}] {}", original_idx + 1, record.filename);
+            let confidence = record.confidence().as_ref().copied().unwrap_or(0.0);
+            println!("  [{}] {}", original_idx + 1, record.filename());
             println!(
                 "      Suggested: {} ({})",
-                record.suggested_title.as_deref().unwrap_or("Unknown"),
-                record.suggested_year.unwrap_or(0)
+                record.suggested_title().as_deref().unwrap_or("Unknown"),
+                record.suggested_year().as_ref().copied().unwrap_or(0)
             );
             println!("      Confidence: {:.1}%", confidence * 100.0);
         }
@@ -107,7 +107,7 @@ pub async fn review_files(yolo: bool, db: &Database) -> Result<(), anyhow::Error
                     updated.update_status(PipelineStatus::Confirmed);
                     db.update_file(&updated).await?;
                     confirmed[idx] = true;
-                    info!(file = %record.filename, "Confirmed");
+                    info!(file = %record.filename(), "Confirmed");
                 }
 
                 println!("{} file(s) confirmed.", to_confirm.len());
@@ -129,7 +129,7 @@ async fn confirm_all(
         let mut updated = record.clone();
         updated.update_status(PipelineStatus::Confirmed);
         db.update_file(&updated).await?;
-        info!(file = %record.filename, "Confirmed");
+        info!(file = %record.filename(), "Confirmed");
     }
 
     println!("All {} files confirmed", records.len());
@@ -145,7 +145,7 @@ async fn confirm_remaining(
         let mut updated = record.clone();
         updated.update_status(PipelineStatus::Confirmed);
         db.update_file(&updated).await?;
-        info!(file = %record.filename, "Confirmed");
+        info!(file = %record.filename(), "Confirmed");
     }
     Ok(())
 }

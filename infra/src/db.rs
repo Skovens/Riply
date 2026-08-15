@@ -71,11 +71,11 @@ impl Database {
     /// fields (path, filename, size, hash) while preserving pipeline status,
     /// canonical titles, and review decisions.
     pub async fn save_file(&self, file: &riply_core::FileRecord) -> Result<(), anyhow::Error> {
-        info!(file = %file.filename, "Saving file record");
+        info!(file = %file.filename(), "Saving file record");
 
         // Check if file already exists
         let existing = sqlx::query_scalar::<_, String>("SELECT id FROM files WHERE id = ?")
-            .bind(&file.id)
+            .bind(&file.id())
             .fetch_optional(&self.pool)
             .await?;
 
@@ -92,12 +92,12 @@ impl Database {
                 WHERE id = ?
                 "#,
             )
-            .bind(file.path.to_string_lossy().to_string())
-            .bind(&file.filename)
-            .bind(file.size)
-            .bind(&file.hash)
-            .bind(&file.updated_at)
-            .bind(&file.id)
+            .bind(file.path().to_string_lossy().to_string())
+            .bind(&file.filename())
+            .bind(file.size())
+            .bind(&file.hash())
+            .bind(&file.updated_at())
+            .bind(&file.id())
             .execute(&self.pool)
             .await?;
         } else {
@@ -119,41 +119,41 @@ impl Database {
                 )
                 "#,
             )
-            .bind(&file.id)
-            .bind(file.path.to_string_lossy().to_string())
-            .bind(&file.filename)
-            .bind(file.size)
-            .bind(file.duration)
-            .bind(&file.hash)
-            .bind(file.status.to_string())
-            .bind(&file.suggested_title)
-            .bind(file.suggested_year)
-            .bind(file.confidence)
-            .bind(&file.canonical_title)
-            .bind(file.canonical_year)
-            .bind(file.tmdb_id)
-            .bind(riply_core::content_type_to_str(&file.content_type))
-            .bind(file.media_type.to_string())
-            .bind(&file.series_name)
-            .bind(file.season_number)
-            .bind(file.episode_number)
-            .bind(&file.episode_title)
-            .bind(&file.source)
-            .bind(&file.subtitle_text)
+            .bind(&file.id())
+            .bind(file.path().to_string_lossy().to_string())
+            .bind(&file.filename())
+            .bind(file.size())
+            .bind(file.duration())
+            .bind(&file.hash())
+            .bind(file.status().to_string())
+            .bind(&file.suggested_title())
+            .bind(file.suggested_year())
+            .bind(file.confidence())
+            .bind(&file.canonical_title())
+            .bind(file.canonical_year())
+            .bind(file.tmdb_id())
+            .bind(riply_core::content_type_to_str(&file.content_type()))
+            .bind(file.media_type().to_string())
+            .bind(&file.series_name())
+            .bind(file.season_number())
+            .bind(file.episode_number())
+            .bind(&file.episode_title())
+            .bind(&file.source())
+            .bind(&file.subtitle_text())
             .bind(
-                file.duplicate_path
+                file.duplicate_path()
                     .as_ref()
                     .map(|p| p.to_string_lossy().to_string()),
             )
-            .bind(&file.title_group_id)
-            .bind(json_encode_list(&file.genres))
-            .bind(file.runtime)
-            .bind(&file.content_rating)
-            .bind(&file.overview)
-            .bind(json_encode_list(&file.cast_list))
-            .bind(file.reviewed)
-            .bind(&file.created_at)
-            .bind(&file.updated_at)
+            .bind(&file.title_group_id())
+            .bind(json_encode_list(&file.genres()))
+            .bind(file.runtime())
+            .bind(&file.content_rating())
+            .bind(&file.overview())
+            .bind(json_encode_list(&file.cast_list()))
+            .bind(file.reviewed())
+            .bind(&file.created_at())
+            .bind(&file.updated_at())
             .execute(&self.pool)
             .await?;
         }
@@ -230,7 +230,7 @@ impl Database {
 
     /// Update a file record
     pub async fn update_file(&self, file: &riply_core::FileRecord) -> Result<(), anyhow::Error> {
-        info!(file = %file.filename, "Updating file record");
+        info!(file = %file.filename(), "Updating file record");
 
         sqlx::query(
             r#"
@@ -268,41 +268,41 @@ impl Database {
             WHERE id = ?
             "#,
         )
-        .bind(file.path.to_string_lossy().to_string())
-        .bind(&file.filename)
-        .bind(file.size)
-        .bind(file.duration)
-        .bind(&file.hash)
-        .bind(file.status.to_string())
-        .bind(&file.suggested_title)
-        .bind(file.suggested_year)
-        .bind(file.confidence)
-        .bind(&file.canonical_title)
-        .bind(file.canonical_year)
-        .bind(file.tmdb_id)
-        .bind(riply_core::content_type_to_str(&file.content_type))
-        .bind(file.media_type.to_string())
-        .bind(&file.series_name)
-        .bind(file.season_number)
-        .bind(file.episode_number)
-        .bind(&file.episode_title)
-        .bind(&file.source)
-        .bind(&file.subtitle_text)
+        .bind(file.path().to_string_lossy().to_string())
+        .bind(&file.filename())
+        .bind(file.size())
+        .bind(file.duration())
+        .bind(&file.hash())
+        .bind(file.status().to_string())
+        .bind(&file.suggested_title())
+        .bind(file.suggested_year())
+        .bind(file.confidence())
+        .bind(&file.canonical_title())
+        .bind(file.canonical_year())
+        .bind(file.tmdb_id())
+        .bind(riply_core::content_type_to_str(&file.content_type()))
+        .bind(file.media_type().to_string())
+        .bind(&file.series_name())
+        .bind(file.season_number())
+        .bind(file.episode_number())
+        .bind(&file.episode_title())
+        .bind(&file.source())
+        .bind(&file.subtitle_text())
         .bind(
-            file.duplicate_path
+            file.duplicate_path()
                 .as_ref()
                 .map(|p| p.to_string_lossy().to_string()),
         )
-        .bind(&file.title_group_id)
-        .bind(json_encode_list(&file.genres))
-        .bind(file.runtime)
-        .bind(&file.content_rating)
-        .bind(&file.overview)
-        .bind(json_encode_list(&file.cast_list))
-        .bind(file.reviewed)
-        .bind(&file.created_at)
-        .bind(&file.updated_at)
-        .bind(&file.id)
+        .bind(&file.title_group_id())
+        .bind(json_encode_list(&file.genres()))
+        .bind(file.runtime())
+        .bind(&file.content_rating())
+        .bind(&file.overview())
+        .bind(json_encode_list(&file.cast_list()))
+        .bind(file.reviewed())
+        .bind(&file.created_at())
+        .bind(&file.updated_at())
+        .bind(&file.id())
         .execute(&self.pool)
         .await?;
 
@@ -317,39 +317,45 @@ impl Database {
         use std::path::PathBuf;
 
         Ok(riply_core::FileRecord {
-            id: row.try_get("id")?,
-            path: PathBuf::from(row.try_get::<String, _>("path")?),
-            filename: row.try_get("filename")?,
-            size: row.try_get("size")?,
-            duration: row.try_get("duration")?,
-            hash: row.try_get("hash")?,
-            status: self.parse_status(row.try_get::<String, _>("status")?),
-            suggested_title: row.try_get("suggested_title")?,
-            suggested_year: row.try_get("suggested_year")?,
-            confidence: row.try_get("confidence")?,
-            canonical_title: row.try_get("canonical_title")?,
-            canonical_year: row.try_get("canonical_year")?,
-            tmdb_id: row.try_get("tmdb_id")?,
-            content_type: riply_core::ContentType::from_str(&row.try_get::<String, _>("content_type")?),
-            media_type: self.parse_media_type(row.try_get::<String, _>("media_type")?),
-            series_name: row.try_get("series_name")?,
-            season_number: row.try_get("season_number")?,
-            episode_number: row.try_get("episode_number")?,
-            episode_title: row.try_get("episode_title")?,
-            source: row.try_get("source")?,
-            subtitle_text: row.try_get("subtitle_text")?,
-            duplicate_path: row
-                .try_get::<Option<String>, _>("duplicate_path")?
-                .map(PathBuf::from),
-            title_group_id: row.try_get::<Option<String>, _>("title_group_id")?,
-            genres: json_decode_list(row.try_get("genres")?),
-            runtime: row.try_get("runtime")?,
-            content_rating: row.try_get("content_rating")?,
-            overview: row.try_get("overview")?,
-            cast_list: json_decode_list(row.try_get("cast_list")?),
-            reviewed: row.try_get("reviewed")?,
-            created_at: row.try_get("created_at")?,
-            updated_at: row.try_get("updated_at")?,
+            scan: riply_core::ScanRecord {
+                id: row.try_get("id")?,
+                path: PathBuf::from(row.try_get::<String, _>("path")?),
+                filename: row.try_get("filename")?,
+                size: row.try_get("size")?,
+                duration: row.try_get("duration")?,
+                hash: row.try_get("hash")?,
+                status: self.parse_status(row.try_get::<String, _>("status")?),
+                content_type: riply_core::ContentType::from_str(&row.try_get::<String, _>("content_type")?),
+                media_type: self.parse_media_type(row.try_get::<String, _>("media_type")?),
+                title_group_id: row.try_get::<Option<String>, _>("title_group_id")?,
+                duplicate_path: row
+                    .try_get::<Option<String>, _>("duplicate_path")?
+                    .map(PathBuf::from),
+                reviewed: row.try_get("reviewed")?,
+                created_at: row.try_get("created_at")?,
+                updated_at: row.try_get("updated_at")?,
+            },
+            metadata: riply_core::MetadataRecord {
+                suggested_title: row.try_get("suggested_title")?,
+                suggested_year: row.try_get("suggested_year")?,
+                confidence: row.try_get("confidence")?,
+                canonical_title: row.try_get("canonical_title")?,
+                canonical_year: row.try_get("canonical_year")?,
+                tmdb_id: row.try_get("tmdb_id")?,
+                series_name: row.try_get("series_name")?,
+                season_number: row.try_get("season_number")?,
+                episode_number: row.try_get("episode_number")?,
+                episode_title: row.try_get("episode_title")?,
+                source: row.try_get("source")?,
+            },
+            enrichment: riply_core::EnrichmentRecord {
+                subtitle_text: row.try_get("subtitle_text")?,
+                genres: json_decode_list(row.try_get("genres")?),
+                runtime: row.try_get("runtime")?,
+                content_rating: row.try_get("content_rating")?,
+                overview: row.try_get("overview")?,
+                cast_list: json_decode_list(row.try_get("cast_list")?),
+            },
         })
     }
 
@@ -752,7 +758,7 @@ impl Database {
             std::collections::HashMap::new();
         for row in &rows {
             let file = self.row_to_file_record(row)?;
-            hash_groups.entry(file.hash.clone()).or_default().push(file);
+            hash_groups.entry(file.hash().to_string()).or_default().push(file);
         }
 
         // Only keep groups with more than one file (actual duplicates)
@@ -791,9 +797,9 @@ impl Database {
                     WHERE id = ?
                     "#,
                 )
-                .bind(duplicate.path.to_string_lossy().to_string())
-                .bind(&duplicate.updated_at)
-                .bind(&duplicate.id)
+                .bind(duplicate.path().to_string_lossy().to_string())
+                .bind(&duplicate.updated_at())
+                .bind(&duplicate.id())
                 .execute(&self.pool)
                 .await?;
                 marked += 1;
@@ -1018,11 +1024,11 @@ mod tests {
             "enriched.mkv".to_string(),
             "hash-enriched".to_string(),
         );
-        file.genres = Some(vec!["Drama".to_string(), "Crime".to_string()]);
-        file.runtime = Some(139);
-        file.content_rating = Some("R".to_string());
-        file.overview = Some("An insomniac office worker.".to_string());
-        file.cast_list = Some(vec!["Brad Pitt".to_string(), "Edward Norton".to_string()]);
+        *file.genres_mut() =Some(vec!["Drama".to_string(), "Crime".to_string()]);
+        *file.runtime_mut() =Some(139);
+        *file.content_rating_mut() =Some("R".to_string());
+        *file.overview_mut() =Some("An insomniac office worker.".to_string());
+        *file.cast_list_mut() =Some(vec!["Brad Pitt".to_string(), "Edward Norton".to_string()]);
         db.save_file(&file).await.unwrap();
 
         let files = db.get_all_files().await.unwrap();

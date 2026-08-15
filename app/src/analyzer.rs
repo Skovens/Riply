@@ -36,7 +36,7 @@ impl AnalyzerService {
     }
 
     /// Analyze a file to identify media
-    #[tracing::instrument(skip(self), fields(file = %file.filename))]
+    #[tracing::instrument(skip(self), fields(file = %file.filename()))]
     pub async fn analyze_file(
         &self,
         file: &riply_core::FileRecord,
@@ -46,21 +46,21 @@ impl AnalyzerService {
         let mut record = file.clone();
 
         // Extract media metadata via ffprobe (skip gracefully if not available)
-        if let Ok(metadata) = ffprobe::extract_metadata(&record.path) {
-            record.duration = metadata.duration_secs.map(|d| d as i64);
+        if let Ok(metadata) = ffprobe::extract_metadata(record.path()) {
+            *record.duration_mut() = metadata.duration_secs.map(|d| d as i64);
             if let Some(ref ct) = metadata.content_type {
-                record.content_type = ct.clone();
+                *record.content_type_mut() = ct.clone();
             }
         }
 
         // Parse filename for title, year, and TV episode info
-        let parsed = parse_filename(&record.filename);
+        let parsed = parse_filename(record.filename());
 
         // If filename has TV episode markers, set media type early
         if parsed.season_number.is_some() || parsed.episode_number.is_some() {
-            record.media_type = MediaType::Tv;
-            record.season_number = parsed.season_number;
-            record.episode_number = parsed.episode_number;
+            *record.media_type_mut() = MediaType::Tv;
+            *record.season_number_mut() = parsed.season_number;
+            *record.episode_number_mut() = parsed.episode_number;
         }
 
         // Use the series/movie title for search (without episode info)
@@ -68,13 +68,13 @@ impl AnalyzerService {
         let search_year = parsed.year;
 
         // Skip metadata search for extras - they don't need title matching
-        let skip_metadata_search = record.content_type.is_extra();
+        let skip_metadata_search = record.content_type().is_extra();
 
         // Try external metadata search if available
         if !skip_metadata_search {
             if let Some(ref searcher) = self.searcher {
                 match searcher
-                    .search(&search_title, search_year, &record.media_type)
+                    .search(&search_title, search_year, record.media_type())
                     .await
                 {
                     Ok(results) => {
@@ -84,39 +84,39 @@ impl AnalyzerService {
                                 year = %best.year.map_or("n/a".to_string(), |y| y.to_string()),
                                 "TMDb match"
                             );
-                            record.suggested_title = Some(best.title);
-                            record.suggested_year = best.year;
-                            record.tmdb_id = best.tmdb_id;
+                            *record.suggested_title_mut() = Some(best.title);
+                            *record.suggested_year_mut() = best.year;
+                            *record.tmdb_id_mut() = best.tmdb_id;
                             if best.is_tv {
-                                record.media_type = MediaType::Tv;
+                                *record.media_type_mut() = MediaType::Tv;
                                 // Use series name from API if available, otherwise keep search title
                                 if let Some(ref series) = best.series_name {
-                                    record.series_name = Some(series.clone());
+                                    *record.series_name_mut() = Some(series.clone());
                                 } else {
-                                    record.series_name = Some(search_title.clone());
+                                    *record.series_name_mut() = Some(search_title.clone());
                                 }
                                 // Season/episode from filename take precedence
-                                if record.season_number.is_none() {
-                                    record.season_number = best.season_number;
+                                if record.season_number().is_none() {
+                                    *record.season_number_mut() = best.season_number;
                                 }
-                                if record.episode_number.is_none() {
-                                    record.episode_number = best.episode_number;
+                                if record.episode_number().is_none() {
+                                    *record.episode_number_mut() = best.episode_number;
                                 }
-                                record.episode_title = best.episode_title;
+                                *record.episode_title_mut() = best.episode_title;
                             }
-                            record.confidence = Some(0.95);
-                            record.source = Some("tmdb".to_string());
+                            *record.confidence_mut() = Some(0.95);
+                            *record.source_mut() = Some("tmdb".to_string());
                             record.update_status(riply_core::PipelineStatus::Matched);
                             // Enrich with genres, runtime, rating, overview, cast.
                             // Failures degrade gracefully — the match is still valid.
                             if let Some(tmdb_id) = best.tmdb_id {
-                                match searcher.fetch_enrichment(tmdb_id, &record.media_type).await {
+                                match searcher.fetch_enrichment(tmdb_id, record.media_type()).await {
                                     Ok(enrichment) => {
-                                        record.genres = enrichment.genres;
-                                        record.runtime = enrichment.runtime;
-                                        record.content_rating = enrichment.content_rating;
-                                        record.overview = enrichment.overview;
-                                        record.cast_list = enrichment.cast_list;
+                                        *record.genres_mut() = enrichment.genres;
+                                        *record.runtime_mut() = enrichment.runtime;
+                                        *record.content_rating_mut() = enrichment.content_rating;
+                                        *record.overview_mut() = enrichment.overview;
+                                        *record.cast_list_mut() = enrichment.cast_list;
                                     }
                                     Err(e) => {
                                         warn!(error = %e, "Metadata enrichment failed");
@@ -146,19 +146,19 @@ impl AnalyzerService {
         if parsed.year.is_some() {
             confidence += 0.3;
         }
-        if record.filename.contains(".") {
+        if record.filename().contains(".") {
             confidence += 0.2;
         }
 
-        record.suggested_title = Some(parsed.title);
-        record.suggested_year = parsed.year;
+        *record.suggested_title_mut() = Some(parsed.title);
+        *record.suggested_year_mut() = parsed.year;
 
         // TV episode detected from filename → higher base confidence
-        if record.media_type.is_tv() {
+        if record.media_type().is_tv() {
             confidence = confidence.max(0.85_f64);
         }
 
-        record.confidence = Some(confidence);
+        *record.confidence_mut() = Some(confidence);
 
         if confidence >= 0.8 {
             record.update_status(riply_core::PipelineStatus::Matched);

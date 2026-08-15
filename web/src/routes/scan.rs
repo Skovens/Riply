@@ -60,9 +60,9 @@ pub async fn start_scan(
 
                 let mut duplicates = HashMap::new();
                 for record in &records {
-                    if let Ok(Some(existing)) = db.find_file_by_hash(&record.hash).await {
-                        if existing.path != record.path {
-                            duplicates.insert(record.hash.clone(), existing.path.clone());
+                    if let Ok(Some(existing)) = db.find_file_by_hash(&record.hash()).await {
+                        if existing.path() != record.path() {
+                            duplicates.insert(record.hash().to_string(), existing.path().clone());
                         }
                     }
                 }
@@ -78,13 +78,13 @@ pub async fn start_scan(
                     }
 
                     let mut save_record = record.clone();
-                    if let Some(dup_path) = duplicates.get(&record.hash) {
-                        save_record.duplicate_path = Some(dup_path.clone());
+                    if let Some(dup_path) = duplicates.get(record.hash()) {
+                        *save_record.duplicate_path_mut() = Some(dup_path.clone());
                         sse.send_log(
                             "info",
                             &format!(
                                 "Duplicate found: {} matches {}",
-                                record.filename,
+                                record.filename(),
                                 dup_path.display()
                             ),
                         );
@@ -93,7 +93,7 @@ pub async fn start_scan(
                     if let Err(e) = db.save_file(&save_record).await {
                         sse.send_log(
                             "warn",
-                            &format!("Failed to save {}: {}", record.filename, e),
+                            &format!("Failed to save {}: {}", record.filename(), e),
                         );
                     }
                     progress.increment();

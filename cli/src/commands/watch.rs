@@ -105,24 +105,24 @@ pub async fn watch_directory(
                                     let mut new_count = 0;
                                     for record in &result.records {
                                         // Check if file already exists
-                                        let existing = db.find_file_by_hash(&record.hash).await;
+                                        let existing = db.find_file_by_hash(&record.hash()).await;
                                         match existing {
                                             Ok(Some(_)) => {
                                                 // Update existing
                                                 if let Err(e) = db.update_file(record).await {
-                                                    error!(file = %record.filename, error = %e, "Failed to update file");
+                                                    error!(file = %record.filename(), error = %e, "Failed to update file");
                                                 }
                                             }
                                             Ok(None) => {
                                                 // Insert new
                                                 if let Err(e) = db.save_file(record).await {
-                                                    error!(file = %record.filename, error = %e, "Failed to save file");
+                                                    error!(file = %record.filename(), error = %e, "Failed to save file");
                                                 } else {
                                                     new_count += 1;
                                                 }
                                             }
                                             Err(e) => {
-                                                error!(file = %record.filename, error = %e, "Failed to check file existence");
+                                                error!(file = %record.filename(), error = %e, "Failed to check file existence");
                                             }
                                         }
                                     }
