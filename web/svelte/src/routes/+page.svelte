@@ -38,6 +38,10 @@
   /** @type {Record<number, { pct: number, eta: number | null, stage: string, doneAt?: number }>} */
   let ripProgress = $state({});
 
+  // ── Rip naming status (ADR-024) ────────────────────────────
+  /** @type {Record<number, { discName: string, foundName: string | null, renamed: boolean }>} */
+  let ripNaming = $state({});
+
   // ── Files ──────────────────────────────────────────────────
   let files = $state([]);
   let filesLoading = $state(true);
@@ -137,19 +141,35 @@
       // Drop stale rip progress for drives that are no longer ripping
       // and whose doneAt is older than 5 seconds (grace period).
       const now = Date.now();
-      const staleKeys = Object.keys(ripProgress).filter(key => {
+      const staleProgressKeys = Object.keys(ripProgress).filter(key => {
         const drive = newDrives.find(d => d.index === Number(key));
         if (!drive) return true;
         if (drive.state === 'Ripping') return false;
         const prog = ripProgress[Number(key)];
         return prog && prog.doneAt && now - prog.doneAt > 5000;
       });
-      if (staleKeys.length > 0) {
+      if (staleProgressKeys.length > 0) {
         const cleaned = { ...ripProgress };
-        for (const key of staleKeys) {
+        for (const key of staleProgressKeys) {
           delete cleaned[key];
         }
         ripProgress = cleaned;
+      }
+      // Drop stale rip naming for drives that are no longer ripping
+      // and whose progress is done (naming is tied to the rip session).
+      const staleNamingKeys = Object.keys(ripNaming).filter(key => {
+        const drive = newDrives.find(d => d.index === Number(key));
+        if (!drive) return true;
+        if (drive.state === 'Ripping') return false;
+        const prog = ripProgress[Number(key)];
+        return prog && prog.doneAt && now - prog.doneAt > 5000;
+      });
+      if (staleNamingKeys.length > 0) {
+        const cleaned = { ...ripNaming };
+        for (const key of staleNamingKeys) {
+          delete cleaned[key];
+        }
+        ripNaming = cleaned;
       }
       drives = newDrives;
       // Cache drives in localStorage for smart polling on refresh
@@ -289,6 +309,30 @@
           ripProgress = { ...ripProgress, [index]: { pct: 0, eta: null, stage: 'Rip failed', doneAt: Date.now() } };
         }
         showToast('Rip failed', 'error');
+      } else if (action === 'named') {
+        // Auto-naming succeeded: "Disc: X → Found: Y"
+        const parts = detail.split(':');
+        if (!Number.isNaN(index) && parts.length >= 2) {
+          const foundName = parts.slice(1).join(':');
+          const drive = drives.find(d => d.index === index);
+          const discName = drive?.disc_name || 'Disc';
+          ripNaming = { ...ripNaming, [index]: { discName, foundName, renamed: false } };
+        }
+      } else if (action === 'naming_failed') {
+        // Auto-naming failed: "Disc: X → Failed to find name"
+        if (!Number.isNaN(index)) {
+          const drive = drives.find(d => d.index === index);
+          const discName = drive?.disc_name || 'Disc';
+          ripNaming = { ...ripNaming, [index]: { discName, foundName: null, renamed: false } };
+        }
+      } else if (action === 'renamed') {
+        // Post-rip folder rename completed
+        const parts = detail.split(':');
+        if (!Number.isNaN(index) && parts.length >= 2) {
+          const newName = parts.slice(1).join(':');
+          ripNaming = { ...ripNaming, [index]: { ...ripNaming[index], foundName: newName, renamed: true } };
+          showToast(`Ripped to ${newName}`, 'success');
+        }
       }
       return;
     }
@@ -410,26 +454,7 @@
 
   /** @param {number} index */
   async function handleRip(index) {
-    const drive = drives.find(d => d.index === index);
-    const discName = (drive && drive.disc_name) || '';
-    const parsed = parseDiscName(discName);
-    if (parsed.title) {
-      // Ask for a name before ripping; prefill from the disc name (ADR-022: prefill, not commit).
-      const choice = await openMediaNamingModal({
-        mediaType: 'movie',
-        suggest: async () => ({ title: parsed.title, year: parsed.year }),
-      });
-      if (!choice) return;
-      const folderName = choice.year ? `${choice.title} (${choice.year})` : choice.title;
-      try {
-        await ripperApi.start(index, `${ripOutputDir}/${folderName}`);
-        return;
-      } catch (e) {
-        console.error('Failed to start rip:', e);
-        showToast('Failed to start rip', 'error');
-        return;
-      }
-    }
+    // Per ADR-024: rip button starts immediately without naming dialog
     try {
       await ripperApi.start(index, ripOutputDir);
     } catch (e) {
@@ -782,6 +807,29 @@
                         <div class="text-xs text-muted" style="margin-top: var(--space-1);">
                           {ripLabel(drive.index)}
                         </div>
+                        <!-- Naming status (ADR-024) -->
+                        {#if ripNaming[drive.index]}
+                          {@const nameInfo = ripNaming[drive.index]}
+                          {#if nameInfo.foundName && !nameInfo.renamed}
+                            <div class="drive-card__naming" style="margin-top: var(--space-2);">
+                              <span class="drive-card__disc-name">{nameInfo.discName}</span>
+                              <span class="drive-card__arrow"> → </span>
+                              <span class="drive-card__derived-name">{nameInfo.foundName}</span>
+                            </div>
+                          {:else if nameInfo.foundName === null}
+                            <div class="drive-card__naming drive-card__naming--failed" style="margin-top: var(--space-2);">
+                              <span class="drive-card__disc-name">{nameInfo.discName}</span>
+                              <span class="drive-card__arrow"> → </span>
+                              <span class="drive-card__failed-name">Failed to find name</span>
+                            </div>
+                          {:else if nameInfo.renamed}
+                            <div class="drive-card__naming" style="margin-top: var(--space-2);">
+                              <span class="drive-card__disc-name">{nameInfo.discName}</span>
+                              <span class="drive-card__arrow"> → </span>
+                              <span class="drive-card__derived-name">{nameInfo.foundName}</span>
+                            </div>
+                          {/if}
+                        {/if}
                       </div>
                     {/if}
                     <div class="drive-card__actions">
@@ -1278,6 +1326,23 @@
   .drive-card__derived-name {
     color: var(--color-primary);
     font-weight: 500;
+  }
+
+  .drive-card__naming {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    font-size: var(--text-xs);
+  }
+
+  .drive-card__disc-name {
+    color: var(--color-text-muted);
+    font-style: italic;
+  }
+
+  .drive-card__failed-name {
+    color: var(--color-warning);
+    font-style: italic;
   }
 
   .drive-card__actions {

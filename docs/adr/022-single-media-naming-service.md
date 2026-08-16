@@ -39,8 +39,12 @@ Extract one media-naming function and one UI used everywhere.
 - `resolve_rip_title` becomes a *prefill*: its auto-lookup fills the
   modal's search box as a default suggestion, and the user confirms,
   instead of silently committing the first match before anyone sees it.
-- Phase 1: naming applies after the rip (renames the title group /
-  files). Phase 2 (optional): pass the chosen name into makemkv so the
+  Per ADR-024, auto-naming runs *during* the rip (not before), and the
+  result is shown live as `"Disc: X → Found: Y"`.
+- Phase 1: naming applies after the rip (renames the rip folder). Per
+  ADR-024, the rip folder is renamed at rip completion if a name was
+  found or set by the user.
+- Phase 2 (optional): pass the chosen name into makemkv so the
   output folder is named correctly at rip time.
 
 ## Consequences

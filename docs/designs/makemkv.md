@@ -325,6 +325,73 @@ Uses Linux `eject` command.
 
 ---
 
+## Rip Flow (ADR-024)
+
+### Overview
+
+Per ADR-024, the rip flow is split into two independent actions:
+
+1. **Rip** — starts immediately with no dialog
+2. **Naming** — available anytime via the disc name click
+
+### Flow
+
+```
+User clicks "Rip" → MakemkvBackend.start_rip()
+                    ↓
+              Files rip to disc-named folder
+                    ↓
+              Background TMDb lookup runs
+                    ↓
+              SSE: rip:named or rip:naming_failed
+                    ↓
+              Rip completes → SSE: rip:complete
+                    ↓
+              Post-rip rename (if name found):
+              Disc-named folder → Jellyfin-named folder
+                    ↓
+              SSE: rip:renamed
+```
+
+### Auto-Naming
+
+After `start_rip()` is called, a background TMDb lookup runs on the disc name:
+1. Parse disc name for title + year (e.g., `INCEPTION_2010` → `Inception`, 2010)
+2. Search TMDb with parsed title
+3. If match found → send `rip:named:{index}:{title} ({year})` via SSE
+4. If no match → send `rip:naming_failed:{index}` via SSE
+
+### Post-Rip Rename
+
+At rip completion (after `rip:complete`):
+1. If `final_name` differs from rip folder name → `fs::rename()` the folder
+2. Apply "(Copy N)" if destination already exists
+3. Send `rip:renamed:{index}:{new_name}` via SSE
+4. If no name found → folder keeps disc name (no rename)
+
+### Jellyfin Naming Convention
+
+Ripped content is restructured into Jellyfin-compatible format:
+
+- **Movies:** `{Title} ({Year})/` with main title file named `{Title}.{ext}`
+- **TV Shows:** `{Series} ({Year})/Season {NN}/` with files named `{Series} - S{NN}E{NN}.{ext}`
+- **Extras:** Kept as-is in `Extras/` subfolder
+
+### SSE Events
+
+| Event | Format | When |
+|---|---|---|
+| `rip:starting` | `rip:starting:{index}` | Rip begins |
+| `rip:progress` | `rip:progress:{index}:{pct}:{eta}` | Every progress update |
+| `rip:named` | `rip:named:{index}:{title} ({year})` | Auto-naming succeeded |
+| `rip:naming_failed` | `rip:naming_failed:{index}` | Auto-naming failed |
+| `rip:complete` | `rip:complete:{index}` | Rip finished |
+| `rip:renamed` | `rip:renamed:{index}:{new_name}` | Post-rip folder rename |
+| `rip:error` | `rip:error:{index}:{message}` | Rip failed |
+| `rip:message` | `rip:message:{index}:{text}` | Status messages |
+
+---
+
 ## Notes
 
 - **Robot mode (`-r`)** — All CLI interaction uses machine-readable output
