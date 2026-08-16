@@ -7,7 +7,7 @@
 
   // ── Sidebar ────────────────────────────────────────────────
   let sidebarCollapsed = $state(false);
-  let sidebarPanel = $state({ drives: true, review: true, jobs: true });
+  let sidebarPanel = $state({ review: true, jobs: true });
 
   // ── Stats ──────────────────────────────────────────────────
   let stats = $state({ scanned: 0, matched: 0, review: 0, confirmed: 0, moved: 0 });
@@ -739,146 +739,141 @@
       <!-- Drives Panel -->
       <div class="sidebar-panel">
         <div class="sidebar-panel-header-row">
-          <button class="sidebar-panel-header" onclick={() => sidebarPanel.drives = !sidebarPanel.drives}>
-            <h4 class="sidebar-panel-title">Drives</h4>
-            <span class="sidebar-panel-chevron">{#if sidebarPanel.drives}&#9660;{:else}&#9654;{/if}</span>
-          </button>
+          <h4 class="sidebar-panel-title">Drives</h4>
           <button class="btn btn--ghost btn--xs" onclick={() => fetchDrives()} title="Refresh drives">↻</button>
         </div>
-        {#if sidebarPanel.drives}
-          <div class="sidebar-panel-body">
-            {#if drivesLoading}
-              <div class="sidebar-loading">
-                <div class="spinner" style="width: 14px; height: 14px;"></div>
-                <span>Querying drives...</span>
-              </div>
-            {:else if drives.length === 0}
-              <div class="sidebar-empty">No drives found</div>
-            {:else}
-              <div class="drives-list">
-                {#each drives as drive, i}
-                  <div
-                    class="drive-card"
-                    class:drive-card--drag-over={dropIndex === i}
-                    draggable="true"
-                    ondragstart={() => { dragIndex = i; }}
-                    ondragover={(e) => { e.preventDefault(); dropIndex = i; }}
-                    ondragleave={() => { dropIndex = null; }}
-                    ondragend={() => {
-                      if (dragIndex !== null && dropIndex !== null && dragIndex !== dropIndex) {
-                        const reordered = [...drives];
-                        const [dragged] = reordered.splice(dragIndex, 1);
-                        reordered.splice(dropIndex, 0, dragged);
-                        drives = reordered;
-                        saveDriveOrder();
-                      }
-                      dragIndex = null;
-                      dropIndex = null;
-                    }}
-                  >
-                    <div class="drive-card__info">
-                      <div class="drive-card__drag-handle" title="Drag to reorder">⠿</div>
-                      <div class="drive-card__name">{drive.name}</div>
-                      {#if drive.disc_name}
-                        <div class="drive-card__disc" onclick={() => handleNameDisc(drive.index)} title="Click to set media name">
-                          {drive.disc_name}
-                          {#if drive.derived_name && drive.derived_name !== drive.disc_name}
-                            <span class="drive-card__arrow"> → </span>
-                            <span class="drive-card__derived-name">{drive.derived_name}</span>
-                          {/if}
-                        </div>
-                      {:else}
-                        <div class="drive-card__disc">No disc</div>
+        <div class="sidebar-panel-body">
+        {#if drivesLoading}
+          <div class="sidebar-loading">
+            <div class="spinner" style="width: 14px; height: 14px;"></div>
+            <span>Querying drives...</span>
+          </div>
+        {:else if drives.length === 0}
+          <div class="sidebar-empty">No drives found</div>
+        {:else}
+          <div class="drives-list">
+            {#each drives as drive, i}
+              <div
+                class="drive-card"
+                class:drive-card--drag-over={dropIndex === i}
+                draggable="true"
+                ondragstart={() => { dragIndex = i; }}
+                ondragover={(e) => { e.preventDefault(); dropIndex = i; }}
+                ondragleave={() => { dropIndex = null; }}
+                ondragend={() => {
+                  if (dragIndex !== null && dropIndex !== null && dragIndex !== dropIndex) {
+                    const reordered = [...drives];
+                    const [dragged] = reordered.splice(dragIndex, 1);
+                    reordered.splice(dropIndex, 0, dragged);
+                    drives = reordered;
+                    saveDriveOrder();
+                  }
+                  dragIndex = null;
+                  dropIndex = null;
+                }}
+              >
+                <div class="drive-card__info">
+                  <div class="drive-card__drag-handle" title="Drag to reorder">⠿</div>
+                  <div class="drive-card__name">{drive.name}</div>
+                  {#if drive.disc_name}
+                    <div class="drive-card__disc" onclick={() => handleNameDisc(drive.index)} title="Click to set media name">
+                      {drive.disc_name}
+                      {#if drive.derived_name && drive.derived_name !== drive.disc_name}
+                        <span class="drive-card__arrow"> → </span>
+                        <span class="drive-card__derived-name">{drive.derived_name}</span>
                       {/if}
-                      <span class="badge badge--{drive.state === 'Ready' ? 'success' : 'default'}">{drive.state}</span>
                     </div>
-                    {#if (drive.state === 'Ripping' || ripProgress[drive.index]?.doneAt) && ripProgress[drive.index]}
-                      <div class="drive-card__progress">
-                        <div class="text-sm font-semibold" style="margin-bottom: var(--space-1);">
-                          {ripStage(drive.index)}
+                  {:else}
+                    <div class="drive-card__disc">No disc</div>
+                  {/if}
+                  <span class="badge badge--{drive.state === 'Ready' ? 'success' : 'default'}">{drive.state}</span>
+                </div>
+                {#if (drive.state === 'Ripping' || ripProgress[drive.index]?.doneAt) && ripProgress[drive.index]}
+                  <div class="drive-card__progress">
+                    <div class="text-sm font-semibold" style="margin-bottom: var(--space-1);">
+                      {ripStage(drive.index)}
+                    </div>
+                    <div class="progress">
+                      <div
+                        class="progress__bar"
+                        class:progress__bar--done={ripProgress[drive.index].pct >= 100}
+                        style="width: {ripProgress[drive.index].pct}%;"
+                      ></div>
+                    </div>
+                    <div class="text-xs text-muted" style="margin-top: var(--space-1);">
+                      {ripLabel(drive.index)}
+                    </div>
+                    <!-- Naming status (ADR-024) -->
+                    {#if ripNaming[drive.index]}
+                      {@const nameInfo = ripNaming[drive.index]}
+                      {#if nameInfo.foundName && !nameInfo.renamed}
+                        <div class="drive-card__naming" style="margin-top: var(--space-2);">
+                          <span class="drive-card__disc-name">{nameInfo.discName}</span>
+                          <span class="drive-card__arrow"> → </span>
+                          <span class="drive-card__derived-name">{nameInfo.foundName}</span>
                         </div>
-                        <div class="progress">
-                          <div
-                            class="progress__bar"
-                            class:progress__bar--done={ripProgress[drive.index].pct >= 100}
-                            style="width: {ripProgress[drive.index].pct}%;"
-                          ></div>
+                      {:else if nameInfo.foundName === null}
+                        <div class="drive-card__naming drive-card__naming--failed" style="margin-top: var(--space-2);">
+                          <span class="drive-card__disc-name">{nameInfo.discName}</span>
+                          <span class="drive-card__arrow"> → </span>
+                          <span class="drive-card__failed-name">Failed to find name</span>
                         </div>
-                        <div class="text-xs text-muted" style="margin-top: var(--space-1);">
-                          {ripLabel(drive.index)}
+                      {:else if nameInfo.renamed}
+                        <div class="drive-card__naming" style="margin-top: var(--space-2);">
+                          <span class="drive-card__disc-name">{nameInfo.discName}</span>
+                          <span class="drive-card__arrow"> → </span>
+                          <span class="drive-card__derived-name">{nameInfo.foundName}</span>
                         </div>
-                        <!-- Naming status (ADR-024) -->
-                        {#if ripNaming[drive.index]}
-                          {@const nameInfo = ripNaming[drive.index]}
-                          {#if nameInfo.foundName && !nameInfo.renamed}
-                            <div class="drive-card__naming" style="margin-top: var(--space-2);">
-                              <span class="drive-card__disc-name">{nameInfo.discName}</span>
-                              <span class="drive-card__arrow"> → </span>
-                              <span class="drive-card__derived-name">{nameInfo.foundName}</span>
-                            </div>
-                          {:else if nameInfo.foundName === null}
-                            <div class="drive-card__naming drive-card__naming--failed" style="margin-top: var(--space-2);">
-                              <span class="drive-card__disc-name">{nameInfo.discName}</span>
-                              <span class="drive-card__arrow"> → </span>
-                              <span class="drive-card__failed-name">Failed to find name</span>
-                            </div>
-                          {:else if nameInfo.renamed}
-                            <div class="drive-card__naming" style="margin-top: var(--space-2);">
-                              <span class="drive-card__disc-name">{nameInfo.discName}</span>
-                              <span class="drive-card__arrow"> → </span>
-                              <span class="drive-card__derived-name">{nameInfo.foundName}</span>
-                            </div>
-                          {/if}
-                        {/if}
-                      </div>
+                      {/if}
                     {/if}
-                    <div class="drive-card__actions">
-                      <div class="drive-card__action-row">
-                        {#if drive.state === 'Ready'}
-                          <button
-                            class="btn btn--primary btn--sm"
-                            onclick={() => handleRip(drive.index)}
-                            disabled={!ripOutputDir}
-                          >
-                            Rip
-                          </button>
-                          {#if drive.disc_name}
-                            <button
-                              class="btn btn--secondary btn--sm"
-                              onclick={() => handleEject(drive.index)}
-                              title="Eject disc"
-                            >
-                              Eject
-                            </button>
-                          {/if}
-                        {/if}
-                        {#if drive.state === 'Ripping'}
-                          <button
-                            class="btn btn--danger btn--sm"
-                            onclick={() => handleCancelRip(drive.index)}
-                          >
-                            Cancel
-                          </button>
-                        {/if}
-                      </div>
-                      <label class="toggle autorip-toggle" title="Auto-rip discs inserted in this drive">
-                        <input
-                          type="checkbox"
-                          checked={autoripDrives.includes(drive.index)}
-                          onclick={() => handleToggleAutorip(drive.index)}
-                        />
-                        <span class="toggle__track"></span>
-                      </label>
-                    </div>
                   </div>
-                {/each}
-                {#if driveOrder.length > 0}
-                  <button class="btn btn--ghost btn--xs" onclick={resetDriveOrder} style="margin: var(--space-2) auto; display: block;">Reset order</button>
                 {/if}
+                <div class="drive-card__actions">
+                  <div class="drive-card__action-row">
+                    {#if drive.state === 'Ready'}
+                      <button
+                        class="btn btn--primary btn--sm"
+                        onclick={() => handleRip(drive.index)}
+                        disabled={!ripOutputDir}
+                      >
+                        Rip
+                      </button>
+                      {#if drive.disc_name}
+                        <button
+                          class="btn btn--secondary btn--sm"
+                          onclick={() => handleEject(drive.index)}
+                          title="Eject disc"
+                        >
+                          Eject
+                        </button>
+                      {/if}
+                    {/if}
+                    {#if drive.state === 'Ripping'}
+                      <button
+                        class="btn btn--danger btn--sm"
+                        onclick={() => handleCancelRip(drive.index)}
+                      >
+                        Cancel
+                      </button>
+                    {/if}
+                  </div>
+                  <label class="toggle autorip-toggle" title="Auto-rip discs inserted in this drive">
+                    <input
+                      type="checkbox"
+                      checked={autoripDrives.includes(drive.index)}
+                      onclick={() => handleToggleAutorip(drive.index)}
+                    />
+                    <span class="toggle__track"></span>
+                  </label>
+                </div>
               </div>
+            {/each}
+            {#if driveOrder.length > 0}
+              <button class="btn btn--ghost btn--xs" onclick={resetDriveOrder} style="margin: var(--space-2) auto; display: block;">Reset order</button>
             {/if}
           </div>
         {/if}
+        </div>
       </div>
 
       <!-- Review Panel -->
