@@ -280,7 +280,7 @@ mod tests {
             .join("The Matrix (1999)")
             .join("The Matrix.mkv")
             .exists());
-        assert_eq!(result.status, PipelineStatus::Moved);
+        assert_eq!(*result.status(), PipelineStatus::Moved);
     }
 
     #[test]

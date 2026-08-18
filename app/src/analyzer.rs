@@ -341,10 +341,10 @@ mod tests {
         let analyzer = AnalyzerService::new(None);
         let result = analyzer.analyze_file(&file).await.unwrap();
 
-        assert_eq!(result.suggested_title, Some("movie".to_string()));
-        assert_eq!(result.suggested_year, Some(2023));
-        assert_eq!(result.confidence, Some(1.0));
-        assert_eq!(result.status, PipelineStatus::Matched);
+        assert_eq!(*result.suggested_title(), Some("movie".to_string()));
+        assert_eq!(*result.suggested_year(), Some(2023));
+        assert_eq!(*result.confidence(), Some(1.0));
+        assert_eq!(*result.status(), PipelineStatus::Matched);
     }
 
     #[tokio::test]
@@ -359,10 +359,10 @@ mod tests {
         let analyzer = AnalyzerService::new(None);
         let result = analyzer.analyze_file(&file).await.unwrap();
 
-        assert_eq!(result.suggested_title, Some("movie".to_string()));
-        assert_eq!(result.suggested_year, None);
-        assert_eq!(result.confidence, Some(0.7));
-        assert_eq!(result.status, PipelineStatus::NeedsReview);
+        assert_eq!(*result.suggested_title(), Some("movie".to_string()));
+        assert_eq!(*result.suggested_year(), None);
+        assert_eq!(*result.confidence(), Some(0.7));
+        assert_eq!(*result.status(), PipelineStatus::NeedsReview);
     }
 
     #[tokio::test]
@@ -377,13 +377,13 @@ mod tests {
         let analyzer = AnalyzerService::new(None);
         let result = analyzer.analyze_file(&file).await.unwrap();
 
-        assert_eq!(result.media_type, MediaType::Tv);
-        assert_eq!(result.season_number, Some(1));
-        assert_eq!(result.episode_number, Some(5));
-        assert_eq!(result.suggested_title, Some("Breaking Bad".to_string()));
+        assert_eq!(*result.media_type(), MediaType::Tv);
+        assert_eq!(*result.season_number(), Some(1));
+        assert_eq!(*result.episode_number(), Some(5));
+        assert_eq!(*result.suggested_title(), Some("Breaking Bad".to_string()));
         // TV episodes get high confidence from filename alone
-        assert!(result.confidence.unwrap() >= 0.85);
-        assert_eq!(result.status, PipelineStatus::Matched);
+        assert!(result.confidence().unwrap() >= 0.85);
+        assert_eq!(*result.status(), PipelineStatus::Matched);
     }
 
     /// Test analyzer with a mock metadata searcher
@@ -449,12 +449,12 @@ mod tests {
         let analyzer = AnalyzerService::new(Some(Box::new(MockSearcher)));
         let result = analyzer.analyze_file(&file).await.unwrap();
 
-        assert_eq!(result.suggested_title, Some("The Matrix".to_string()));
-        assert_eq!(result.suggested_year, Some(1999));
-        assert_eq!(result.tmdb_id, Some(603));
-        assert_eq!(result.confidence, Some(0.95));
-        assert_eq!(result.source, Some("tmdb".to_string()));
-        assert_eq!(result.status, PipelineStatus::Matched);
+        assert_eq!(*result.suggested_title(), Some("The Matrix".to_string()));
+        assert_eq!(*result.suggested_year(), Some(1999));
+        assert_eq!(*result.tmdb_id(), Some(603));
+        assert_eq!(*result.confidence(), Some(0.95));
+        assert_eq!(*result.source(), Some("tmdb".to_string()));
+        assert_eq!(*result.status(), PipelineStatus::Matched);
     }
 
     /// Test analyzer with TV metadata searcher
@@ -520,16 +520,16 @@ mod tests {
         let analyzer = AnalyzerService::new(Some(Box::new(MockTvSearcher)));
         let result = analyzer.analyze_file(&file).await.unwrap();
 
-        assert_eq!(result.media_type, MediaType::Tv);
-        assert_eq!(result.series_name, Some("Breaking Bad".to_string()));
-        assert_eq!(result.season_number, Some(1));
-        assert_eq!(result.episode_number, Some(5));
-        assert_eq!(result.episode_title, Some("Gray Matter".to_string()));
-        assert_eq!(result.suggested_title, Some("Breaking Bad".to_string()));
-        assert_eq!(result.tmdb_id, Some(1396));
-        assert_eq!(result.confidence, Some(0.95));
-        assert_eq!(result.source, Some("tmdb".to_string()));
-        assert_eq!(result.status, PipelineStatus::Matched);
+        assert_eq!(*result.media_type(), MediaType::Tv);
+        assert_eq!(*result.series_name(), Some("Breaking Bad".to_string()));
+        assert_eq!(*result.season_number(), Some(1));
+        assert_eq!(*result.episode_number(), Some(5));
+        assert_eq!(*result.episode_title(), Some("Gray Matter".to_string()));
+        assert_eq!(*result.suggested_title(), Some("Breaking Bad".to_string()));
+        assert_eq!(*result.tmdb_id(), Some(1396));
+        assert_eq!(*result.confidence(), Some(0.95));
+        assert_eq!(*result.source(), Some("tmdb".to_string()));
+        assert_eq!(*result.status(), PipelineStatus::Matched);
     }
 
     /// Test analyzer applies metadata enrichment after a match
@@ -622,17 +622,17 @@ mod tests {
         let result = analyzer.analyze_file(&file).await.unwrap();
 
         assert_eq!(
-            result.genres.as_deref(),
+            result.genres().as_deref(),
             Some(&["Sci-Fi".to_string(), "Action".to_string()][..])
         );
-        assert_eq!(result.runtime, Some(136));
-        assert_eq!(result.content_rating.as_deref(), Some("R"));
+        assert_eq!(*result.runtime(), Some(136));
+        assert_eq!(result.content_rating().as_deref(), Some("R"));
         assert_eq!(
-            result.overview.as_deref(),
+            result.overview().as_deref(),
             Some("A hacker discovers the truth.")
         );
         assert_eq!(
-            result.cast_list.as_deref(),
+            result.cast_list().as_deref(),
             Some(&["Keanu Reeves".to_string()][..])
         );
     }
@@ -697,16 +697,16 @@ mod tests {
             "hash".to_string(),
         );
         let mut file = file;
-        file.content_type = ContentType::Extra;
+        *file.content_type_mut() = ContentType::Extra;
 
         let analyzer = AnalyzerService::new(Some(Box::new(MockSearcher)));
         let result = analyzer.analyze_file(&file).await.unwrap();
 
         // Should NOT have metadata from the searcher
-        assert_eq!(result.suggested_title, Some("commentary".to_string()));
-        assert_eq!(result.tmdb_id, None);
-        assert_eq!(result.source, None);
+        assert_eq!(*result.suggested_title(), Some("commentary".to_string()));
+        assert_eq!(*result.tmdb_id(), None);
+        assert_eq!(*result.source(), None);
         // Extras get moderate confidence from filename
-        assert!(result.confidence.unwrap() >= 0.5);
+        assert!(result.confidence().unwrap() >= 0.5);
     }
 }

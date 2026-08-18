@@ -345,8 +345,8 @@ mod tests {
 
         assert!(result.title_groups.is_empty());
         assert_eq!(result.records.len(), 2);
-        assert!(result.records.iter().any(|r| r.filename == "movie.mkv"));
-        assert!(result.records.iter().any(|r| r.filename == "clip.mp4"));
+        assert!(result.records.iter().any(|r| r.filename() == "movie.mkv"));
+        assert!(result.records.iter().any(|r| r.filename() == "clip.mp4"));
     }
 
     #[tokio::test]
@@ -380,25 +380,25 @@ mod tests {
 
         // Files at root: top.mkv; in the group: ep01.mkv, ep02.mp4, behind_scenes.mkv
         assert_eq!(result.records.len(), 4);
-        assert!(result.records.iter().any(|r| r.filename == "ep01.mkv"));
-        assert!(result.records.iter().any(|r| r.filename == "ep02.mp4"));
+        assert!(result.records.iter().any(|r| r.filename() == "ep01.mkv"));
+        assert!(result.records.iter().any(|r| r.filename() == "ep02.mp4"));
         assert!(result
             .records
             .iter()
-            .any(|r| r.filename == "behind_scenes.mkv"));
+            .any(|r| r.filename() == "behind_scenes.mkv"));
 
         // Root-level file has no group; files in subdirectory have group set
         assert!(result
             .records
             .iter()
-            .any(|rec| rec.filename == "top.mkv" && rec.title_group_id.is_none()));
+            .any(|rec| rec.filename() == "top.mkv" && rec.title_group_id().is_none()));
         for rec in result
             .records
             .iter()
-            .filter(|rec| rec.filename != "top.mkv")
+            .filter(|rec| rec.filename() != "top.mkv")
         {
             assert_eq!(
-                rec.title_group_id.as_deref(),
+                rec.title_group_id().as_deref(),
                 Some(result.title_groups[0].id.as_str())
             );
         }
@@ -416,10 +416,10 @@ mod tests {
 
         assert_eq!(result.records.len(), 1);
         let r = &result.records[0];
-        assert!(!r.hash.is_empty());
-        assert_eq!(r.hash.len(), 64); // SHA-256 hex = 64 chars
-        assert_eq!(r.size, Some(content.len() as i64));
-        assert_eq!(r.id.len(), 16); // ID = first 16 hex chars of hash
+        assert!(!r.hash().is_empty());
+        assert_eq!(r.hash().len(), 64); // SHA-256 hex = 64 chars
+        assert_eq!(r.size(), Some(content.len() as i64));
+        assert_eq!(r.id().len(), 16); // ID = first 16 hex chars of hash
     }
 
     #[tokio::test]
@@ -436,8 +436,8 @@ mod tests {
 
         assert_eq!(result.records.len(), 2);
         // Both have the same hash (and thus same ID prefix)
-        assert_eq!(result.records[0].hash, result.records[1].hash);
-        assert_eq!(result.records[0].id, result.records[1].id);
+        assert_eq!(result.records[0].hash(), result.records[1].hash());
+        assert_eq!(result.records[0].id(), result.records[1].id());
     }
 
     #[tokio::test]
@@ -475,7 +475,7 @@ mod tests {
         assert_eq!(result.records.len(), 2);
         for r in &result.records {
             assert_eq!(
-                r.title_group_id.as_deref(),
+                r.title_group_id().as_deref(),
                 Some(result.title_groups[0].id.as_str())
             );
         }

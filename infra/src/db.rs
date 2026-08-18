@@ -950,7 +950,7 @@ mod tests {
         // Get files by status
         let files = db.get_files_by_status("Scanned").await.unwrap();
         assert_eq!(files.len(), 1);
-        assert_eq!(files[0].filename, "movie.mkv");
+        assert_eq!(files[0].filename(), "movie.mkv");
     }
 
     #[tokio::test]
@@ -969,8 +969,8 @@ mod tests {
 
         let files = db.get_all_files().await.unwrap();
         assert_eq!(files.len(), 1);
-        assert!(files[0].title_group_id.is_none());
-        assert!(files[0].duplicate_path.is_none());
+        assert!(files[0].title_group_id().is_none());
+        assert!(files[0].duplicate_path().is_none());
 
         db.update_file(&files[0]).await.unwrap();
     }
@@ -1006,8 +1006,8 @@ mod tests {
 
         let files = db.get_all_files().await.unwrap();
         assert_eq!(files.len(), 1);
-        assert_eq!(files[0].id, "backup-test");
-        assert_eq!(files[0].filename, "backup.mkv");
+        assert_eq!(files[0].id(), "backup-test");
+        assert_eq!(files[0].filename(), "backup.mkv");
     }
 
     #[tokio::test]
@@ -1034,17 +1034,17 @@ mod tests {
         let files = db.get_all_files().await.unwrap();
         assert_eq!(files.len(), 1);
         assert_eq!(
-            files[0].genres.as_deref(),
+            files[0].genres().as_deref(),
             Some(&["Drama".to_string(), "Crime".to_string()][..])
         );
-        assert_eq!(files[0].runtime, Some(139));
-        assert_eq!(files[0].content_rating.as_deref(), Some("R"));
+        assert_eq!(*files[0].runtime(), Some(139));
+        assert_eq!(files[0].content_rating().as_deref(), Some("R"));
         assert_eq!(
-            files[0].overview.as_deref(),
+            files[0].overview().as_deref(),
             Some("An insomniac office worker.")
         );
         assert_eq!(
-            files[0].cast_list.as_deref(),
+            files[0].cast_list().as_deref(),
             Some(&["Brad Pitt".to_string(), "Edward Norton".to_string()][..])
         );
     }

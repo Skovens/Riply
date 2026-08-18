@@ -246,8 +246,8 @@ mod tests {
                 .expect("Analysis should succeed");
 
             // Verify the file was analyzed
-            assert!(analyzed.filename.contains(".mkv"));
-            assert!(!analyzed.hash.is_empty(), "Hash should be populated");
+            assert!(analyzed.filename().contains(".mkv"));
+            assert!(!analyzed.hash().is_empty(), "Hash should be populated");
         }
     }
 
@@ -295,7 +295,7 @@ mod tests {
         let filenames: Vec<&str> = scan_result
             .records
             .iter()
-            .map(|r| r.filename.as_str())
+            .map(|r| r.filename())
             .collect();
 
         assert!(
