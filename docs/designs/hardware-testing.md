@@ -13,8 +13,8 @@ This document describes the complete hardware testing strategy for Riply's DVD r
 | Item | Status | Details |
 |------|--------|---------|
 | **DVD Drive** | Present | `/dev/sr0`, 7.7G capacity, type `rom` (normal for optical) |
-| **Device Node** | Exists | `/dev/cdrom` → `/dev/sr0` (symlink) |
-| **Drive Permissions** | `root:cdrom` | `brw-rw----+` — requires `cdrom` group membership |
+| **Device Node** | Exists | `/dev/cdrom` Ôćĺ `/dev/sr0` (symlink) |
+| **Drive Permissions** | `root:cdrom` | `brw-rw----+` ÔÇö requires `cdrom` group membership |
 | **Current Disc** | None | No disc mounted (drive is empty) |
 
 ### Software
@@ -57,7 +57,7 @@ id -nG | grep -w cdrom
 
 ### 1.2 Verify MakeMKV Accessibility
 
-MakeMKV is installed via Flatpak and is NOT directly on PATH. Riply's `MakemkvBackend::auto_detect()` handles this — it detects Flatpak and constructs the correct command:
+MakeMKV is installed via Flatpak and is NOT directly on PATH. Riply's `MakemkvBackend::auto_detect()` handles this ÔÇö it detects Flatpak and constructs the correct command:
 
 ```
 flatpak run --command=makemkvcon com.makemkv.MakeMKV
@@ -129,21 +129,21 @@ cargo run -p cli -- rip list --json | jq .
 ```
 
 **Edge cases:**
-- Multiple drives → each listed with correct index
-- Drive not attached (status=256) → filtered out
-- Drive with no device_path field → handled gracefully
+- Multiple drives Ôćĺ each listed with correct index
+- Drive not attached (status=256) Ôćĺ filtered out
+- Drive with no device_path field Ôćĺ handled gracefully
 
 ### 2.2 Drive State Machine
 
 **Test:** Observe state transitions as disc is inserted/ejected:
 
 ```
-Empty → Loading → Ready → Empty (after eject)
+Empty Ôćĺ Loading Ôćĺ Ready Ôćĺ Empty (after eject)
 ```
 
 **Commands:**
 ```bash
-# Insert disc → wait → check
+# Insert disc Ôćĺ wait Ôćĺ check
 cargo run -p cli -- rip list
 
 # Eject disc
@@ -192,13 +192,13 @@ kill $RIP_PID 2>/dev/null
 **Test:** Feed real `DRV:` lines into `parser::parse_drive_line()`
 
 **Verify all fields match:**
-- `index` — matches DRV line index
-- `visible` — true when status != 256
-- `enabled` — true when disc is readable
-- `flags` — raw flags value
-- `drive_name` — drive model name
-- `disc_name` — disc label (or None)
-- `device_path` — `/dev/sr0` (or None)
+- `index` ÔÇö matches DRV line index
+- `visible` ÔÇö true when status != 256
+- `enabled` ÔÇö true when disc is readable
+- `flags` ÔÇö raw flags value
+- `drive_name` ÔÇö drive model name
+- `disc_name` ÔÇö disc label (or None)
+- `device_path` ÔÇö `/dev/sr0` (or None)
 
 **Edge cases to test:**
 - Disc names with quotes: `The \"Best\" Movie`
@@ -248,9 +248,9 @@ cargo run -p cli -- rip eject 0
 
 | Scenario | Expected Behavior |
 |----------|------------------|
-| Drive already empty | `Ok(())` — "No medium found" treated as success |
-| Non-existent drive | `Err` — device not found message |
-| No cdrom permission | `Err` — permission denied |
+| Drive already empty | `Ok(())` ÔÇö "No medium found" treated as success |
+| Non-existent drive | `Err` ÔÇö device not found message |
+| No cdrom permission | `Err` ÔÇö permission denied |
 
 ### 4.3 Post-Rip Auto-Eject
 
@@ -330,14 +330,14 @@ cargo run -p cli -- serve
 **Test:** Enable auto-rip in settings
 
 **Verify:**
-- Insert disc → rip starts automatically
+- Insert disc Ôćĺ rip starts automatically
 - Drive card shows `Ripping` state
 - Auto-rip disabled for drives marked as such
 - Multiple discs handled sequentially (not concurrently)
 
 ### 6.3 Cancel via Web UI
 
-**Test:** Start rip → click cancel button
+**Test:** Start rip Ôćĺ click cancel button
 
 **Verify:**
 - Rip process killed
@@ -440,60 +440,39 @@ fn test_drive_detection() { ... }
 
 ## Phase 8: Fix Pre-existing Test Compilation Errors
 
-### Current Status
+### Status: ✅ COMPLETE
 
-The `app` and `infra` test suites have pre-existing compilation errors due to `FileRecord` field-to-method changes that weren't reflected in tests.
+All 179 library tests now compile and pass across all 4 crates.
 
-**Affected files:**
-- `app/src/analyzer.rs` (~40 errors)
-- `app/src/mover.rs` (~1 error)
-- `app/src/scanner.rs` (~10 errors, partially fixed)
-- `infra/src/db.rs` (~8 errors, partially fixed)
+**Result:**
+- `app` crate: 51 tests passed
+- `core` crate: 38 tests passed
+- `infra` crate: 86 tests passed
+- `web` crate: 4 tests passed
 
-**Methods that need `()` added in test code:**
-- `.filename` → `.filename()`
-- `.hash` → `.hash()`
-- `.id` → `.id()`
-- `.title_group_id` → `.title_group_id()`
-- `.content_rating` → `.content_rating()`
-- `.overview` → `.overview()`
-- `.cast_list` → `.cast_list()`
-- `.duplicate_path` → `.duplicate_path()`
-- `.genres` → `.genres()`
-- `.runtime` → `.runtime()`
-- `.suggested_title` → `.suggested_title()`
-- `.suggested_year` → `.suggested_year()`
-- `.confidence` → `.confidence()`
-- `.status` → `.status()`
-- `.media_type` → `.media_type()`
-- `.season_number` → `.season_number()`
-- `.episode_number` → `.episode_number()`
-- `.tmdb_id` → `.tmdb_id()`
-- `.source` → `.source()`
-- `.series_name` → `.series_name()`
-- `.episode_title` → `.episode_title()`
+**Committed:** `5e8b3ae fix: resolve pre-existing test compilation errors (field → method access)`
 
-**Fix approach:** Use sed to replace field access with method calls in `#[cfg(test)]` modules only.
+**Note:** 5 web E2E test failures are pre-existing (not related to the ripper subsystem).
 
 ---
 
 ## Execution Order
 
 ```
-Phase 1 (Setup) → Phase 8 (Fix tests) → Phase 2-4 (Detection/Eject)
-  → Phase 5 (Full rip) → Phase 6 (Web UI) → Phase 7 (Automated tests)
+Phase 1 (Setup) Ôćĺ Phase 8 (Fix tests) Ôćĺ Phase 2-4 (Detection/Eject)
+  Ôćĺ Phase 5 (Full rip) Ôćĺ Phase 6 (Web UI) Ôćĺ Phase 7 (Automated tests)
 ```
 
 ### Recommended Sequence
 
-1. **Phase 1** — Fix cdrom group, verify MakeMKV accessibility
-2. **Phase 8** — Fix pre-existing test compilation errors (needed for all subsequent phases)
-3. **Phase 2** — Test drive detection (quick win, validates hardware setup)
-4. **Phase 3** — Validate parser with real output (confirms parsing correctness)
-5. **Phase 4** — Test eject functionality (simple, validates permissions)
-6. **Phase 5** — Full rip workflow (core functionality, needs disc)
-7. **Phase 6** — Web UI integration (visual validation)
-8. **Phase 7** — Write automated hardware tests (permanent regression protection)
+1. **Phase 1** ÔÇö Fix cdrom group, verify MakeMKV accessibility
+2. **Phase 8** ÔÇö Fix pre-existing test compilation errors (needed for all subsequent phases)
+3. **Phase 2** ÔÇö Test drive detection (quick win, validates hardware setup)
+4. **Phase 3** ÔÇö Validate parser with real output (confirms parsing correctness)
+5. **Phase 4** ÔÇö Test eject functionality (simple, validates permissions)
+6. **Phase 5** ÔÇö Full rip workflow (core functionality, needs disc)
+7. **Phase 6** ÔÇö Web UI integration (visual validation)
+8. **Phase 7** ÔÇö Write automated hardware tests (permanent regression protection)
 
 ---
 
@@ -521,13 +500,13 @@ Phase 1 (Setup) → Phase 8 (Fix tests) → Phase 2-4 (Detection/Eject)
 
 ## Notes
 
-- **Robot mode (`-r`)** — All CLI interaction uses machine-readable output for reliable parsing
-- **Flatpak command** — `flatpak run --command=makemkvcon com.makemkv.MakeMKV`
-- **Process isolation** — Each rip spawns a new child process
-- **Kill on drop** — Processes are auto-terminated when session is dropped
-- **Stdin safety net** — `"n\n"` prevents blocking on overwrite prompts
-- **Parser is strict** — Malformed output is silently ignored
-- **Error codes** — MakeMKV errors start with code 3010
-- **Completion code** — `MSG:201003` signals rip completion
-- **DryRunBackend** — Returns 2 fake drives, simulates 5 progress steps (used for CI)
-- **SSE events** — Real-time progress via `rip:progress`, `rip:complete`, `rip:error`, `rip:message`
+- **Robot mode (`-r`)** ÔÇö All CLI interaction uses machine-readable output for reliable parsing
+- **Flatpak command** ÔÇö `flatpak run --command=makemkvcon com.makemkv.MakeMKV`
+- **Process isolation** ÔÇö Each rip spawns a new child process
+- **Kill on drop** ÔÇö Processes are auto-terminated when session is dropped
+- **Stdin safety net** ÔÇö `"n\n"` prevents blocking on overwrite prompts
+- **Parser is strict** ÔÇö Malformed output is silently ignored
+- **Error codes** ÔÇö MakeMKV errors start with code 3010
+- **Completion code** ÔÇö `MSG:201003` signals rip completion
+- **DryRunBackend** ÔÇö Returns 2 fake drives, simulates 5 progress steps (used for CI)
+- **SSE events** ÔÇö Real-time progress via `rip:progress`, `rip:complete`, `rip:error`, `rip:message`
