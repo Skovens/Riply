@@ -125,6 +125,30 @@ cargo test -p app -- test_name
 cargo test -p infra -- test_name
 ```
 
+### E2E Tests (Playwright)
+
+Playwright is configured in `playwright.config.js` with auto-start of the
+Riply server. Tests live in `tests/e2e/`.
+
+```bash
+# Install dependencies (one-time)
+npm install
+npx playwright install chromium
+
+# Run all E2E tests (auto-starts server)
+npm test
+
+# Run with browser visible (for debugging)
+npm run test:headed
+
+# View HTML report
+npm run test:report
+```
+
+The `webServer` config in `playwright.config.js` runs `cargo run -p cli -- serve`
+before tests and tears it down after. Set `CI=1` for retries and single-worker
+mode.
+
 ---
 
 ## Commit Messages
