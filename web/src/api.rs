@@ -25,6 +25,7 @@ use crate::routes::config as cfg;
 use crate::routes::files;
 use crate::routes::jobs;
 use crate::routes::move_ as mover_routes;
+use crate::routes::organizer;
 use crate::routes::review;
 use crate::routes::ripper;
 use crate::routes::scan;
@@ -174,6 +175,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .merge(ripper::router(Arc::clone(&state)))
         .merge(cfg::router(Arc::clone(&state)))
         .merge(search::router(Arc::clone(&state)))
+        .merge(organizer::router(Arc::clone(&state)))
         .layer(TimeoutLayer::new(std::time::Duration::from_secs(30)));
 
     Router::new()

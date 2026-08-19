@@ -5,6 +5,7 @@ use riply_core::{FolderRecord, FolderStatus, MediaType, FolderStore, FolderStore
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 use tracing::{info, warn};
 
 /// Result of a folder scan
@@ -16,9 +17,9 @@ pub struct ScanFoldersResult {
 /// Organizer service — orchestrates folder-level media operations
 pub struct OrganizerService {
     /// Metadata searcher for TMDb lookups
-    searcher: Option<Box<dyn MetadataSearcher>>,
+    searcher: Option<Arc<dyn MetadataSearcher>>,
     /// Folder store for persistence
-    folder_store: Box<dyn FolderStore>,
+    folder_store: Arc<dyn FolderStore>,
     /// Scan directory (configurable)
     scan_directory: std::sync::Mutex<Option<std::path::PathBuf>>,
 }
@@ -26,7 +27,7 @@ pub struct OrganizerService {
 impl OrganizerService {
     /// Create a new organizer service
     #[tracing::instrument(skip_all)]
-    pub fn new(searcher: Option<Box<dyn MetadataSearcher>>, folder_store: Box<dyn FolderStore>) -> Self {
+    pub fn new(searcher: Option<Arc<dyn MetadataSearcher>>, folder_store: Arc<dyn FolderStore>) -> Self {
         info!("Organizer service initialized");
         OrganizerService {
             searcher,
@@ -346,15 +347,7 @@ impl OrganizerService {
 /// - Movie: 1 large file (>3x median) + small extras
 /// - TV: Multiple similarly-sized files (std dev < 30% of mean)
 /// - Unknown: Doesn't match either pattern
-fn detect_media_type_from_files(folder: &FolderRecord) -> MediaType {
-    if folder.file_count < 2 {
-        return MediaType::Movie; // Single file is likely a movie
-    }
-
-    // Collect file sizes
-    let sizes: Vec<u64> = folder.extra_files.iter().map(|_| 1).collect();
-    let main_size = 1; // We don't have actual sizes at this point
-
+fn detect_media_type_from_files(_folder: &FolderRecord) -> MediaType {
     // For now, default to movie — real sizes come from actual file scanning
     MediaType::Movie
 }
@@ -400,7 +393,7 @@ mod tests {
     #[test]
     fn test_organizer_service_creation() {
         let store = MockFolderStore::new();
-        let service = OrganizerService::new(None, Box::new(store));
+        let service = OrganizerService::new(None, Arc::new(store));
         assert!(service.get_scan_directory().is_none());
     }
 }

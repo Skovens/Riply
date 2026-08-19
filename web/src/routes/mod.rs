@@ -3,6 +3,7 @@ pub mod config;
 pub mod files;
 pub mod jobs;
 pub mod move_;
+pub mod organizer;
 pub mod review;
 pub mod ripper;
 pub mod scan;
