@@ -4,6 +4,7 @@
 
 pub mod file_record;
 pub mod folder_record;
+pub mod folder_store;
 pub mod media_type;
 pub mod metadata;
 pub mod name_cleaner;
@@ -13,6 +14,7 @@ pub mod title_group;
 
 pub use file_record::{content_type_to_str, ContentType, EnrichmentRecord, FileRecord, MetadataRecord, ScanRecord};
 pub use folder_record::{FolderRecord, FolderStatus};
+pub use folder_store::{FolderStore, FolderStoreError};
 pub use media_type::MediaType;
 pub use metadata::{MetadataEnrichment, MetadataError, MetadataMatch, MetadataSearcher};
 pub use name_cleaner::NameCleaner;

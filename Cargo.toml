@@ -19,6 +19,7 @@ license = "MIT"
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 chrono = "0.4"
+async-trait = "0.1"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

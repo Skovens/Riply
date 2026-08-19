@@ -15,6 +15,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 chrono = { version = "0.4", features = ["serde"] }
 unidecode = "0.3"
+async-trait = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

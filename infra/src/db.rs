@@ -1439,3 +1439,41 @@ mod folder_tests {
         assert_eq!(result.status, riply_core::FolderStatus::Confident);
     }
 }
+
+// ── FolderStore trait impl for Database (ADR-026) ──────────────────────────────
+
+/// Implement FolderStore for Database so app services can use it
+#[async_trait::async_trait]
+impl riply_core::FolderStore for Database {
+    async fn save_folder(&self, folder: &riply_core::FolderRecord) -> Result<(), riply_core::FolderStoreError> {
+        save_folder(&self.pool, folder).await.map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
+    }
+
+    async fn get_all_folders(&self) -> Result<Vec<riply_core::FolderRecord>, riply_core::FolderStoreError> {
+        get_all_folders(&self.pool).await.map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
+    }
+
+    async fn get_folder_by_id(&self, id: &str) -> Result<Option<riply_core::FolderRecord>, riply_core::FolderStoreError> {
+        get_folder_by_id(&self.pool, id).await.map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
+    }
+
+    async fn get_folders_by_status(&self, status: &str) -> Result<Vec<riply_core::FolderRecord>, riply_core::FolderStoreError> {
+        get_folders_by_status(&self.pool, status).await.map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
+    }
+
+    async fn count_folders_by_status(&self) -> Result<Vec<(String, i64)>, riply_core::FolderStoreError> {
+        count_folders_by_status(&self.pool).await.map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
+    }
+
+    async fn update_folder_status(&self, id: &str, status: &str) -> Result<(), riply_core::FolderStoreError> {
+        update_folder_status(&self.pool, id, status).await.map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
+    }
+
+    async fn delete_folder(&self, id: &str) -> Result<(), riply_core::FolderStoreError> {
+        delete_folder(&self.pool, id).await.map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
+    }
+
+    async fn clear_folders(&self) -> Result<(), riply_core::FolderStoreError> {
+        clear_folders(&self.pool).await.map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
+    }
+}
