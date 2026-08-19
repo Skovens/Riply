@@ -325,57 +325,83 @@ Uses Linux `eject` command.
 
 ---
 
-## Rip Flow (ADR-024)
+## Rip Flow (ADR-025)
 
 ### Overview
 
-Per ADR-024, the rip flow is split into two independent actions:
-
-1. **Rip** — starts immediately with no dialog
-2. **Naming** — available anytime via the disc name click
+Per ADR-025 (Three-Window Architecture), the Rip window handles disc ripping with concurrent autodetection.
 
 ### Flow
 
 ```
 User clicks "Rip" → MakemkvBackend.start_rip()
                     ↓
-              Files rip to disc-named folder
+              Files rip to tmp folder (configurable, default /tmp/riply)
                     ↓
-              Background TMDb lookup runs
+              Concurrent: TMDb lookup runs on disc name
+              (independent of rip, no overlap)
                     ↓
-              SSE: rip:named or rip:naming_failed
+              SSE: rip:named or rip:naming_failed (live feedback)
                     ↓
               Rip completes → SSE: rip:complete
                     ↓
-              Post-rip rename (if name found):
-              Disc-named folder → Jellyfin-named folder
+              Post-rip move (files moved to final destination):
+              - Movie: biggest file → {Title} ({Year})/
+                rest → {Title} ({Year})/Extras/
+              - TV: user confirms show/season → {Show} ({Year})/Season {NN}/
+                files → {Show} - S{NN}E{NN}.{ext}
+                extras → Season {NN}/Extras/
+              - Unidentified: files stay in tmp with disc name
                     ↓
-              SSE: rip:renamed
+              SSE: rip:renamed (if moved)
+              Drive card: Complete / Error / Ready
 ```
 
-### Auto-Naming
+### Auto-Naming (Concurrent with Rip)
 
-After `start_rip()` is called, a background TMDb lookup runs on the disc name:
+TMDb lookup begins at rip start (uses disc name from drive info):
 1. Parse disc name for title + year (e.g., `INCEPTION_2010` → `Inception`, 2010)
 2. Search TMDb with parsed title
-3. If match found → send `rip:named:{index}:{title} ({year})` via SSE
+3. If match found → send `rip:named:{index}:{type}:{title} ({year})` via SSE (`type` = movie or tv)
 4. If no match → send `rip:naming_failed:{index}` via SSE
+5. Drive card shows live: `"Disc: Inception → Found: Inception (2010)"` or `"Disc: Inception → Not found"`
 
-### Post-Rip Rename
+### Post-Rip Move
 
 At rip completion (after `rip:complete`):
-1. If `final_name` differs from rip folder name → `fs::rename()` the folder
-2. Apply "(Copy N)" if destination already exists
-3. Send `rip:renamed:{index}:{new_name}` via SSE
-4. If no name found → folder keeps disc name (no rename)
+1. Detect biggest file = main title
+2. Move files based on media type (movie or TV show):
+   - **Movie:** `{Title} ({Year})/` with main file `{Title}.{ext}`, extras in `Extras/`
+   - **TV Show:** `{Show} ({Year})/Season {NN}/` with files `{Show} - S{NN}E{NN}.{ext}`, extras in `Season {NN}/Extras/`
+   - **Unidentified:** files stay in tmp with disc name
+3. Apply "(Copy N)" if destination already exists
+4. Send `rip:renamed:{index}:{new_name}` via SSE
+5. Drive card ends in terminal state: `Complete`, `Error`, or `Ready` (if unidentified)
+
+### Tmp Folder
+
+- Ripped content written to configurable tmp folder (default `/tmp/riply`)
+- See ADR-027 (Tmp Folder Lifecycle) for cleanup policy
+- On server restart, content older than N days (configurable, default 7) is deleted
 
 ### Jellyfin Naming Convention
 
 Ripped content is restructured into Jellyfin-compatible format:
 
-- **Movies:** `{Title} ({Year})/` with main title file named `{Title}.{ext}`
-- **TV Shows:** `{Series} ({Year})/Season {NN}/` with files named `{Series} - S{NN}E{NN}.{ext}`
-- **Extras:** Kept as-is in `Extras/` subfolder
+- **Movies:** `{Title} ({Year})/` with main file `{Title}.{ext}`
+- **TV Shows:** `{Series} ({Year})/Season {NN}/` with files `{Series} - S{NN}E{NN}.{ext}`
+- **Extras:** Moved to `Extras/` subfolder (movies) or `Season {NN}/Extras/` (TV)
+
+### Movie vs TV Show Detection
+
+See ADR-028 (Movie vs TV Show Detection) for full details.
+
+Detection priority:
+1. **TMDb match** — Most accurate (check if result is movie or tv_show)
+2. **File-size heuristic** — Fallback when TMDb fails:
+   - Movie: 1 large file (>3x median) + small extras
+   - TV: Multiple similarly-sized files (std dev < 30% of mean)
+3. **User confirmation** — Always required, one-click flip Movie ↔ TV Show
 
 ### SSE Events
 
@@ -383,10 +409,10 @@ Ripped content is restructured into Jellyfin-compatible format:
 |---|---|---|
 | `rip:starting` | `rip:starting:{index}` | Rip begins |
 | `rip:progress` | `rip:progress:{index}:{pct}:{eta}` | Every progress update |
-| `rip:named` | `rip:named:{index}:{title} ({year})` | Auto-naming succeeded |
+| `rip:named` | `rip:named:{index}:{type}:{title} ({year})` | Auto-naming succeeded (`type` = movie or tv) |
 | `rip:naming_failed` | `rip:naming_failed:{index}` | Auto-naming failed |
-| `rip:complete` | `rip:complete:{index}` | Rip finished |
-| `rip:renamed` | `rip:renamed:{index}:{new_name}` | Post-rip folder rename |
+| `rip:complete` | `rip:complete:{index}` | Rip finished, files moved |
+| `rip:renamed` | `rip:renamed:{index}:{new_name}` | Post-rip rename/move |
 | `rip:error` | `rip:error:{index}:{message}` | Rip failed |
 | `rip:message` | `rip:message:{index}:{text}` | Status messages |
 

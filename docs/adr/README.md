@@ -63,10 +63,15 @@ What becomes easier or more difficult to do?
 | [017](017-api-versioning.md) | API Versioning | Accepted | 2026-08-02 |
 | [018](018-graceful-shutdown.md) | Graceful Shutdown | Accepted | 2026-08-02 |
 | [019](019-xdg-data-home.md) | XDG Data Home for Config and Database | Proposed | 2026-08-12 |
-| [020](020-rip-progress-bar.md) | Rip Progress Bar in Drive Panel | Proposed | 2026-08-12 |
-| [021](021-collapsible-folder-preview.md) | Collapsible Folder Preview in the Files Pane | Proposed | 2026-08-12 |
-| [022](022-single-media-naming-service.md) | Single Media-Naming Service | Proposed | 2026-08-12 |
+| [020](020-rip-progress-bar.md) | Rip Progress Bar in Drive Panel | **Superseded** by ADR-025 | 2026-08-12 |
+| [021](021-collapsible-folder-preview.md) | Collapsible Folder Preview in the Files Pane | **Superseded** by ADR-025 | 2026-08-12 |
+| [022](022-single-media-naming-service.md) | Single Media-Naming Service | **Superseded** by ADR-025 | 2026-08-12 |
 | [023](023-per-drive-autorip-session-scoped.md) | Per-Drive Autorip State Is Session-Scoped | Accepted | 2026-08-12 |
+| [024](024-separate-rip-and-naming.md) | Separate Rip and Naming Flows | **Superseded** by ADR-025 | 2026-08-12 |
+| [025](025-three-window-architecture.md) | Three-Window Architecture | Proposed | 2026-08-19 |
+| [026](026-folder-based-pipeline.md) | Folder-Based Pipeline | Proposed | 2026-08-19 |
+| [027](027-tmp-folder-lifecycle.md) | Tmp Folder Lifecycle | Proposed | 2026-08-19 |
+| [028](028-movie-vs-tv-show-detection.md) | Movie vs TV Show Detection | Proposed | 2026-08-19 |
 
 ## Creating a New ADR
 

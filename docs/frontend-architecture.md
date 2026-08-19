@@ -21,13 +21,8 @@ web/svelte/
         index.ts            — Barrel export
         request.ts          — Fetch wrapper (headers, error handling)
         sse.ts              — SSE connection manager
-        files.ts            — /api/files endpoints
-        review.ts           — /api/review endpoints
-        scan.ts             — /api/scan endpoints
-        analyze.ts          — /api/analyze endpoints
-        jobs.ts             — /api/jobs endpoints
-        move.ts             — /api/move endpoints
-        ripper.ts           — /api/ripper endpoints
+        ripper.ts           — /api/ripper endpoints (drives, rip, eject)
+        organizer.ts        — /api/organizer endpoints (folders, scan, accept-all)
         config.ts           — /api/config endpoints
 
       css/                  — Component-scoped CSS
@@ -41,31 +36,32 @@ web/svelte/
       stores/
         index.ts            — Svelte store re-exports
 
-      types.ts              — Shared TypeScript types (FileRecord, RipEvent, etc.)
+      types.ts              — Shared TypeScript types (DriveInfo, FolderRecord, RipEvent, etc.)
 
     routes/                 — SvelteKit file-based routing
-      +layout.js            — Shared layout loader
+      +layout.js            — Shared layout loader (3-window nav)
       +layout.svelte        — App shell (header nav + main content area)
-      +page.svelte          — Dashboard (root route)
-      files/+page.svelte    — File list with pagination
-      review/+page.svelte   — Review queue
-      jobs/+page.svelte     — Background jobs with progress
-      ripper/+page.svelte   — Drive list, rip controls, progress bars
-      settings/+page.svelte — Config form
+      +page.svelte          — Redirects to /ripper
+      ripper/+page.svelte   — Rip window (drive cards, rip controls)
+      organizer/+page.svelte — Organizer window (folder list, naming, bulk move)
+      settings/+page.svelte — Settings window (configuration)
 ```
 
 ## Routing
 
 SvelteKit file-based: route directories map to URL paths.
 
+> **ADR-025 (Three-Window Architecture)** defines the three windows:
+> - **Rip** (`/ripper`) — Drive cards, rip controls, progress
+> - **Organizer** (`/organizer`) — Folder list, naming, bulk move
+> - **Settings** (`/settings`) — Configuration
+
 | Route | Page |
 |-------|------|
-| `/` | Dashboard (`+page.svelte`) |
-| `/files` | File list |
-| `/review` | Review queue |
-| `/jobs` | Background jobs |
-| `/ripper` | Disc ripping |
-| `/settings` | Configuration |
+| `/` | Redirects to `/ripper` |
+| `/ripper` | Rip window — drive cards, rip controls |
+| `/organizer` | Organizer window — folder list, naming, bulk move |
+| `/settings` | Settings window — configuration |
 
 Navigation is handled by SvelteKit's `<a>` links — no hash-based routing.
 

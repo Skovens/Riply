@@ -106,7 +106,7 @@ cargo build --all
 cargo test --all
 ```
 
-Expected: **0 clippy warnings**, **216+ tests passing**.
+Expected: **0 clippy warnings**, **179 tests passing**.
 
 The SvelteKit frontend is embedded into the binary at build time via
 `web/build.rs` + `rust-embed` (folder `web/svelte/build`). `cargo build` fails
@@ -148,6 +148,58 @@ npm run test:report
 The `webServer` config in `playwright.config.js` runs `cargo run -p cli -- serve`
 before tests and tears it down after. Set `CI=1` for retries and single-worker
 mode.
+
+---
+
+## Architecture Overview (ADR-025)
+
+Riply uses a **three-window architecture**:
+
+| Window | Route | Purpose |
+|--------|-------|---------|
+| **Rip** | `/ripper` | Drive cards, rip controls, progress, eject |
+| **Organizer** | `/organizer` | Folder list, naming, bulk move |
+| **Settings** | `/settings` | Configuration |
+
+### Rip Window
+
+- Drive cards with fixed-size cover images (placeholder when unidentified)
+- Buttons never disappear — inactive buttons are greyed out with tooltips
+- Concurrent autodetection (TMDb lookup runs during rip, independent of ripping)
+- Tmp folder (default `/tmp/riply`) for ripped content
+- Post-rip move to final destination (Jellyfin naming convention)
+- Autorip is event-driven (no constant polling)
+
+### Organizer Window
+
+- Folder-level pipeline (not file-level)
+- Confidence scoring: Confident (≥0.9), Uncertain (0.7–0.9), Unknown (<0.7)
+- Accept All moves only confident folders
+- Reject All moves unknown folders to quarantine
+- Manual TMDb search per folder
+- Expandable folder view showing files inside
+
+### Movie vs TV Show Detection (ADR-028)
+
+Detection priority:
+1. TMDb match (most accurate)
+2. File-size heuristic (fallback: 1 large file = movie, multiple similar = TV)
+3. User confirmation (always required, one-click flip)
+
+### Tmp Folder Lifecycle (ADR-027)
+
+- Ripped content written to configurable tmp folder
+- On server restart, content older than N days (configurable, default 7) is deleted
+- Fresh rips preserved until user handles them
+- No automatic cleanup during operation
+
+### What Was Replaced
+
+- File-based pipeline (SHA-256, ffprobe, 5 states) → Folder-based pipeline
+- Dashboard stats bar → Gone
+- Review queue → Organizer window
+- DetailDrawer → Gone
+- ADR-020, ADR-021, ADR-022, ADR-024 → Superseded by ADR-025
 
 ---
 
