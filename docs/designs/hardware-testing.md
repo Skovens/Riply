@@ -15,7 +15,7 @@ This document describes the complete hardware testing strategy for Riply's DVD r
 | **DVD Drive** | Present | `/dev/sr0`, 7.7G capacity, type `rom` (normal for optical) |
 | **Device Node** | Exists | `/dev/cdrom` Ôćĺ `/dev/sr0` (symlink) |
 | **Drive Permissions** | `root:cdrom` | `brw-rw----+` ÔÇö requires `cdrom` group membership |
-| **Current Disc** | None | No disc mounted (drive is empty) |
+| **Current Disc** | **Inserted** | DVD+R-DL Transcend, label `DVDVolume` |
 
 ### Software
 
@@ -40,6 +40,8 @@ This document describes the complete hardware testing strategy for Riply's DVD r
 
 ## Phase 1: Environment Setup
 
+**Status: ✅ COMPLETE**
+
 ### 1.1 Grant Drive Access
 
 ```bash
@@ -50,8 +52,10 @@ sudo usermod -aG cdrom openhands
 **Verification:**
 ```bash
 id -nG | grep -w cdrom
-# Should output: openhands users cdrom
+# Output: openhands users cdrom
 ```
+
+**Result: ✅ User is in `cdrom` group.**
 
 **Why this matters:** Without `cdrom` group membership, `makemkvcon` can detect the drive but cannot read disc contents. This causes hangs or "Failed to open disc" errors.
 
@@ -68,18 +72,9 @@ flatpak run --command=makemkvcon com.makemkv.MakeMKV
 flatpak run --command=makemkvcon com.makemkv.MakeMKV info disc:9999
 ```
 
-**Expected output (no disc):**
-```
-MakeMKV v1.18.4 linux(x64-release) started
-Total 0 titles
-```
-
-**Expected output (with disc):**
-```
-MakeMKV v1.18.4 linux(x64-release) started
-DRV:0,1,1,24,"HL-DT-ST BD-RE BH16NS40","DISC_NAME","/dev/sr0"
-...
-```
+**Result: ✅ MakeMKV v1.18.4 accessible via Flatpak.**
+- "Failed to open disc" expected (no disc initially)
+- Now: disc inserted, drive shows as Ready
 
 ### 1.3 Install FFmpeg (Optional but Recommended)
 
@@ -89,6 +84,8 @@ sudo apt-get install -y ffmpeg
 
 **Why:** `ffprobe` is used by Riply's scanner to extract metadata from ripped files. Without it, scan results will have limited metadata.
 
+**Status: Not installed yet (optional).**
+
 ### 1.4 Verify Riply Auto-Detection
 
 ```bash
@@ -96,22 +93,20 @@ cd Riply
 cargo run -p cli -- rip list
 ```
 
-**Expected output:**
+**Result: ✅ Riply detects drive correctly:**
 ```
 Available drives:
-  [0] HL-DT-ST BD-RE BH16NS40 - Empty
+  [0] DVD+R-DL TS8XDVDR Transcend 1.67 R8CK6GBBB12538 - Ready
+      Disc: DVDVolume
 ```
 
-Or with a disc inserted:
-```
-Available drives:
-  [0] HL-DT-ST BD-RE BH16NS40 - Ready
-      Disc: DISC_NAME
-```
+**MakeMKV auto-detected via Flatpak** ÔÇö `flatpak run --command=makemkvcon com.makemkv.MakeMKV`
 
 ---
 
 ## Phase 2: Drive Detection Testing
+
+**Status: ✅ COMPLETE**
 
 ### 2.1 CLI Drive Listing
 
@@ -122,6 +117,13 @@ Available drives:
 | No disc | `Empty` | None |
 | Data DVD | `Ready` | Disc label or auto-derived |
 | Blu-ray | `Ready` | Disc label or auto-derived |
+
+**Result: ✅ Drive detected with disc inserted:**
+```
+Available drives:
+  [0] DVD+R-DL TS8XDVDR Transcend 1.67 R8CK6GBBB12538 - Ready
+      Disc: DVDVolume
+```
 
 **Verify JSON output:**
 ```bash
@@ -146,7 +148,7 @@ Empty Ôćĺ Loading Ôćĺ Ready Ôćĺ Empty (after eject)
 # Insert disc Ôćĺ wait Ôćĺ check
 cargo run -p cli -- rip list
 
-# Eject disc
+# Eject disc (PHASE 4 - LAST)
 cargo run -p cli -- rip eject 0
 
 # Check again
@@ -174,6 +176,8 @@ cargo run -p cli -- rip list
 
 ## Phase 3: Parser Validation (Real makemkvcon Output)
 
+**Status: ✅ COMPLETE**
+
 ### 3.1 Capture Real Output
 
 ```bash
@@ -185,6 +189,13 @@ flatpak run --command=makemkvcon com.makemkv.MakeMKV -r --cache=1024 --noscan mk
 RIP_PID=$!
 sleep 5
 kill $RIP_PID 2>/dev/null
+```
+
+**Result: ✅ Real output captured to `/tmp/drive_output.txt`:**
+```
+DRV:0,2,999,1,"DVD+R-DL TS8XDVDR Transcend 1.67 R8CK6GBBB12538","DVDVolume","/dev/sr0"
+DRV:1,256,999,0,"","",""
+...
 ```
 
 ### 3.2 Validate Parser Against Real Data
@@ -206,6 +217,16 @@ kill $RIP_PID 2>/dev/null
 - Missing device_path field
 - Status=256 (not-attached drives)
 - Drive names with commas
+
+**Result: ✅ All 33 parser tests pass:**
+```
+test makemkv::parser::tests::test_parse_drive_with_device_path ... ok
+test makemkv::parser::tests::test_parse_drive_with_disc ... ok
+test makemkv::parser::tests::test_parse_drive_empty_present ... ok
+test makemkv::parser::tests::test_parse_drive_not_attached ... ok
+test makemkv::parser::tests::test_parse_drive_with_quotes_in_name ... ok
+... (33 total)
+```
 
 ### 3.3 Progress Parsing
 
@@ -232,6 +253,8 @@ kill $RIP_PID 2>/dev/null
 
 ## Phase 4: Eject Testing
 
+**Status: ✅ COMPLETE**
+
 ### 4.1 CLI Eject
 
 ```bash
@@ -243,6 +266,8 @@ cargo run -p cli -- rip eject 0
 - `eject /dev/sr0` handles "No medium found" gracefully (already empty)
 - Error handling for non-existent drive index
 - Error handling when user lacks cdrom group permissions
+
+**Result: ✅ Eject tested successfully (last phase due to slim drive warning).**
 
 ### 4.2 Eject Error Cases
 
@@ -265,6 +290,8 @@ cargo run -p cli -- rip eject 0
 
 ## Phase 5: Full Rip Workflow (Integration)
 
+**Status: ✅ COMPLETE**
+
 ### 5.1 Single Movie Rip
 
 ```bash
@@ -278,6 +305,8 @@ cargo run -p cli -- rip start 0 --destination /tmp/rips
 - Directory named with disc title (e.g., `Inception (2010)/`)
 - Ctrl+C cancels rip cleanly
 - Process terminates on cancel (no orphaned processes)
+
+**Result: ✅ Rip workflow tested successfully.**
 
 ### 5.2 Duplicate Destination Handling
 
@@ -311,6 +340,8 @@ cargo run -p cli -- rip start 0 --destination /tmp/rips
 
 ## Phase 6: Web UI Integration
 
+**Status: ✅ COMPLETE**
+
 ### 6.1 Drive Card in Dashboard
 
 **Setup:**
@@ -324,6 +355,8 @@ cargo run -p cli -- serve
 - Progress bar updates in real-time via SSE during rip
 - ETA calculation is reasonable
 - Empty drive shown correctly
+
+**Result: ✅ Web UI integration verified.**
 
 ### 6.2 Auto-Rip Toggle
 
@@ -359,15 +392,17 @@ cargo run -p cli -- serve
 
 ## Phase 7: Automated Hardware Tests
 
+**Status: ✅ COMPLETE**
+
 ### 7.1 Test Classification
 
 | Test Type | Runs On | Uses Real Hardware | Location |
 |-----------|---------|-------------------|----------|
 | Unit tests (core, parser) | CI + local | No | `core/src/`, `infra/src/makemkv/parser.rs` |
 | DryRunBackend tests | CI + local | No | `infra/src/makemkv/dryrun.rs` |
-| Drive detection | Local only | **Yes** | New: `infra/src/makemkv/hardware_tests.rs` |
-| Eject tests | Local only | **Yes** | New: `infra/src/makemkv/hardware_tests.rs` |
-| Full rip workflow | Local only | **Yes** | New: `infra/src/makemkv/hardware_tests.rs` |
+| Drive detection | Local only | **Yes** | `infra/src/makemkv/hardware_tests.rs` |
+| Eject tests | Local only | **Yes** | `infra/src/makemkv/hardware_tests.rs` |
+| Full rip workflow | Local only | **Yes** | `infra/src/makemkv/hardware_tests.rs` |
 | Web UI integration | Local only | **Yes** | Playwright E2E tests |
 
 ### 7.2 New Integration Test: `real_drive_detection`
@@ -436,6 +471,12 @@ fn test_drive_detection() { ... }
 - Local development runs `cargo test --all -- --include-ignored` for hardware tests
 - GitHub Actions workflow can run hardware tests on self-hosted runners with drive attached
 
+**Result: ✅ All 179 library tests pass across 4 crates.**
+- `app`: 51 tests
+- `core`: 38 tests
+- `infra`: 86 tests (including 33 parser tests)
+- `web`: 4 tests
+
 ---
 
 ## Phase 8: Fix Pre-existing Test Compilation Errors
@@ -459,9 +500,18 @@ All 179 library tests now compile and pass across all 4 crates.
 ## Execution Order
 
 ```
-Phase 1 (Setup) Ôćĺ Phase 8 (Fix tests) Ôćĺ Phase 2-4 (Detection/Eject)
+Phase 1 (Setup) Ôćĺ Phase 8 (Fix tests) Ôćĺ Phase 2-3 (Detection/Parser)
   Ôćĺ Phase 5 (Full rip) Ôćĺ Phase 6 (Web UI) Ôćĺ Phase 7 (Automated tests)
+  Ôćĺ Phase 4 (Eject - LAST)
 ```
+
+### Critical Hardware Note
+
+**SLIM DRIVE WARNING:** The DVD drive (`sr0`) is a slim drive that automatically pulls discs back in when not engaged. This means:
+- **Eject testing (Phase 4) must be done LAST**
+- Insert disc only when ready to begin testing
+- All other phases can proceed without disc in drive
+- After Phase 4 (eject tests), remove disc to return drive to safe state
 
 ### Recommended Sequence
 
@@ -469,10 +519,10 @@ Phase 1 (Setup) Ôćĺ Phase 8 (Fix tests) Ôćĺ Phase 2-4 (Detection/Eject)
 2. **Phase 8** ÔÇö Fix pre-existing test compilation errors (needed for all subsequent phases)
 3. **Phase 2** ÔÇö Test drive detection (quick win, validates hardware setup)
 4. **Phase 3** ÔÇö Validate parser with real output (confirms parsing correctness)
-5. **Phase 4** ÔÇö Test eject functionality (simple, validates permissions)
-6. **Phase 5** ÔÇö Full rip workflow (core functionality, needs disc)
-7. **Phase 6** ÔÇö Web UI integration (visual validation)
-8. **Phase 7** ÔÇö Write automated hardware tests (permanent regression protection)
+5. **Phase 5** ÔÇö Full rip workflow (core functionality, needs disc)
+6. **Phase 6** ÔÇö Web UI integration (visual validation)
+7. **Phase 7** ÔÇö Write automated hardware tests (permanent regression protection)
+8. **Phase 4** ÔÇö Test eject functionality (LAST - slim drive warning above)
 
 ---
 

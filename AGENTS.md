@@ -359,6 +359,14 @@ the module. Write `warn!(error = %e, "Ping failed")` instead.
     `web/src/routes/ripper.rs`); the dashboard renders them inline in the
     drive card via `ripProgress` state in `web/svelte/src/routes/+page.svelte`.
 
+11. **DVD drive (`sr0`) is a slim drive that auto-retracts discs** — When
+    testing the DVD ripping subsystem, eject testing (Phase 4) must be done
+    LAST. The drive pulls discs back in when not engaged, so insert a disc
+    only when ready to begin testing. All other phases (detection, parser,
+    rip, web UI, automated tests) can proceed without a disc in the drive.
+    After eject tests, remove the disc to return the drive to safe state.
+    See `docs/designs/hardware-testing.md` for the full testing plan.
+
 ---
 
 ## Workflow: The Spec → Build → Demo Loop
