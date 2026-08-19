@@ -22,8 +22,8 @@ test.describe('Riply Dashboard', () => {
   });
 
   test('dashboard has sidebar panels', async ({ page }) => {
-    // Verify sidebar panels exist (drives, review, jobs buttons)
-    await expect(page.locator('button:has-text("Drives")')).toBeVisible();
+    // Verify sidebar panels exist (drives heading, review/jobs buttons)
+    await expect(page.locator('h4:has-text("Drives")')).toBeVisible();
     await expect(page.locator('button:has-text("Review")')).toBeVisible();
     await expect(page.locator('button:has-text("Jobs")')).toBeVisible();
   });
