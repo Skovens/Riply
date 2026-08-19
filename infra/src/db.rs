@@ -1049,3 +1049,393 @@ mod tests {
         );
     }
 }
+
+// ── Folder operations (ADR-026: Folder-Based Pipeline) ─────────────────────────
+
+/// Save a folder record.
+/// If a folder with the same ID already exists, updates all fields.
+pub async fn save_folder(pool: &sqlx::SqlitePool, folder: &riply_core::FolderRecord) -> Result<(), anyhow::Error> {
+    info!(folder = %folder.name, "Saving folder record");
+
+    let extra_files_json = json_encode_list(&Some(folder.extra_files.clone()));
+
+    sqlx::query(
+        r#"
+        INSERT INTO folders (id, path, name, suggested_name, suggested_year,
+                             confidence, tmdb_id, media_type, file_count,
+                             main_file, extra_files, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            path = excluded.path,
+            name = excluded.name,
+            suggested_name = excluded.suggested_name,
+            suggested_year = excluded.suggested_year,
+            confidence = excluded.confidence,
+            tmdb_id = excluded.tmdb_id,
+            media_type = excluded.media_type,
+            file_count = excluded.file_count,
+            main_file = excluded.main_file,
+            extra_files = excluded.extra_files,
+            status = excluded.status,
+            updated_at = excluded.updated_at
+        "#,
+    )
+    .bind(&folder.id)
+    .bind(folder.path.to_string_lossy().to_string())
+    .bind(&folder.name)
+    .bind(&folder.suggested_name)
+    .bind(folder.suggested_year)
+    .bind(folder.confidence)
+    .bind(folder.tmdb_id)
+    .bind(folder.media_type.to_string())
+    .bind(folder.file_count as i64)
+    .bind(&folder.main_file)
+    .bind(extra_files_json)
+    .bind(folder.status.to_string())
+    .bind(&folder.created_at)
+    .bind(&folder.updated_at)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+/// Get all folder records.
+pub async fn get_all_folders(pool: &sqlx::SqlitePool) -> Result<Vec<riply_core::FolderRecord>, anyhow::Error> {
+    let rows = sqlx::query(
+        r#"SELECT id, path, name, suggested_name, suggested_year, confidence,
+                  tmdb_id, media_type, file_count, main_file, extra_files,
+                  status, created_at, updated_at
+           FROM folders ORDER BY name"#,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    rows.into_iter()
+        .map(|row| folder_row_to_record(&row))
+        .collect()
+}
+
+/// Get a single folder by ID.
+pub async fn get_folder_by_id(pool: &sqlx::SqlitePool, id: &str) -> Result<Option<riply_core::FolderRecord>, anyhow::Error> {
+    let row = sqlx::query(
+        r#"SELECT id, path, name, suggested_name, suggested_year, confidence,
+                  tmdb_id, media_type, file_count, main_file, extra_files,
+                  status, created_at, updated_at
+           FROM folders WHERE id = ?"#,
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+
+    match row {
+        Some(r) => Ok(Some(folder_row_to_record(&r)?)),
+        None => Ok(None),
+    }
+}
+
+/// Get folders by status.
+pub async fn get_folders_by_status(pool: &sqlx::SqlitePool, status: &str) -> Result<Vec<riply_core::FolderRecord>, anyhow::Error> {
+    let rows = sqlx::query(
+        r#"SELECT id, path, name, suggested_name, suggested_year, confidence,
+                  tmdb_id, media_type, file_count, main_file, extra_files,
+                  status, created_at, updated_at
+           FROM folders WHERE status = ? ORDER BY name"#,
+    )
+    .bind(status)
+    .fetch_all(pool)
+    .await?;
+
+    rows.into_iter()
+        .map(|row| folder_row_to_record(&row))
+        .collect()
+}
+
+/// Count folders by status.
+pub async fn count_folders_by_status(pool: &sqlx::SqlitePool) -> Result<Vec<(String, i64)>, anyhow::Error> {
+    let rows = sqlx::query(
+        r#"SELECT status, COUNT(*) FROM folders GROUP BY status"#,
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let status: String = row.get("status");
+            let count: i64 = row.get("COUNT(*)");
+            (status, count)
+        })
+        .collect())
+}
+
+/// Update a folder's status.
+pub async fn update_folder_status(pool: &sqlx::SqlitePool, id: &str, status: &str) -> Result<(), anyhow::Error> {
+    use chrono::Utc;
+    let now = Utc::now().to_rfc3339();
+
+    sqlx::query(
+        "UPDATE folders SET status = ?, updated_at = ? WHERE id = ?",
+    )
+    .bind(status)
+    .bind(&now)
+    .bind(id)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+/// Delete a folder by ID.
+pub async fn delete_folder(pool: &sqlx::SqlitePool, id: &str) -> Result<(), anyhow::Error> {
+    sqlx::query("DELETE FROM folders WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Clear all folders.
+pub async fn clear_folders(pool: &sqlx::SqlitePool) -> Result<(), anyhow::Error> {
+    sqlx::query("DELETE FROM folders").execute(pool).await?;
+    Ok(())
+}
+
+/// Convert a database row to a FolderRecord.
+fn folder_row_to_record(row: &sqlx::sqlite::SqliteRow) -> Result<riply_core::FolderRecord, anyhow::Error> {
+    use std::path::PathBuf;
+
+    let id: String = row.get("id");
+    let path_str: String = row.get("path");
+    let name: String = row.get("name");
+    let suggested_name: Option<String> = row.get("suggested_name");
+    let suggested_year: Option<i32> = row.get("suggested_year");
+    let confidence: Option<f64> = row.get("confidence");
+    let tmdb_id: Option<i32> = row.get("tmdb_id");
+    let media_type_str: String = row.get("media_type");
+    let file_count: i32 = row.get("file_count");
+    let main_file: Option<String> = row.get("main_file");
+    let extra_files_raw: Option<String> = row.get("extra_files");
+    let status_str: String = row.get("status");
+    let created_at: String = row.get("created_at");
+    let updated_at: String = row.get("updated_at");
+
+    let media_type = match media_type_str.as_str() {
+        "Tv" | "TV Show" => riply_core::MediaType::Tv,
+        _ => riply_core::MediaType::Movie,
+    };
+
+    let status = match status_str.as_str() {
+        "Scanned" => riply_core::FolderStatus::Scanned,
+        "Confident" => riply_core::FolderStatus::Confident,
+        "Uncertain" => riply_core::FolderStatus::Uncertain,
+        "Unknown" => riply_core::FolderStatus::Unknown,
+        "Moved" => riply_core::FolderStatus::Moved,
+        "Quarantined" => riply_core::FolderStatus::Quarantined,
+        _ => riply_core::FolderStatus::Scanned,
+    };
+
+    let extra_files: Vec<String> = extra_files_raw
+        .and_then(|s: String| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+
+    let path = PathBuf::from(path_str);
+
+    Ok(riply_core::FolderRecord {
+        id,
+        path,
+        name,
+        suggested_name,
+        suggested_year: suggested_year.map(|y| y as u32),
+        confidence,
+        tmdb_id,
+        media_type,
+        file_count: file_count as usize,
+        main_file,
+        extra_files,
+        status,
+        created_at,
+        updated_at,
+    })
+}
+
+#[cfg(test)]
+mod folder_tests {
+    use super::*;
+    use riply_core::FolderRecord;
+    use std::path::PathBuf;
+
+    #[tokio::test]
+    async fn test_save_and_get_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+
+        let db = Database::new(db_path.to_str().unwrap()).await.unwrap();
+        db.migrate().await.unwrap();
+        let pool = &db.pool;
+
+        let folder = FolderRecord::new(
+            "folder-1".to_string(),
+            PathBuf::from("/test/Inception (2010)"),
+            "Inception (2010)".to_string(),
+            3,
+        );
+
+        save_folder(pool, &folder).await.unwrap();
+
+        let folders = get_all_folders(pool).await.unwrap();
+        assert_eq!(folders.len(), 1);
+        assert_eq!(folders[0].name, "Inception (2010)");
+        assert_eq!(folders[0].file_count, 3);
+        assert_eq!(folders[0].status, riply_core::FolderStatus::Scanned);
+    }
+
+    #[tokio::test]
+    async fn test_get_folder_by_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+
+        let db = Database::new(db_path.to_str().unwrap()).await.unwrap();
+        db.migrate().await.unwrap();
+        let pool = &db.pool;
+
+        let folder = FolderRecord::new(
+            "folder-2".to_string(),
+            PathBuf::from("/test/Matrix"),
+            "Matrix".to_string(),
+            1,
+        );
+        save_folder(pool, &folder).await.unwrap();
+
+        let result = get_folder_by_id(pool, "folder-2").await.unwrap();
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().name, "Matrix");
+
+        let none_result = get_folder_by_id(pool, "nonexistent").await.unwrap();
+        assert!(none_result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_update_folder_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+
+        let db = Database::new(db_path.to_str().unwrap()).await.unwrap();
+        db.migrate().await.unwrap();
+        let pool = &db.pool;
+
+        let folder = FolderRecord::new(
+            "folder-3".to_string(),
+            PathBuf::from("/test/Folder"),
+            "Folder".to_string(),
+            2,
+        );
+        save_folder(pool, &folder).await.unwrap();
+
+        update_folder_status(pool, "folder-3", "Confident").await.unwrap();
+
+        let folders = get_folders_by_status(pool, "Confident").await.unwrap();
+        assert_eq!(folders.len(), 1);
+        assert_eq!(folders[0].status, riply_core::FolderStatus::Confident);
+    }
+
+    #[tokio::test]
+    async fn test_count_folders_by_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+
+        let db = Database::new(db_path.to_str().unwrap()).await.unwrap();
+        db.migrate().await.unwrap();
+        let pool = &db.pool;
+
+        let f1 = FolderRecord::new("fc1".to_string(), PathBuf::from("/test/A"), "A".to_string(), 1);
+        let f2 = FolderRecord::new("fc2".to_string(), PathBuf::from("/test/B"), "B".to_string(), 1);
+        save_folder(pool, &f1).await.unwrap();
+        save_folder(pool, &f2).await.unwrap();
+
+        update_folder_status(pool, "fc1", "Confident").await.unwrap();
+        update_folder_status(pool, "fc2", "Unknown").await.unwrap();
+
+        let counts = count_folders_by_status(pool).await.unwrap();
+        let counts_map: std::collections::HashMap<_, _> = counts.into_iter().collect();
+        // Only Confident and Unknown should appear (Scanned has 0 folders after updates)
+        assert!(!counts_map.contains_key("Scanned"));
+        assert_eq!(counts_map.get("Confident"), Some(&1));
+        assert_eq!(counts_map.get("Unknown"), Some(&1));
+    }
+
+    #[tokio::test]
+    async fn test_delete_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+
+        let db = Database::new(db_path.to_str().unwrap()).await.unwrap();
+        db.migrate().await.unwrap();
+        let pool = &db.pool;
+
+        let folder = FolderRecord::new(
+            "folder-del".to_string(),
+            PathBuf::from("/test/ToDelete"),
+            "ToDelete".to_string(),
+            1,
+        );
+        save_folder(pool, &folder).await.unwrap();
+
+        delete_folder(pool, "folder-del").await.unwrap();
+
+        let folders = get_all_folders(pool).await.unwrap();
+        assert_eq!(folders.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_folder_with_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+
+        let db = Database::new(db_path.to_str().unwrap()).await.unwrap();
+        db.migrate().await.unwrap();
+        let pool = &db.pool;
+
+        let files = vec![
+            ("main.mkv".to_string(), 8000000000),
+            ("extra.mkv".to_string(), 500000000),
+        ];
+        let folder = FolderRecord::with_files(
+            "folder-files".to_string(),
+            PathBuf::from("/test/WithFiles"),
+            "WithFiles".to_string(),
+            files,
+        );
+
+        save_folder(pool, &folder).await.unwrap();
+
+        let result = get_folder_by_id(pool, "folder-files").await.unwrap().unwrap();
+        assert_eq!(result.main_file, Some("main.mkv".to_string()));
+        assert_eq!(result.extra_files, vec!["extra.mkv".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn test_save_folder_preserves_tmdb_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+
+        let db = Database::new(db_path.to_str().unwrap()).await.unwrap();
+        db.migrate().await.unwrap();
+        let pool = &db.pool;
+
+        let mut folder = FolderRecord::new(
+            "folder-tmdb".to_string(),
+            PathBuf::from("/test/Disc"),
+            "Disc".to_string(),
+            2,
+        );
+        folder.apply_tmdb_match("Inception".to_string(), Some(2010), 27205, riply_core::MediaType::Movie);
+        save_folder(pool, &folder).await.unwrap();
+
+        let result = get_folder_by_id(pool, "folder-tmdb").await.unwrap().unwrap();
+        assert_eq!(result.suggested_name, Some("Inception".to_string()));
+        assert_eq!(result.suggested_year, Some(2010));
+        assert_eq!(result.tmdb_id, Some(27205));
+        assert_eq!(result.confidence, Some(0.95));
+        assert_eq!(result.status, riply_core::FolderStatus::Confident);
+    }
+}
