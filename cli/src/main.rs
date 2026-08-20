@@ -170,7 +170,7 @@ async fn main() -> anyhow::Result<()> {
     info!(path = %config.database_path, "Database");
 
     // Auto-cleanup temp rips from previous sessions
-    web::routes::ripper::cleanup_temp_rips();
+    web::routes::ripper::cleanup_temp_rips(&config.temp_directory);
 
     // Initialize database
     let db = Database::new(&config.database_path).await?;

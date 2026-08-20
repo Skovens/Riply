@@ -71,6 +71,9 @@ pub struct Config {
     pub tv_directory: String,
     /// Directory to rip disc content into
     pub rip_output_directory: Option<String>,
+    /// Temp directory for unorganized rips (auto-cleaned on restart)
+    #[serde(default = "default_temp_directory")]
+    pub temp_directory: String,
     /// Enable verbose logging
     pub verbose: bool,
     /// TMDb API key (optional, enables metadata lookups)
@@ -102,6 +105,10 @@ fn default_port() -> u16 {
     3000
 }
 
+fn default_temp_directory() -> String {
+    "/tmp/riply".to_string()
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -110,6 +117,7 @@ impl Default for Config {
             movies_directory: "movies".to_string(),
             tv_directory: "tv".to_string(),
             rip_output_directory: None,
+            temp_directory: default_temp_directory(),
             verbose: false,
             tmdb_api_key: None,
             omdb_api_key: None,

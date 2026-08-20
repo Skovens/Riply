@@ -13,15 +13,11 @@ use tracing::{info, warn};
 use crate::api::{ApiResponse, AppState, DiscNameInfo};
 use crate::error::WebError;
 
-/// Temporary directory for unverified rips (ADR-026)
-/// Unnamed media stays here until renamed in the Organizer window.
-const TEMP_RIP_DIR: &str = "/tmp/riply";
-
-/// Auto-cleanup: remove all contents of /tmp/riply on application restart.
+/// Auto-cleanup: remove all contents of the temp rip directory on application restart.
 /// This ensures stale temp rips from previous sessions don't accumulate.
-pub fn cleanup_temp_rips() {
+pub fn cleanup_temp_rips(temp_dir: &str) {
     use std::fs;
-    if let Ok(entries) = fs::read_dir(TEMP_RIP_DIR) {
+    if let Ok(entries) = fs::read_dir(temp_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
@@ -376,8 +372,11 @@ pub async fn start_rip(
 
     let disc_name = drives.iter().find(|d| d.index == index).and_then(|d| d.disc_name.clone());
 
-    // Create temp rip folder: /tmp/riply/{drive_index}/
-    let temp_folder = format!("{}/{}", TEMP_RIP_DIR, index);
+    // Create temp rip folder: {temp_directory}/{drive_index}/
+    let config = state.config.read().await;
+    let temp_dir = config.temp_directory.clone();
+    drop(config);
+    let temp_folder = format!("{}/{}", temp_dir, index);
     std::fs::create_dir_all(&temp_folder)
         .map_err(|e| WebError::Internal(format!("Failed to create temp folder: {}", e)))?;
 
@@ -664,8 +663,11 @@ async fn execute_rip(state: Arc<AppState>, index: usize, eject_after: bool) -> R
 
     let disc_name = drives.iter().find(|d| d.index == index).and_then(|d| d.disc_name.clone());
 
-    // Create temp rip folder: /tmp/riply/{drive_index}/
-    let temp_folder = format!("{}/{}", TEMP_RIP_DIR, index);
+    // Create temp rip folder: {temp_directory}/{drive_index}/
+    let config = state.config.read().await;
+    let temp_dir = config.temp_directory.clone();
+    drop(config);
+    let temp_folder = format!("{}/{}", temp_dir, index);
     std::fs::create_dir_all(&temp_folder).map_err(|e| format!("Failed to create temp folder: {}", e))?;
 
     let mut handle = backend.start_rip(index, &temp_folder).map_err(|e| e.to_string())?;
