@@ -1,11 +1,113 @@
 # Design: Database Layer
 
 > ⚠️ **Note:** Product behavior is defined in [PRODUCT.md](../PRODUCT.md). This document describes the technical database implementation.
+>
+> ⚠️ **Deprecation notice:** The `files` table and `title_groups` table are deprecated by the folder-based pipeline (ADR-026). The `folders` table is the active schema. This document retains the old `files`/`title_groups` documentation for reference during migration.
 
 ## Purpose
-SQLite-based persistence for file records, folder records, and configuration. Uses `sqlx` for type-safe queries and `sqlx::migrate!()` for versioned migrations. This document describes the *current* behavior of the database layer.
+SQLite-based persistence for folder records and configuration. Uses `sqlx` for type-safe queries and `sqlx::migrate!()` for versioned migrations.
 
-**Note:** The `files` table is deprecated by the folder-based pipeline (ADR-026). New development should use the `folders` table.
+## Active Schema: `folders` Table
+
+See [ADR-026](../adr/026-folder-based-pipeline.md) for the `folders` table schema, FolderRecord struct, and CRUD operations.
+
+## Deprecated Schema: `files` Table
+
+The `files` table is deprecated. Kept here for migration reference only.
+
+```sql
+CREATE TABLE files (
+    id TEXT PRIMARY KEY,              -- First 16 hex chars of SHA-256 hash
+    path TEXT NOT NULL,               -- Full path on disk
+    filename TEXT NOT NULL,           -- File name only
+    size INTEGER,                     -- File size in bytes
+    duration INTEGER,                 -- Duration in seconds (ffprobe)
+    hash TEXT NOT NULL,               -- Full SHA-256 hex digest
+    status TEXT NOT NULL DEFAULT 'Scanned',
+    suggested_title TEXT,             -- Title from analysis
+    suggested_year INTEGER,
+    confidence REAL,                  -- 0.0 to 1.0
+    canonical_title TEXT,             -- User-confirmed title
+    canonical_year INTEGER,
+    tmdb_id INTEGER,                  -- TMDb ID
+    content_type TEXT NOT NULL DEFAULT 'unknown',  -- "main" or "extra"
+    media_type TEXT NOT NULL DEFAULT 'Movie',      -- "Movie" or "Tv"
+    series_name TEXT,                 -- TV series name
+    season_number INTEGER,
+    episode_number INTEGER,
+    episode_title TEXT,               -- TV episode title
+    source TEXT,                      -- "tmdb", "omdb", "Manual"
+    subtitle_text TEXT,               -- OCR-extracted subtitles
+    duplicate_path TEXT,              -- Duplicate file path
+    title_group_id TEXT,              -- TitleGroup ID
+    genres TEXT,                      -- JSON array: ["Drama", "Crime"]
+    runtime INTEGER,                  -- Runtime in minutes
+    content_rating TEXT,              -- "PG-13", "TV-MA"
+    overview TEXT,                    -- Plot summary
+    cast_list TEXT,                   -- JSON array: ["Brad Pitt", ...]
+    reviewed INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,         -- RFC3339 timestamp
+    updated_at TEXT NOT NULL          -- RFC3339 timestamp
+);
+
+CREATE INDEX idx_files_status ON files(status);
+```
+
+### Deprecated: `title_groups` Table
+
+```sql
+CREATE TABLE title_groups (
+    id TEXT PRIMARY KEY,              -- SHA-256 of directory path (first 16 hex)
+    path TEXT NOT NULL,               -- Directory path
+    title TEXT NOT NULL,              -- Cleaned title
+    year INTEGER,
+    tmdb_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'Scanned',
+    media_type TEXT NOT NULL DEFAULT 'Movie',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_title_groups_status ON title_groups(status);
+```
+
+### Deprecated: File Operations
+
+The following operations are superseded by the folder-based pipeline (ADR-026):
+- `save_file()` → use `save_folder()`
+- `update_file()` → use `update_folder()`
+- `get_files_by_status()` → use `get_folders_by_status()`
+- `get_all_files()` → use `get_all_folders()`
+- `get_file_by_id()` → use `get_folder_by_id()`
+- `find_file_by_hash()` → use `find_folder_by_path()`
+- `count_files_by_status()` → use `count_folders_by_status()`
+- `save_title_group()` → use `save_folder()` (title_groups concept merged into folders)
+- `get_title_group_by_id()` → use `get_folder_by_id()`
+- `get_all_title_groups()` → use `get_all_folders()`
+
+### Deprecated: JSON Columns
+
+`genres` and `cast_list` are JSON-encoded TEXT columns. Kept for backward compatibility with existing `files` records.
+
+```rust
+fn json_encode_list(value: &Option<Vec<String>>) -> Option<String> {
+    value.as_ref().map(|v| serde_json::to_string(v).unwrap_or_default())
+}
+
+fn json_decode_list(value: Option<String>) -> Option<Vec<String>> {
+    value.and_then(|s| serde_json::from_str(&s).ok())
+}
+```
+
+### Deprecated: Migration Files
+
+| File | Description | Status |
+|---|---|---|
+| `001_create_files_table.sql` | Initial files table | Deprecated |
+| `002_create_title_groups_table.sql` | Title groups table | Deprecated |
+| `003_add_enrichment_columns.sql` | Add genres, runtime, content_rating, overview, cast_list | Deprecated |
+| `004_add_subtitle_and_group_columns.sql` | Add subtitle_text, duplicate_path, title_group_id | Deprecated |
+| `005_create_folders_table.sql` | Folders table (ADR-026) | **Active** |
 
 ---
 

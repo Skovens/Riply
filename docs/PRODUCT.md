@@ -7,7 +7,27 @@ discs can be reviewed and named manually in the Organizer.
 > **Rebuild of [MediaAtlas](https://github.com/Skovens/MediaAtlas)** — prioritizing memory
 > safety, concurrency, testability, and clean architecture.
 
----
+## Table of Contents
+
+- [The Three Windows](#the-three-windows) — Rip, Organizer, Settings
+- [User Flows](#user-flows) — Rip flow, Organize flow, Media type detection
+- [Tmp Folder Lifecycle](#tmp-folder-lifecycle) — Cleanup policy
+- [Deprecated](#deprecated) — What was removed
+- [API Endpoints](#api-endpoints) — All routes
+- [Frontend Routing](#frontend-routing) — URL → window mapping
+- [Tech Stack](#tech-stack) — Technologies used
+- [Quick Start](#quick-start) — Prerequisites, build, run, config
+- [Roadmap](#roadmap) → [improvements.md](../improvements.md)
+
+## Where to Start
+
+| Role | Read |
+|------|------|
+| **New developer** | This doc + `AGENTS.md` |
+| **Understanding architecture** | `docs/adr/` (technical decisions) |
+| **Understanding implementation** | `docs/designs/` + source code |
+| **Understanding frontend** | `web/svelte/ARCHITECTURE.md` |
+| **Planning work** | `improvements.md` |
 
 ## The Three Windows
 
