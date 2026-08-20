@@ -251,6 +251,7 @@ mod tests {
             movies_directory: "movies".to_string(),
             tv_directory: "tv".to_string(),
             rip_output_directory: Some("/rips".to_string()),
+            temp_directory: "/tmp/riply".to_string(),
             verbose: true,
             tmdb_api_key: None,
             omdb_api_key: None,
