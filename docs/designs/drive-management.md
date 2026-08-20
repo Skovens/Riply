@@ -1,5 +1,7 @@
 # Design: Drive Management
 
+> ⚠️ **Note:** Product behavior is defined in [PRODUCT.md](../PRODUCT.md). This document describes the technical implementation details.
+
 ## Purpose
 Manage drive cards in the Rip window. Drives are polled on events (not constantly), updated via SSE, and provide eject controls.
 

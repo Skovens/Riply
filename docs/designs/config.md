@@ -1,5 +1,7 @@
 # Design: Configuration System
 
+> ⚠️ **Note:** Product behavior is defined in [PRODUCT.md](../PRODUCT.md). This document describes the technical implementation details.
+
 ## Purpose
 Load, save, and manage application configuration from a TOML file. This document describes the *current* behavior of the config system.
 

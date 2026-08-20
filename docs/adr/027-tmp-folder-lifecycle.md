@@ -2,9 +2,11 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
+
+Product behavior is defined in [PRODUCT.md](../PRODUCT.md). This ADR captures the technical implementation.
 
 Ripped content is written to a configurable tmp folder (default `/tmp/riply`). This folder has two purposes:
 1. **Temporary staging** — Ripped content lives here until named and moved to the library

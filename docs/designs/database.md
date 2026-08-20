@@ -1,7 +1,11 @@
 # Design: Database Layer
 
+> ⚠️ **Note:** Product behavior is defined in [PRODUCT.md](../PRODUCT.md). This document describes the technical database implementation.
+
 ## Purpose
-SQLite-based persistence for file records, title groups, and configuration. Uses `sqlx` for type-safe queries and `sqlx::migrate!()` for versioned migrations. This document describes the *current* behavior of the database layer.
+SQLite-based persistence for file records, folder records, and configuration. Uses `sqlx` for type-safe queries and `sqlx::migrate!()` for versioned migrations. This document describes the *current* behavior of the database layer.
+
+**Note:** The `files` table is deprecated by the folder-based pipeline (ADR-026). New development should use the `folders` table.
 
 ---
 

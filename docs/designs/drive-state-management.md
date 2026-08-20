@@ -1,5 +1,7 @@
 # Design: Drive State Management
 
+> ⚠️ **Note:** Product behavior is defined in [PRODUCT.md](../PRODUCT.md). This document describes the technical implementation details.
+
 ## Purpose
 Manage optical drive discovery, state tracking, ripping, and auto-rip. This document describes the *current* behavior of the system.
 

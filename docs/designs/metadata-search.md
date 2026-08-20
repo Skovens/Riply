@@ -1,5 +1,7 @@
 # Design: Metadata Search
 
+> ⚠️ **Note:** Product behavior is defined in [PRODUCT.md](../PRODUCT.md). This document describes the technical implementation details.
+
 ## Purpose
 Search external metadata APIs (TMDb, OMDb) to identify media files and enrich matches with additional metadata. This document describes the *current* behavior of the metadata search system.
 

@@ -1,5 +1,7 @@
 # Design: Hardware Testing
 
+> ⚠️ **Note:** Product behavior is defined in [PRODUCT.md](../PRODUCT.md). This document describes the technical implementation details.
+
 ## Purpose
 
 This document describes the complete hardware testing strategy for Riply's DVD ripping subsystem. It covers environment setup, test phases, test classification, and automation. This is the canonical reference for anyone testing Riply against physical optical drives.

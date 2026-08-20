@@ -1,5 +1,7 @@
 # Feature: Disc Name Derivation & Post-Rip Move
 
+> ⚠️ **Note:** Product behavior is defined in [PRODUCT.md](../PRODUCT.md). This document describes the technical implementation details.
+
 ## Purpose
 When a disc is inserted, derive a clean media name from it, let the user override it, then after the rip completes, move the ripped content to the derived-named folder. If no name is derived or set, skip the move — the rip folder already has the disc name, which is the final state.
 

@@ -2,32 +2,19 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
-The current file-based pipeline (ADR-009, `docs/designs/file-pipeline.md`) processes individual files through a 5-state machine:
+The previous file-based pipeline processed individual files through a 5-state machine (Scanned → Matched → NeedsReview → Confirmed → Moved). Each file was hashed (SHA-256), analyzed (ffprobe), scored (confidence), and tracked individually.
 
-```
-Scanned → Matched/NeedsReview/Failed → Confirmed → Moved
-```
+For DVD/Blu-ray ripping, users think in folders, not files. A disc produces one folder. This ADR defines the technical implementation of the folder-based pipeline.
 
-Each file is hashed (SHA-256), analyzed (ffprobe), scored (confidence), and tracked individually. This creates:
-- Database bloat (one record per file, not per folder)
-- Complex state management (5 states, 7 transitions)
-- Unnecessary overhead (hashing every file, probing every file)
-- UI complexity (file table, detail drawer, per-file review)
-
-For DVD/Blu-ray ripping, users think in folders, not files. A disc produces one folder. The question is how that folder is named and where it goes.
-
-Options considered:
-1. **Keep file-based pipeline** — Current approach, works but over-engineered
-2. **Folder-based pipeline** — New approach, simpler, matches user mental model
-3. **Hybrid** — Folder-level tracking with file-level details on demand
+Product behavior is defined in [PRODUCT.md](../PRODUCT.md).
 
 ## Decision
 
-Use a **folder-based pipeline** for DVD ripping and the Organizer window.
+Use a **folder-based pipeline** with 6 states for the Organizer window.
 
 ### Pipeline States
 
@@ -56,14 +43,14 @@ Use a **folder-based pipeline** for DVD ripping and the Organizer window.
 
 ### State Definitions
 
-| State | Meaning | Action |
-|-------|---------|--------|
-| `Scanned` | Folder found in scan directory, not yet analyzed | Default state after scan |
-| `Confident` | TMDb match found, year confirmed (score ≥ 0.9) | Auto-accept, move on "Accept All" |
-| `Uncertain` | TMDb match found, year missing/ambiguous (score 0.7–0.9) | Manual review required |
-| `Unknown` | No TMDb match (score < 0.7) | Manual search or reject |
-| `Moved` | Folder moved to library destination | Terminal |
-| `Quarantined` | Unknown folder moved to quarantine subfolder | Terminal |
+| State | Meaning |
+|-------|---------|
+| `Scanned` | Folder found in scan directory, not yet analyzed |
+| `Confident` | TMDb match found, year confirmed (score ≥ 0.9) |
+| `Uncertain` | TMDb match found, year missing/ambiguous (score 0.7–0.9) |
+| `Unknown` | No TMDb match (score < 0.7) |
+| `Moved` | Folder moved to library destination (terminal) |
+| `Quarantined` | Unknown folder moved to quarantine subfolder (terminal) |
 
 ### Valid Transitions
 
@@ -78,7 +65,7 @@ Use a **folder-based pipeline** for DVD ripping and the Organizer window.
 | `Unknown` | `Moved` | User manually accepts after search |
 | `Unknown` | `Quarantined` | User clicks "Reject All" |
 
-### Folder Record
+### Folder Record (core/src/folder_record.rs)
 
 ```rust
 pub struct FolderRecord {
@@ -100,21 +87,9 @@ pub struct FolderRecord {
 }
 ```
 
-### Naming Rules
-
-**Movies:**
-- Destination: `{Title} ({Year})/`
-- Main file: `{Title}.{ext}` (biggest file in folder)
-- Extras: `{Title} ({Year})/Extras/` (all other files)
-
-**TV Shows:**
-- Destination: `{Show} ({Year})/Season {NN}/`
-- Files: `{Show} - S{NN}E{NN}.{ext}`
-- Extras: `{Show} ({Year})/Season {NN}/Extras/`
-
 ### Confidence Scoring
 
-Confidence is calculated per folder, not per file:
+Confidence is calculated per folder:
 
 | Factor | Score |
 |--------|-------|
@@ -128,20 +103,20 @@ Thresholds:
 - ≥ 0.7 → `Uncertain`
 - < 0.7 → `Unknown`
 
-### API Endpoints
+### API Endpoints (web/src/routes/organizer.rs)
 
-| Method | Path | Handler | Description |
-|--------|------|---------|-------------|
-| GET | `/v1/organizer/folders` | `list_folders` | List all folders in scan directory |
-| GET | `/v1/organizer/folders/:id` | `get_folder` | Single folder by ID |
-| POST | `/v1/organizer/scan` | `scan_directory` | Scan configured directory |
-| POST | `/v1/organizer/:id/search` | `search_folder` | Manually search TMDb for folder |
-| POST | `/v1/organizer/:id/accept` | `accept_folder` | Accept → Confident → Moved |
-| POST | `/v1/organizer/:id/reject` | `reject_folder` | Reject → Unknown → Quarantined |
-| POST | `/v1/organizer/accept-all` | `accept_all` | Move all Confident folders |
-| POST | `/v1/organizer/reject-all` | `reject_all` | Move all Unknown folders to quarantine |
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/organizer/folders` | List all folders in scan directory |
+| GET | `/api/organizer/folders/:id` | Single folder by ID |
+| POST | `/api/organizer/scan` | Scan configured directory |
+| POST | `/api/organizer/:id/search` | Manually search TMDb for folder |
+| POST | `/api/organizer/:id/accept` | Accept → Moved |
+| POST | `/api/organizer/:id/reject` | Reject → Quarantined |
+| POST | `/api/organizer/accept-all` | Move all Confident folders |
+| POST | `/api/organizer/reject-all` | Move all Unknown folders to quarantine |
 
-### Database Schema
+### Database Schema (infra/src/migrations/005_create_folders_table.sql)
 
 ```sql
 CREATE TABLE folders (
@@ -167,30 +142,12 @@ CREATE INDEX idx_folders_status ON folders(status);
 ### Consequences
 
 **Positive:**
-- Simpler pipeline — 6 states instead of 5, but folder-level not file-level
+- Simpler pipeline — one record per folder, not per file
 - No per-file hashing or probing — faster, less I/O
-- Database is smaller — one record per folder, not per file
+- Database is smaller
 - UI is simpler — folder list, not file table
-- Matches user mental model — users think in folders
 
 **Negative:**
-- File-level details (duration, hash, content type) are lost — acceptable for DVD ripping
-- No duplicate detection across folders — acceptable, folders are already organized
+- File-level details (duration, hash, content type) are lost
+- No duplicate detection across folders
 - Less granular control — users can't accept/reject individual files
-
-### What Gets Replaced
-
-| Old | New |
-|-----|-----|
-| `FileRecord` struct | `FolderRecord` struct |
-| `PipelineStatus` (5 states) | `FolderStatus` (6 states) |
-| `ScannerService::scan_directory()` | `OrganizerService::scan_directory()` |
-| `AnalyzerService::analyze_file()` | `OrganizerService::analyze_folder()` |
-| `MoverService::execute_move()` | `OrganizerService::move_folder()` |
-| `/v1/files` endpoints | `/v1/organizer/folders` endpoints |
-| `/v1/review` endpoints | `/v1/organizer/:id/accept` + `/:id/reject` |
-| `/v1/move/preview` + `/v1/move/execute` | `/v1/organizer/accept-all` |
-
-## Supersedes
-
-- `docs/designs/file-pipeline.md` — replaced by this folder-based pipeline

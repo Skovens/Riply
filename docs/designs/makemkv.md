@@ -1,5 +1,7 @@
 # Design: MakeMKV Backend
 
+> ⚠️ **Note:** Product behavior is defined in [PRODUCT.md](../PRODUCT.md). This document describes the technical implementation details.
+
 ## Purpose
 Wrap MakeMKV's `makemkvcon` CLI tool with a trait-based abstraction (`RipBackend`). Supports native install, Flatpak, and dry-run testing. This document describes the *current* behavior of the MakeMKV backend.
 

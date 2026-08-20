@@ -1,5 +1,7 @@
 # Design: CLI Interface
 
+> ⚠️ **Note:** Product behavior is defined in [PRODUCT.md](../PRODUCT.md). This document describes the technical implementation details.
+
 ## Purpose
 Command-line interface for Riply operations. Built with Clap derive macros. This document describes the *current* behavior of each CLI command.
 

@@ -1,5 +1,7 @@
 # Design: SSE (Server-Sent Events) Manager
 
+> ⚠️ **Note:** Product behavior is defined in [PRODUCT.md](../PRODUCT.md). This document describes the technical implementation details.
+
 ## Purpose
 Broadcast real-time updates to all connected web clients. Used for job progress, rip progress, drive state changes, and scan/review notifications. This document describes the *current* behavior of the SSE manager.
 

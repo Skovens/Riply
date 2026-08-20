@@ -2,9 +2,11 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
+
+Product behavior is defined in [PRODUCT.md](../PRODUCT.md). This ADR captures the technical implementation.
 
 When ripping a DVD, the system must determine whether the content is a movie or a TV show. This affects the output structure:
 

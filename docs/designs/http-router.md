@@ -1,5 +1,7 @@
 # Design: HTTP Router & Web Server
 
+> ⚠️ **Note:** Product behavior is defined in [PRODUCT.md](../PRODUCT.md). This document describes the technical implementation details.
+
 ## Purpose
 Axum-based HTTP API server with embedded SvelteKit frontend. This document describes the *current* behavior of the web server architecture, routing, and request handling.
 

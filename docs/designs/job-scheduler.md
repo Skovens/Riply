@@ -1,5 +1,7 @@
 # Design: Job Scheduler
 
+> ⚠️ **Note:** Product behavior is defined in [PRODUCT.md](../PRODUCT.md). This document describes the technical implementation details.
+
 ## Purpose
 Track long-running background operations (scan, analyze, move) with progress reporting and cancellation. This document describes the *current* behavior of the job scheduler system.
 

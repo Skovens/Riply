@@ -63,15 +63,11 @@ What becomes easier or more difficult to do?
 | [017](017-api-versioning.md) | API Versioning | Accepted | 2026-08-02 |
 | [018](018-graceful-shutdown.md) | Graceful Shutdown | Accepted | 2026-08-02 |
 | [019](019-xdg-data-home.md) | XDG Data Home for Config and Database | Proposed | 2026-08-12 |
-| [020](020-rip-progress-bar.md) | Rip Progress Bar in Drive Panel | **Superseded** by ADR-025 | 2026-08-12 |
-| [021](021-collapsible-folder-preview.md) | Collapsible Folder Preview in the Files Pane | **Superseded** by ADR-025 | 2026-08-12 |
-| [022](022-single-media-naming-service.md) | Single Media-Naming Service | **Superseded** by ADR-025 | 2026-08-12 |
 | [023](023-per-drive-autorip-session-scoped.md) | Per-Drive Autorip State Is Session-Scoped | Accepted | 2026-08-12 |
-| [024](024-separate-rip-and-naming.md) | Separate Rip and Naming Flows | **Superseded** by ADR-025 | 2026-08-12 |
-| [025](025-three-window-architecture.md) | Three-Window Architecture | Proposed | 2026-08-19 |
-| [026](026-folder-based-pipeline.md) | Folder-Based Pipeline | Proposed | 2026-08-19 |
-| [027](027-tmp-folder-lifecycle.md) | Tmp Folder Lifecycle | Proposed | 2026-08-19 |
-| [028](028-movie-vs-tv-show-detection.md) | Movie vs TV Show Detection | Proposed | 2026-08-19 |
+| [025](025-three-window-architecture.md) | Three-Window Architecture | Accepted | 2026-08-19 |
+| [026](026-folder-based-pipeline.md) | Folder-Based Pipeline | Accepted | 2026-08-19 |
+| [027](027-tmp-folder-lifecycle.md) | Tmp Folder Lifecycle | Accepted | 2026-08-19 |
+| [028](028-movie-vs-tv-show-detection.md) | Movie vs TV Show Detection | Accepted | 2026-08-19 |
 
 ## Creating a New ADR
 
@@ -84,6 +80,10 @@ What becomes easier or more difficult to do?
 
 ## Documentation Note
 
-`docs/frontend-architecture.md` contains detailed frontend system design documentation.
-It is not an ADR — it describes *how* the frontend works rather than *why* a decision was made.
-Keep it in `docs/` alongside ADRs for discoverability, but do not number it as an ADR.
+**ADR vs PRODUCT.md:** ADRs capture *technical* decisions (tech stack, architecture, patterns).
+Product behavior, UI design, and user flows are defined in [PRODUCT.md](../PRODUCT.md).
+When creating a new ADR, reference PRODUCT.md for product context and keep the ADR focused
+on the technical implementation.
+
+**Frontend architecture** is documented in `web/svelte/ARCHITECTURE.md` — not an ADR,
+it describes *how* the frontend works.
