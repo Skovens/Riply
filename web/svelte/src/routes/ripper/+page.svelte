@@ -1,0 +1,466 @@
+<script>
+  import { onMount, onDestroy } from 'svelte';
+  import { ripperApi } from '$lib/api';
+  import { connectSSE } from '$lib/api/sse';
+
+  /** @type {import('$lib/types').DriveInfo[]} */
+  let drives = $state([]);
+  let drivesLoading = $state(true);
+  let installStatus = $state(null);
+
+  // ── Rip progress ───────────────────────────────────────────
+  /** @type {Record<number, { pct: number, eta: number | null, stage: string }>} */
+  let ripProgress = $state({});
+
+  // ── Autorip ────────────────────────────────────────────────
+  let autoripDrives = $state([]);
+
+  // ── SSE ────────────────────────────────────────────────────
+  let sseDisconnect = null;
+
+  // ── Lifecycle ──────────────────────────────────────────────
+
+  onMount(async () => {
+    await Promise.all([fetchDrives(), fetchAutoripStatus(), fetchInstallStatus()]);
+    sseDisconnect = connectSSE(handleSSEEvent);
+  });
+
+  onDestroy(() => {
+    sseDisconnect?.();
+  });
+
+  // ── Data fetching ──────────────────────────────────────────
+
+  async function fetchDrives() {
+    try {
+      drives = await ripperApi.listDrives();
+    } catch (e) {
+      console.error('Failed to load drives:', e);
+    } finally {
+      drivesLoading = false;
+    }
+  }
+
+  async function fetchAutoripStatus() {
+    try {
+      autoripDrives = await ripperApi.getAutoripStatus();
+    } catch (e) {
+      console.error('Failed to load autorip status:', e);
+    }
+  }
+
+  async function fetchInstallStatus() {
+    try {
+      const status = await ripperApi.getStatus();
+      installStatus = { installed: status.installed, method: formatMethod(status.method) };
+    } catch (e) {
+      console.error('Failed to load install status:', e);
+    }
+  }
+
+  function formatMethod(method) {
+    if (typeof method === 'object' && method !== null) {
+      const keys = Object.keys(method);
+      return keys.length > 0 ? keys[0] : 'Unknown';
+    }
+    return String(method);
+  }
+
+  // ── SSE ────────────────────────────────────────────────────
+
+  /** @param {string} data */
+  function handleSSEEvent(data) {
+    const parts = data.split(':');
+    if (parts.length < 3) return;
+    const [kind, action, idxStr, ...rest] = parts;
+    const idx = parseInt(idxStr, 10);
+    if (isNaN(idx)) return;
+
+    if (kind === 'rip' && (action === 'progress' || action === 'eta')) {
+      const pct = parseFloat(rest[0]) || 0;
+      const eta = action === 'eta' ? parseFloat(rest[1]) || null : null;
+      const stage = rest.slice(2).join(':') || '';
+      ripProgress = { ...ripProgress, [idx]: { pct, eta, stage } };
+    }
+
+    if (kind === 'rip' && action === 'starting') {
+      drives = drives.map(d => d.index === idx ? { ...d, state: 'Ripping' } : d);
+    }
+
+    if (kind === 'rip' && (action === 'complete' || action === 'failed')) {
+      drives = drives.map(d => d.index === idx ? { ...d, state: action === 'complete' ? 'Complete' : 'Error' } : d);
+      setTimeout(() => {
+        ripProgress = Object.fromEntries(Object.entries(ripProgress).filter(([k]) => k !== String(idx)));
+      }, 5000);
+      fetchDrives();
+    }
+  }
+
+  // ── Actions ────────────────────────────────────────────────
+
+  async function startRip(index) {
+    try {
+      await ripperApi.start(index, '');
+    } catch (e) {
+      console.error(`Failed to start rip on drive ${index}:`, e);
+    }
+  }
+
+  async function cancelRip(index) {
+    try {
+      await ripperApi.cancel(index);
+    } catch (e) {
+      console.error(`Failed to cancel rip on drive ${index}:`, e);
+    }
+  }
+
+  async function ejectDisc(index) {
+    try {
+      await ripperApi.eject(index);
+    } catch (e) {
+      console.error(`Failed to eject disc from drive ${index}:`, e);
+    }
+  }
+
+  async function toggleAutorip(index) {
+    try {
+      autoripDrives = await ripperApi.toggleAutorip(index);
+    } catch (e) {
+      console.error(`Failed to toggle autorip on drive ${index}:`, e);
+    }
+  }
+
+  // ── Helpers ────────────────────────────────────────────────
+
+  function driveStateIcon(state) {
+    switch (state) {
+      case 'Empty': return '⏹';
+      case 'Loading': return '⟳';
+      case 'Ready': return '💿';
+      case 'Ripping': return '⚡';
+      case 'Complete': return '✅';
+      case 'Error': return '❌';
+      default: return '❓';
+    }
+  }
+
+  function driveStateColor(state) {
+    switch (state) {
+      case 'Empty': return 'var(--color-text-muted)';
+      case 'Loading': return 'var(--color-warning)';
+      case 'Ready': return 'var(--color-success)';
+      case 'Ripping': return 'var(--color-primary)';
+      case 'Complete': return 'var(--color-success)';
+      case 'Error': return 'var(--color-danger)';
+      default: return 'var(--color-text-muted)';
+    }
+  }
+</script>
+
+<div class="ripper">
+  <!-- Install warning -->
+  {#if installStatus && !installStatus.installed}
+    <div class="ripper__warning" role="alert">
+      <span class="ripper__warning-icon">⚠</span>
+      <span class="ripper__warning-text">
+        MakeMKV is not installed. Install it to enable ripping.
+        {#if installStatus.method === 'Flatpak'}
+          Detected Flatpak — check permissions for drive access.
+        {/if}
+      </span>
+    </div>
+  {/if}
+
+  <div class="ripper__header">
+    <h2 class="ripper__title">Ripper</h2>
+    {#if drivesLoading}
+      <span class="ripper__loading">Loading drives...</span>
+    {:else}
+      <span class="ripper__count">{drives.length} drive{drives.length !== 1 ? 's' : ''}</span>
+    {/if}
+  </div>
+
+  <!-- Drive cards -->
+  <div class="ripper__drives">
+    {#each drives as drive (drive.index)}
+      <div class="drive-card" class:drive-card--active={drive.state === 'Ripping'}>
+        <div class="drive-card__info">
+          <div class="drive-card__header">
+            <span class="drive-card__state" style="color: {driveStateColor(drive.state)}">
+              {driveStateIcon(drive.state)}
+            </span>
+            <span class="drive-card__name">Drive {drive.index}</span>
+            {#if drive.name}
+              <span class="drive-card__disc-name">{drive.name}</span>
+            {/if}
+            {#if drive.disc_name}
+              <span class="drive-card__disc-label">Disc: {drive.disc_name}</span>
+            {/if}
+          </div>
+
+          <!-- Progress bar -->
+          {#if ripProgress[drive.index]}
+            <div class="drive-card__progress">
+              <div class="progress-bar">
+                <div class="progress-bar__fill" style="width: {ripProgress[drive.index].pct}%"></div>
+              </div>
+              <div class="drive-card__progress-info">
+                <span class="drive-card__progress-pct">{ripProgress[drive.index].pct}%</span>
+                {#if ripProgress[drive.index].stage}
+                  <span class="drive-card__progress-stage">{ripProgress[drive.index].stage}</span>
+                {/if}
+                {#if ripProgress[drive.index].eta}
+                  <span class="drive-card__progress-eta">ETA: {ripProgress[drive.index].eta}s</span>
+                {/if}
+              </div>
+            </div>
+          {/if}
+
+          <!-- Actions -->
+          <div class="drive-card__actions">
+            <div class="drive-card__action-row">
+              {#if drive.state === 'Ready' || drive.state === 'Complete'}
+                <button
+                  class="btn btn--primary btn--sm"
+                  onclick={() => startRip(drive.index)}
+                  title="Start rip"
+                >
+                  Rip
+                </button>
+              {/if}
+              {#if drive.state === 'Ripping'}
+                <button
+                  class="btn btn--danger btn--sm"
+                  onclick={() => cancelRip(drive.index)}
+                  title="Cancel rip"
+                >
+                  Cancel
+                </button>
+              {/if}
+              {#if drive.state === 'Complete' || drive.state === 'Error'}
+                <button
+                  class="btn btn--secondary btn--sm"
+                  onclick={() => ejectDisc(drive.index)}
+                  title="Eject disc"
+                >
+                  Eject
+                </button>
+              {/if}
+            </div>
+
+            <!-- Autorip toggle -->
+            <label class="autorip-toggle">
+              <input
+                type="checkbox"
+                checked={autoripDrives.includes(drive.index)}
+                onchange={() => toggleAutorip(drive.index)}
+              />
+              <span class="toggle__track"></span>
+              <span class="toggle__label">AutoRip</span>
+            </label>
+          </div>
+        </div>
+      </div>
+    {/each}
+
+    {#if !drivesLoading && drives.length === 0}
+      <div class="ripper__empty">No drives detected</div>
+    {/if}
+  </div>
+</div>
+
+<style>
+  .ripper {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    height: 100%;
+  }
+
+  .ripper__warning {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    background: var(--color-warning-bg);
+    border: 1px solid var(--color-warning);
+    border-radius: var(--radius-lg);
+    color: var(--color-warning);
+  }
+
+  .ripper__warning-icon {
+    font-size: var(--text-lg);
+  }
+
+  .ripper__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .ripper__title {
+    font-size: var(--text-xl);
+    font-weight: 700;
+    margin: 0;
+  }
+
+  .ripper__loading,
+  .ripper__count {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+
+  .ripper__drives {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  .ripper__empty {
+    text-align: center;
+    padding: var(--space-8) 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-base);
+  }
+
+  /* ── Drive Card ─────────────────────────────────────────── */
+  .drive-card {
+    padding: var(--space-4);
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-xl);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  }
+
+  .drive-card--active {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 1px var(--color-primary);
+  }
+
+  .drive-card__header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  .drive-card__state {
+    font-size: var(--text-lg);
+    flex-shrink: 0;
+  }
+
+  .drive-card__name {
+    font-weight: 600;
+    font-size: var(--text-base);
+  }
+
+  .drive-card__disc-name {
+    color: var(--color-text-secondary);
+    font-size: var(--text-sm);
+  }
+
+  .drive-card__disc-label {
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+    font-style: italic;
+  }
+
+  /* ── Progress ───────────────────────────────────────────── */
+  .drive-card__progress {
+    margin-top: var(--space-3);
+  }
+
+  .progress-bar {
+    height: 6px;
+    background: var(--color-bg-tertiary);
+    border-radius: var(--radius-full);
+    overflow: hidden;
+  }
+
+  .progress-bar__fill {
+    height: 100%;
+    background: var(--color-primary);
+    transition: width 0.3s ease;
+  }
+
+  .drive-card__progress-info {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-top: var(--space-2);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+
+  .drive-card__progress-pct {
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+
+  /* ── Actions ────────────────────────────────────────────── */
+  .drive-card__actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: var(--space-3);
+    gap: var(--space-3);
+  }
+
+  .drive-card__action-row {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  /* ── Autorip Toggle ─────────────────────────────────────── */
+  .autorip-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    cursor: pointer;
+    margin: 0;
+  }
+
+  .autorip-toggle input {
+    display: none;
+  }
+
+  .toggle__track {
+    display: block;
+    width: 36px;
+    height: 20px;
+    background: var(--color-border);
+    border-radius: 10px;
+    position: relative;
+    transition: background var(--transition-fast);
+    flex-shrink: 0;
+  }
+
+  .autorip-toggle input:checked + .toggle__track {
+    background: var(--color-success);
+  }
+
+  .toggle__track::after {
+    content: '';
+    display: block;
+    width: 16px;
+    height: 16px;
+    background: white;
+    border-radius: 50%;
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    transition: transform var(--transition-fast);
+  }
+
+  .autorip-toggle input:checked + .toggle__track::after {
+    transform: translateX(16px);
+  }
+
+  .toggle__label {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    user-select: none;
+  }
+</style>

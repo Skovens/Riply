@@ -8,9 +8,31 @@ export type PipelineStatus =
   | 'Moved'
   | 'Failed';
 
+// ── Folder Status (Organizer) ────────────────────────────────
+
+export type FolderStatus = 'Scanned' | 'Confident' | 'Unknown' | 'Quarantined' | 'Moved';
+
 // ── Media Types ──────────────────────────────────────────────
 
 export type MediaType = 'Movie' | 'Tv';
+
+// ── Folder Record (Organizer) ────────────────────────────────
+
+export interface FolderRecord {
+  id: string;
+  path: string;
+  name: string;
+  size_bytes: number;
+  files: number;
+  status: FolderStatus;
+  title?: string;
+  year?: number;
+  media_type?: MediaType;
+  tmdb_id?: number;
+  confidence?: number;
+  created_at: string;
+  updated_at: string;
+}
 
 // ── File Record ──────────────────────────────────────────────
 

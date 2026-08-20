@@ -9,6 +9,8 @@
 
   const navItems = [
     { href: '/', label: 'Dashboard' },
+    { href: '/ripper', label: 'Ripper' },
+    { href: '/organizer', label: 'Organizer' },
     { href: '/files', label: 'Files' },
     { href: '/settings', label: 'Settings' }
   ];

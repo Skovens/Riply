@@ -10,3 +10,4 @@ export * from './sse.js';
 export * from './search.js';
 export * from './media-naming.js';
 export * from './title-groups.js';
+export * from './organizer.js';
