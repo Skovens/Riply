@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { organizerApi } from '$lib/api';
+  import Tooltip from '$lib/components/Tooltip.svelte';
 
   /** @type {import('$lib/types').FolderRecord[]} */
   let folders = $state([]);
@@ -175,6 +176,44 @@
   }
 
   const statusFilterOptions = ['All', 'Scanned', 'Confident', 'Unknown', 'Quarantined', 'Moved'];
+
+  function getAnalyzeDisabledTooltip(status) {
+    switch (status) {
+      case 'Confident': return 'Already analyzed and accepted';
+      case 'Unknown': return 'Unknown status — Accept or Reject first';
+      case 'Quarantined': return 'Quarantined — cannot analyze';
+      case 'Moved': return 'Already moved — no action needed';
+      default: return 'Analyze only available for scanned folders';
+    }
+  }
+
+  function getAcceptDisabledTooltip(status) {
+    switch (status) {
+      case 'Confident': return 'Already accepted';
+      case 'Quarantined': return 'Quarantined — cannot accept';
+      case 'Moved': return 'Already moved — no action needed';
+      default: return 'Accept only available for scanned/unknown folders';
+    }
+  }
+
+  function getRejectDisabledTooltip(status) {
+    switch (status) {
+      case 'Confident': return 'Already accepted — cannot reject';
+      case 'Quarantined': return 'Already quarantined';
+      case 'Moved': return 'Already moved — no action needed';
+      default: return 'Reject only available for scanned/unknown folders';
+    }
+  }
+
+  function getMoveDisabledTooltip(status) {
+    switch (status) {
+      case 'Scanned': return 'Must analyze or accept first';
+      case 'Unknown': return 'Unknown — Accept or Reject first';
+      case 'Quarantined': return 'Quarantined — cannot move';
+      case 'Moved': return 'Already moved — no action needed';
+      default: return 'Move only available for confident folders';
+    }
+  }
 </script>
 
 <div class="organizer">
@@ -295,6 +334,7 @@
             </div>
           </div>
           <div class="folder-card__actions">
+            <!-- Analyze button -->
             {#if folder.status === 'Scanned'}
               <button
                 class="btn btn--secondary btn--sm"
@@ -304,7 +344,15 @@
               >
                 Analyze
               </button>
+            {:else}
+              <Tooltip text={getAnalyzeDisabledTooltip(folder.status)}>
+                <button class="btn btn--secondary btn--sm btn--disabled" disabled>
+                  Analyze
+                </button>
+              </Tooltip>
             {/if}
+
+            <!-- Accept button -->
             {#if folder.status === 'Scanned' || folder.status === 'Unknown'}
               <button
                 class="btn btn--success btn--sm"
@@ -314,6 +362,16 @@
               >
                 Accept
               </button>
+            {:else}
+              <Tooltip text={getAcceptDisabledTooltip(folder.status)}>
+                <button class="btn btn--success btn--sm btn--disabled" disabled>
+                  Accept
+                </button>
+              </Tooltip>
+            {/if}
+
+            <!-- Reject button -->
+            {#if folder.status === 'Scanned' || folder.status === 'Unknown'}
               <button
                 class="btn btn--warning btn--sm"
                 onclick={() => handleReject(folder.id)}
@@ -322,7 +380,15 @@
               >
                 Reject
               </button>
+            {:else}
+              <Tooltip text={getRejectDisabledTooltip(folder.status)}>
+                <button class="btn btn--warning btn--sm btn--disabled" disabled>
+                  Reject
+                </button>
+              </Tooltip>
             {/if}
+
+            <!-- Move button -->
             {#if folder.status === 'Confident'}
               <button
                 class="btn btn--primary btn--sm"
@@ -332,7 +398,15 @@
               >
                 Move
               </button>
+            {:else}
+              <Tooltip text={getMoveDisabledTooltip(folder.status)}>
+                <button class="btn btn--primary btn--sm btn--disabled" disabled>
+                  Move
+                </button>
+              </Tooltip>
             {/if}
+
+            <!-- Delete button (always active) -->
             <button
               class="btn btn--danger btn--sm"
               onclick={() => handleDelete(folder.id)}
@@ -544,6 +618,13 @@
     display: flex;
     gap: var(--space-2);
     flex-shrink: 0;
+  }
+
+  /* ── Disabled Buttons ──────────────────────────────────── */
+  .btn--disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
   }
 
   /* ── Responsive ─────────────────────────────────────────── */

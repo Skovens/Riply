@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { ripperApi } from '$lib/api';
   import { connectSSE } from '$lib/api/sse';
+  import Tooltip from '$lib/components/Tooltip.svelte';
 
   /** @type {import('$lib/types').DriveInfo[]} */
   let drives = $state([]);
@@ -155,6 +156,32 @@
       default: return 'var(--color-text-muted)';
     }
   }
+
+  function getRipDisabledTooltip(state) {
+    switch (state) {
+      case 'Empty': return 'No disc loaded';
+      case 'Loading': return 'Drive loading...';
+      case 'Ripping': return 'Rip in progress';
+      default: return 'Rip only available when drive is ready';
+    }
+  }
+
+  function getCancelDisabledTooltip(state) {
+    switch (state) {
+      case 'Ripping': return 'Cancel in progress';
+      default: return 'No rip in progress';
+    }
+  }
+
+  function getEjectDisabledTooltip(state) {
+    switch (state) {
+      case 'Empty': return 'No disc to eject';
+      case 'Loading': return 'Drive loading...';
+      case 'Ready': return 'Disc not yet ripped';
+      case 'Ripping': return 'Cannot eject during rip';
+      default: return 'Eject only available after rip completes';
+    }
+  }
 </script>
 
 <div class="ripper">
@@ -219,6 +246,7 @@
           <!-- Actions -->
           <div class="drive-card__actions">
             <div class="drive-card__action-row">
+              <!-- Rip button -->
               {#if drive.state === 'Ready' || drive.state === 'Complete'}
                 <button
                   class="btn btn--primary btn--sm"
@@ -227,7 +255,18 @@
                 >
                   Rip
                 </button>
+              {:else}
+                <Tooltip text={getRipDisabledTooltip(drive.state)}>
+                  <button
+                    class="btn btn--primary btn--sm btn--disabled"
+                    disabled
+                  >
+                    Rip
+                  </button>
+                </Tooltip>
               {/if}
+
+              <!-- Cancel button -->
               {#if drive.state === 'Ripping'}
                 <button
                   class="btn btn--danger btn--sm"
@@ -236,7 +275,18 @@
                 >
                   Cancel
                 </button>
+              {:else}
+                <Tooltip text={getCancelDisabledTooltip(drive.state)}>
+                  <button
+                    class="btn btn--danger btn--sm btn--disabled"
+                    disabled
+                  >
+                    Cancel
+                  </button>
+                </Tooltip>
               {/if}
+
+              <!-- Eject button -->
               {#if drive.state === 'Complete' || drive.state === 'Error'}
                 <button
                   class="btn btn--secondary btn--sm"
@@ -245,6 +295,15 @@
                 >
                   Eject
                 </button>
+              {:else}
+                <Tooltip text={getEjectDisabledTooltip(drive.state)}>
+                  <button
+                    class="btn btn--secondary btn--sm btn--disabled"
+                    disabled
+                  >
+                    Eject
+                  </button>
+                </Tooltip>
               {/if}
             </div>
 
@@ -411,6 +470,13 @@
   .drive-card__action-row {
     display: flex;
     gap: var(--space-2);
+  }
+
+  /* ── Disabled Buttons ──────────────────────────────────── */
+  .btn--disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
   }
 
   /* ── Autorip Toggle ─────────────────────────────────────── */

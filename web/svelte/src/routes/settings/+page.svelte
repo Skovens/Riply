@@ -16,6 +16,7 @@
   let port = $state(3000);
   let ripping_command = $state('');
   let rip_output_directory = $state('');
+  let temp_directory = $state('/tmp/riply');
   let database_path = $state('');
   let verbose = $state(false);
   let healthchecks_uuid = $state('');
@@ -35,6 +36,7 @@
     port = config.port || 3000;
     ripping_command = config.ripping?.command || '';
     rip_output_directory = config.rip_output_directory || '';
+    temp_directory = config.temp_directory || '/tmp/riply';
     database_path = config.database_path || 'riply.db';
     verbose = config.verbose || false;
     healthchecks_uuid = config.healthchecks?.uuid || '';
@@ -66,6 +68,7 @@
         port: parseInt(port, 10),
         ripping_command: ripping_command || '',
         rip_output_directory: rip_output_directory || '',
+        temp_directory: temp_directory || '/tmp/riply',
         database_path: database_path || 'riply.db',
         verbose,
         healthchecks_uuid: healthchecks_uuid || '',
@@ -207,6 +210,19 @@
               <input class="settings__input" type="text" id="settings-rip_output_directory" bind:value={rip_output_directory} autocomplete="off" />
             </div>
             <div class="settings__hint">Where ripped disc content is saved. Falls back to scan directory if empty.</div>
+          </div>
+        </div>
+
+        <!-- Organizer -->
+        <div class="settings__section">
+          <h3 class="settings__section-title">Organizer</h3>
+
+          <div class="settings__field">
+            <label class="settings__label" for="settings-temp_directory">Temp Directory</label>
+            <div class="settings__input-wrap">
+              <input class="settings__input" type="text" id="settings-temp_directory" bind:value={temp_directory} autocomplete="off" />
+            </div>
+            <div class="settings__hint">Unrenamed media stays here until organized. Auto-cleaned on restart.</div>
           </div>
         </div>
 

@@ -47,3 +47,9 @@ export const jobs = writable<Job[]>([]);
 // ── SSE ──────────────────────────────────────────────────────
 
 export const lastEvent = writable<string | null>(null);
+
+// ── Organizer ────────────────────────────────────────────────
+
+export const folders = writable<import('$lib/types').FolderRecord[]>([]);
+export const foldersLoading = writable(false);
+export const foldersStats = writable<Record<string, number>>({});
