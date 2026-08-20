@@ -1,8 +1,5 @@
 // ADR-026: Folder-Based Pipeline — FolderStore trait for Organizer persistence
 
-use std::future::Future;
-use std::pin::Pin;
-
 use thiserror::Error;
 
 use crate::FolderRecord;

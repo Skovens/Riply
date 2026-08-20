@@ -13,6 +13,28 @@ use tracing::{info, warn};
 use crate::api::{ApiResponse, AppState, DiscNameInfo};
 use crate::error::WebError;
 
+/// Temporary directory for unverified rips (ADR-026)
+/// Unnamed media stays here until renamed in the Organizer window.
+const TEMP_RIP_DIR: &str = "/tmp/riply";
+
+/// Auto-cleanup: remove all contents of /tmp/riply on application restart.
+/// This ensures stale temp rips from previous sessions don't accumulate.
+pub fn cleanup_temp_rips() {
+    use std::fs;
+    if let Ok(entries) = fs::read_dir(TEMP_RIP_DIR) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Err(e) = fs::remove_dir_all(&path) {
+                    warn!(path = %path.display(), error = %e, "Failed to cleanup temp rip folder");
+                } else {
+                    info!(path = %path.display(), "Cleaned up temp rip folder");
+                }
+            }
+        }
+    }
+}
+
 /// Request body for the rename endpoint
 #[derive(Debug, Deserialize)]
 pub struct RenameDriveBody {
@@ -254,7 +276,7 @@ async fn process_rip_events(
 /// return a unique path by appending ` (Copy 1)`, ` (Copy 2)` etc.
 /// Prevents MakeMKV from blocking on its interactive overwrite prompt.
 /// `subdir_name` is the human-readable stem (e.g. "Inception (2010)").
-fn unique_rip_destination(candidate: &str, subdir_name: Option<&str>) -> String {
+fn _unique_rip_destination(candidate: &str, subdir_name: Option<&str>) -> String {
     let candidate_path = std::path::Path::new(candidate);
     if candidate_path.exists() && candidate_path.is_dir() {
         let has_content = std::fs::read_dir(candidate_path)
@@ -337,7 +359,7 @@ fn apply_copy_n(path: &std::path::Path) -> std::path::PathBuf {
 pub async fn start_rip(
     State(state): State<Arc<AppState>>,
     Path(index): Path<usize>,
-    Json(body): Json<StartRipBody>,
+    Json(_): Json<StartRipBody>,
 ) -> Result<Json<ApiResponse<String>>, WebError> {
     let backend = state.backend.as_ref().ok_or_else(|| {
         WebError::ServiceUnavailable(
@@ -345,57 +367,22 @@ pub async fn start_rip(
         )
     })?;
 
-    let explicit_dest = body.destination.as_ref().filter(|d| !d.is_empty()).cloned();
+    // Resolve disc name for the temp folder
+    let backend_clone = Arc::clone(backend);
+    let drives = tokio::task::spawn_blocking(move || backend_clone.detect_drives())
+        .await
+        .unwrap_or(Ok(vec![]))
+        .unwrap_or(vec![]);
 
-    let (base, subdir_hint) = match &explicit_dest {
-        Some(d) => {
-            // User explicitly named the destination; use as-is but uniquify
-            let p = std::path::Path::new(d);
-            let parent = p.parent().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| ".".to_string());
-            let name = p.file_name().map(|x| x.to_string_lossy().to_string());
-            (parent, name)
-        }
-        None => {
-            let config = state.config.read().await;
-            config
-                .validate_for_ripping()
-                .map_err(WebError::BadRequest)?;
-            let r = config
-                .rip_output_directory
-                .clone()
-                .unwrap_or_else(|| ".".to_string());
+    let disc_name = drives.iter().find(|d| d.index == index).and_then(|d| d.disc_name.clone());
 
-            // Look up disc name — use raw disc name for rip folder (auto-naming happens after rip)
-            let backend_clone = Arc::clone(backend);
-            let drives = tokio::task::spawn_blocking(move || backend_clone.detect_drives())
-                .await
-                .unwrap_or(Ok(vec![]))
-                .unwrap_or(vec![]);
-
-            let subdir: Option<String> = if let Some(drive) = drives.iter().find(|d| d.index == index) {
-                drive.disc_name.clone()
-            } else {
-                None
-            };
-
-            match &subdir {
-                Some(s) => (r.clone(), Some(s.clone())),
-                None => (r, None),
-            }
-        }
-    };
-
-    let candidate = match &subdir_hint {
-        Some(s) => format!("{}/{}", base, s),
-        None => base.clone(),
-    };
-
-    let dest = unique_rip_destination(&candidate, subdir_hint.as_deref());
-    let rip_folder = dest.clone();
-    let disc_name = subdir_hint.clone();
+    // Create temp rip folder: /tmp/riply/{drive_index}/
+    let temp_folder = format!("{}/{}", TEMP_RIP_DIR, index);
+    std::fs::create_dir_all(&temp_folder)
+        .map_err(|e| WebError::Internal(format!("Failed to create temp folder: {}", e)))?;
 
     let mut handle = backend
-        .start_rip(index, &dest)
+        .start_rip(index, &temp_folder)
         .map_err(|e| WebError::Internal(e.to_string()))?;
 
     let sse = state.sse.clone();
@@ -410,7 +397,8 @@ pub async fn start_rip(
         // Remove from active rips (whether success or error)
         state_clone.active_rips.write().await.remove(&index);
 
-        // Post-rip: auto-naming and folder rename
+        // Post-rip: concurrent autodetection during rip is done above;
+        // now handle the result
         if let Ok(()) = rip_result {
             // Successful rip — attempt auto-naming in background
             if let Some(ref disc) = disc_name {
@@ -425,59 +413,38 @@ pub async fn start_rip(
                 sse.send_status(&format!("rip:naming_failed:{}", index));
             }
 
-            // Post-rip rename: if final_name differs from rip folder, rename it
-            // Check for user-set name first
-            let user_name = state_clone.disc_names.read().await.get(&index).map(|info| info.final_name.clone());
-
-            // Determine final name: user-set name takes priority, then auto-detected
-            let auto_name = if let Some(ref disc) = disc_name {
-                resolve_rip_title(disc, searcher.as_deref()).await
-            } else {
-                (String::new(), None)
+            // Move to Organizer scan directory for processing
+            // The Organizer window will handle the final rename/move
+            let organizer_dir = {
+                let config = state_clone.config.read().await;
+                config
+                    .rip_output_directory
+                    .clone()
+                    .unwrap_or_else(|| ".".to_string())
             };
-            let final_name = user_name.or_else(|| {
-                if !auto_name.0.is_empty() {
-                    Some(format_title_display(&auto_name.0, auto_name.1))
-                } else {
-                    None
+
+            let folder_name = disc_name.clone().unwrap_or_else(|| format!("Disc_{}", index));
+            let final_dest = std::path::Path::new(&organizer_dir).join(&folder_name);
+            let final_dest_str = apply_copy_n(&final_dest).to_string_lossy().to_string();
+
+            match std::fs::rename(&temp_folder, &final_dest_str) {
+                Ok(()) => {
+                    info!(
+                        from = %temp_folder,
+                        to = %final_dest_str,
+                        "Post-rip move to Organizer completed"
+                    );
+                    sse.send_status(&format!("rip:complete:{}:{}", index, final_dest_str));
                 }
-            });
-
-            if let Some(ref final_name) = final_name {
-                let rip_parent = std::path::Path::new(&rip_folder)
-                    .parent()
-                    .unwrap_or(std::path::Path::new("."));
-                let dest_path = rip_parent.join(final_name);
-
-                if dest_path != std::path::Path::new(&rip_folder) {
-                    // Apply (Copy N) if destination exists
-                    let final_dest = apply_copy_n(&dest_path);
-
-                    match std::fs::rename(&rip_folder, &final_dest) {
-                        Ok(()) => {
-                            info!(
-                                from = %rip_folder,
-                                to = %final_dest.to_string_lossy(),
-                                "Post-rip move completed"
-                            );
-                            sse.send_status(&format!("rip:renamed:{}:{}", index, final_dest.to_string_lossy()));
-                        }
-                        Err(e) => {
-                            warn!(error = %e, from = %rip_folder, to = %final_dest.to_string_lossy(), "Post-rip move failed");
-                            sse.send_status(&format!("rip:message:{}:Move failed: {}", index, e));
-                        }
-                    }
-                } else {
-                    sse.send_status(&format!("rip:message:{}:Rip complete", index));
+                Err(e) => {
+                    warn!(error = %e, from = %temp_folder, to = %final_dest_str, "Post-rip move failed");
+                    sse.send_status(&format!("rip:message:{}:Move failed: {}", index, e));
                 }
-            } else {
-                // No final name — rip folder is the final state
-                sse.send_status(&format!("rip:message:{}:Rip complete", index));
             }
         } else {
-            // Rip failed — clean up
-            info!(rip_folder = %rip_folder, "Cleaning up failed rip");
-            let _ = std::fs::remove_dir_all(&rip_folder);
+            // Rip failed — clean up temp folder
+            info!(rip_folder = %temp_folder, "Cleaning up failed rip");
+            let _ = std::fs::remove_dir_all(&temp_folder);
             sse.send_status(&format!("rip:message:{}:Rip failed, cleaned up", index));
         }
     });
@@ -688,128 +655,79 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
 async fn execute_rip(state: Arc<AppState>, index: usize, eject_after: bool) -> Result<(), String> {
     let backend = state.backend.as_ref().ok_or("No ripping backend")?;
 
-    // Resolve destination, auto-append (Copy N) if the directory already exists
-    let (dest, final_name) = {
-        let config = state.config.read().await;
-        config.validate_for_ripping()?;
-        let base = config
-            .rip_output_directory
-            .clone()
-            .unwrap_or_else(|| ".".to_string());
+    // Resolve disc name for the temp folder
+    let backend_clone = Arc::clone(backend);
+    let drives = tokio::task::spawn_blocking(move || backend_clone.detect_drives())
+        .await
+        .unwrap_or(Ok(vec![]))
+        .unwrap_or(vec![]);
 
-        // Check for user-set name first
-        let user_name = state.disc_names.read().await.get(&index).map(|info| info.final_name.clone());
+    let disc_name = drives.iter().find(|d| d.index == index).and_then(|d| d.disc_name.clone());
 
-        let subdir_name = if let Some(name) = user_name {
-            // User set a name — use it directly
-            Some(name)
-        } else {
-            // Fall back to derived name from drive detection
-            let backend_clone = Arc::clone(backend);
-            let drives = tokio::task::spawn_blocking(move || backend_clone.detect_drives())
-                .await
-                .unwrap_or(Ok(vec![]))
-                .unwrap_or(vec![]);
+    // Create temp rip folder: /tmp/riply/{drive_index}/
+    let temp_folder = format!("{}/{}", TEMP_RIP_DIR, index);
+    std::fs::create_dir_all(&temp_folder).map_err(|e| format!("Failed to create temp folder: {}", e))?;
 
-            if let Some(drive) = drives.iter().find(|d| d.index == index) {
-                // Use derived name if available, otherwise raw disc name
-                if let Some(ref derived) = drive.derived_name {
-                    Some(derived.clone())
-                } else if let Some(ref disc_name) = drive.disc_name {
-                    // No derived name — use raw disc name as fallback
-                    let (title, year) = resolve_rip_title(disc_name, state.searcher.as_deref()).await;
-                    if !title.is_empty() {
-                        Some(match year {
-                            Some(y) => format!("{} ({})", title, y),
-                            None => title,
-                        })
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        };
-
-        let rip_folder_name = subdir_name.clone().unwrap_or_else(|| "Disc".to_string());
-
-        let candidate = match &subdir_name {
-            Some(ref s) => format!("{}/{}", base, s),
-            None => base.clone(),
-        };
-
-        let dest = unique_rip_destination(&candidate, Some(&rip_folder_name));
-        (dest, subdir_name)
-    };
-
-    let mut handle = backend.start_rip(index, &dest).map_err(|e| e.to_string())?;
+    let mut handle = backend.start_rip(index, &temp_folder).map_err(|e| e.to_string())?;
 
     let sse = state.sse.clone();
     sse.send_status(&format!("rip:starting:{}", index));
 
+    let searcher = state.searcher.clone();
+    let state_clone = Arc::clone(&state);
     let result = process_rip_events(&mut handle, &sse, index).await;
 
     // Remove from active rips (whether success or error)
-    state.active_rips.write().await.remove(&index);
+    state_clone.active_rips.write().await.remove(&index);
 
     // Post-rip: move or cleanup
-    let rip_folder = dest.clone();
     match result {
         Ok(()) => {
-            // Successful rip — move if final name differs from rip folder
-            if let Some(ref final_name) = final_name {
-                // If the rip folder differs from the expected final folder, move it
-                let rip_parent = std::path::Path::new(&rip_folder)
-                    .parent()
-                    .unwrap_or(std::path::Path::new("."));
-                let dest_path = rip_parent.join(final_name);
-
-                if dest_path != std::path::Path::new(&rip_folder) {
-                    // Apply (Copy N) if destination exists
-                    let final_dest = if dest_path.exists() {
-                        let parent = dest_path.parent().unwrap_or(std::path::Path::new("."));
-                        let mut copy_n = 1;
-                        loop {
-                            let copy_name = format!("{} (Copy {})", final_name, copy_n);
-                            let copy_path = parent.join(&copy_name);
-                            if !copy_path.exists() {
-                                break copy_path.to_string_lossy().to_string();
-                            }
-                            copy_n += 1;
-                        }
-                    } else {
-                        dest_path.to_string_lossy().to_string()
-                    };
-
-                    match std::fs::rename(&rip_folder, &final_dest) {
-                        Ok(()) => {
-                            info!(
-                                from = %rip_folder,
-                                to = %final_dest,
-                                "Post-rip move completed"
-                            );
-                            sse.send_status(&format!("rip:message:{}:Moved to {}", index, final_name));
-                        }
-                        Err(e) => {
-                            warn!(error = %e, from = %rip_folder, to = %final_dest, "Post-rip move failed");
-                            sse.send_status(&format!("rip:message:{}:Move failed: {}", index, e));
-                        }
-                    }
+            // Successful rip — attempt auto-naming in background
+            if let Some(ref disc) = disc_name {
+                let auto_name = resolve_rip_title(disc, searcher.as_deref()).await;
+                if !auto_name.0.is_empty() {
+                    let display_name = format_title_display(&auto_name.0, auto_name.1);
+                    sse.send_status(&format!("rip:named:{}:{}", index, display_name));
                 } else {
-                    sse.send_status(&format!("rip:message:{}:Rip complete", index));
+                    sse.send_status(&format!("rip:naming_failed:{}", index));
                 }
             } else {
-                // No final name — rip folder is the final state
-                sse.send_status(&format!("rip:message:{}:Rip complete", index));
+                sse.send_status(&format!("rip:naming_failed:{}", index));
+            }
+
+            // Move to Organizer scan directory for processing
+            let organizer_dir = {
+                let config = state_clone.config.read().await;
+                config
+                    .rip_output_directory
+                    .clone()
+                    .unwrap_or_else(|| ".".to_string())
+            };
+
+            let folder_name = disc_name.clone().unwrap_or_else(|| format!("Disc_{}", index));
+            let final_dest = std::path::Path::new(&organizer_dir).join(&folder_name);
+            let final_dest_str = apply_copy_n(&final_dest).to_string_lossy().to_string();
+
+            match std::fs::rename(&temp_folder, &final_dest_str) {
+                Ok(()) => {
+                    info!(
+                        from = %temp_folder,
+                        to = %final_dest_str,
+                        "Post-rip move to Organizer completed"
+                    );
+                    sse.send_status(&format!("rip:complete:{}:{}", index, final_dest_str));
+                }
+                Err(e) => {
+                    warn!(error = %e, from = %temp_folder, to = %final_dest_str, "Post-rip move failed");
+                    sse.send_status(&format!("rip:message:{}:Move failed: {}", index, e));
+                }
             }
         }
         Err(_) => {
-            // Rip failed — clean up
-            info!(rip_folder = %rip_folder, "Cleaning up failed rip");
-            let _ = std::fs::remove_dir_all(&rip_folder);
+            // Rip failed — clean up temp folder
+            info!(rip_folder = %temp_folder, "Cleaning up failed rip");
+            let _ = std::fs::remove_dir_all(&temp_folder);
             sse.send_status(&format!("rip:message:{}:Rip failed, cleaned up", index));
         }
     }

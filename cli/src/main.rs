@@ -169,6 +169,9 @@ async fn main() -> anyhow::Result<()> {
     info!(config = %cli.config, "Config file");
     info!(path = %config.database_path, "Database");
 
+    // Auto-cleanup temp rips from previous sessions
+    web::routes::ripper::cleanup_temp_rips();
+
     // Initialize database
     let db = Database::new(&config.database_path).await?;
     db.migrate().await?;

@@ -399,10 +399,12 @@ mod tests {
 }
 
 /// Mock FolderStore for testing
+#[allow(dead_code)]
 struct MockFolderStore {
     folders: std::sync::Mutex<Vec<FolderRecord>>,
 }
 
+#[allow(dead_code)]
 impl MockFolderStore {
     fn new() -> Self {
         Self {
