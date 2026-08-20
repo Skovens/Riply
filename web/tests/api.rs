@@ -193,8 +193,8 @@ async fn test_get_file_found() {
 
     let (status, body) = get(&ctx, "/v1/files/f1").await;
     assert_eq!(status, 200);
-    assert_eq!(body["data"]["id"], "f1");
-    assert_eq!(body["data"]["filename"], "a.mkv");
+    assert_eq!(body["data"]["scan"]["id"], "f1");
+    assert_eq!(body["data"]["scan"]["filename"], "a.mkv");
 }
 
 #[tokio::test]
@@ -208,8 +208,8 @@ async fn test_update_file() {
     });
     let (status, resp) = post(&ctx, "/v1/files/f1", body).await;
     assert_eq!(status, 200);
-    assert_eq!(resp["data"]["canonical_title"], "The Movie");
-    assert_eq!(resp["data"]["canonical_year"], 2024);
+    assert_eq!(resp["data"]["metadata"]["canonical_title"], "The Movie");
+    assert_eq!(resp["data"]["metadata"]["canonical_year"], 2024);
 }
 
 #[tokio::test]
@@ -262,7 +262,7 @@ async fn test_review_queue_has_files() {
     let (status, body) = get(&ctx, "/v1/review").await;
     assert_eq!(status, 200);
     assert_eq!(body["data"].as_array().unwrap().len(), 1);
-    assert_eq!(body["data"][0]["id"], "f1");
+    assert_eq!(body["data"][0]["scan"]["id"], "f1");
 }
 
 #[tokio::test]
@@ -272,7 +272,7 @@ async fn test_accept_file() {
 
     let (status, body) = post(&ctx, "/v1/review/f1/accept", serde_json::json!({})).await;
     assert_eq!(status, 200);
-    assert_eq!(body["data"]["status"], "Confirmed");
+    assert_eq!(body["data"]["scan"]["status"], "Confirmed");
 }
 
 #[tokio::test]
@@ -282,7 +282,7 @@ async fn test_reject_file() {
 
     let (status, body) = post(&ctx, "/v1/review/f1/reject", serde_json::json!({})).await;
     assert_eq!(status, 200);
-    assert_eq!(body["data"]["status"], "Failed");
+    assert_eq!(body["data"]["scan"]["status"], "Failed");
 }
 
 #[tokio::test]
