@@ -53,6 +53,7 @@ pub struct ConfigUpdateBody {
     pub tv_directory: Option<String>,
     pub rip_output_directory: Option<String>,
     pub temp_directory: Option<String>,
+    pub tmp_cleanup_age_days: Option<u64>,
     pub verbose: Option<bool>,
     pub host: Option<String>,
     pub port: Option<u16>,
@@ -87,6 +88,9 @@ pub async fn update_config(
     }
     if let Some(v) = body.temp_directory {
         config.temp_directory = v;
+    }
+    if let Some(v) = body.tmp_cleanup_age_days {
+        config.tmp_cleanup_age_days = v;
     }
     if let Some(v) = body.verbose {
         config.verbose = v;

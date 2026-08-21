@@ -17,6 +17,7 @@
   let ripping_command = $state('');
   let rip_output_directory = $state('');
   let temp_directory = $state('/tmp/riply');
+  let tmp_cleanup_age_days = $state(7);
   let database_path = $state('');
   let verbose = $state(false);
   let healthchecks_uuid = $state('');
@@ -37,6 +38,7 @@
     ripping_command = config.ripping?.command || '';
     rip_output_directory = config.rip_output_directory || '';
     temp_directory = config.temp_directory || '/tmp/riply';
+    tmp_cleanup_age_days = config.tmp_cleanup_age_days || 7;
     database_path = config.database_path || 'riply.db';
     verbose = config.verbose || false;
     healthchecks_uuid = config.healthchecks?.uuid || '';
@@ -69,6 +71,7 @@
         ripping_command: ripping_command || '',
         rip_output_directory: rip_output_directory || '',
         temp_directory: temp_directory || '/tmp/riply',
+        tmp_cleanup_age_days: parseInt(tmp_cleanup_age_days, 10) || 7,
         database_path: database_path || 'riply.db',
         verbose,
         healthchecks_uuid: healthchecks_uuid || '',
@@ -223,6 +226,14 @@
               <input class="settings__input" type="text" id="settings-temp_directory" bind:value={temp_directory} autocomplete="off" />
             </div>
             <div class="settings__hint">Unrenamed media stays here until organized. Auto-cleaned on restart.</div>
+          </div>
+
+          <div class="settings__field">
+            <label class="settings__label" for="settings-tmp_cleanup_age_days">Temp Cleanup Age (days)</label>
+            <div class="settings__input-wrap">
+              <input class="settings__input" type="number" id="settings-tmp_cleanup_age_days" bind:value={tmp_cleanup_age_days} min="1" max="365" autocomplete="off" />
+            </div>
+            <div class="settings__hint">Temp rips older than this many days are automatically deleted on restart. Default: 7.</div>
           </div>
         </div>
 

@@ -13,18 +13,36 @@ use tracing::{info, warn};
 use crate::api::{ApiResponse, AppState, DiscNameInfo};
 use crate::error::WebError;
 
-/// Auto-cleanup: remove all contents of the temp rip directory on application restart.
-/// This ensures stale temp rips from previous sessions don't accumulate.
-pub fn cleanup_temp_rips(temp_dir: &str) {
+/// Auto-cleanup: remove contents of the temp rip directory that are older than the configured age.
+/// This ensures stale temp rips from previous sessions don't accumulate, while preserving
+/// recent rips for manual organization.
+pub fn cleanup_temp_rips(temp_dir: &str, age_days: u64) {
     use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     if let Ok(entries) = fs::read_dir(temp_dir) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let age_threshold = age_days * 24 * 60 * 60;
+
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                if let Err(e) = fs::remove_dir_all(&path) {
-                    warn!(path = %path.display(), error = %e, "Failed to cleanup temp rip folder");
-                } else {
-                    info!(path = %path.display(), "Cleaned up temp rip folder");
+                if let Ok(metadata) = fs::metadata(&path) {
+                    if let Ok(modified) = metadata.modified() {
+                        let age = now - modified.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+                        if age > age_threshold {
+                            if let Err(e) = fs::remove_dir_all(&path) {
+                                warn!(path = %path.display(), error = %e, "Failed to cleanup temp rip folder (age: {} days)", age / 86400);
+                            } else {
+                                info!(path = %path.display(), "Cleaned up temp rip folder (age: {} days)", age / 86400);
+                            }
+                        } else {
+                            info!(path = %path.display(), age_days = age / 86400, "Keeping temp rip folder (not old enough to cleanup)");
+                        }
+                    }
                 }
             }
         }

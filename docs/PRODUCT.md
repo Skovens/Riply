@@ -149,7 +149,7 @@ Ripped content is written to a configurable tmp folder (default `/tmp/riply`).
 | Server restart | Content older than N days deleted |
 | Content < N days old | Kept, regardless of state |
 
-Configuration: `ripping.tmp_dir` (default `/tmp/riply`), `ripping.tmp_cleanup_age_days` (default `7`).
+Configuration: `temp_directory` (default `/tmp/riply`), `tmp_cleanup_age_days` (default `7`).
 
 ---
 
@@ -168,26 +168,62 @@ The following are removed by this spec:
 
 ## API Endpoints
 
+All endpoints use the `/v1/` prefix.
+
+### Ripper
+
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/ripper/drives` | List available drives |
-| POST | `/api/ripper/:index/start` | Start ripping |
-| POST | `/api/ripper/:index/cancel` | Cancel rip |
-| POST | `/api/ripper/:index/eject` | Eject disc |
-| GET | `/api/ripper/autorip` | Get autorip-enabled drives |
-| POST | `/api/ripper/autorip/:index/toggle` | Toggle autorip for drive |
-| GET | `/api/organizer/folders` | List folders in scan directory |
-| POST | `/api/organizer/scan` | Scan configured directory |
-| POST | `/api/organizer/:id/search` | Manually search TMDb for folder |
-| POST | `/api/organizer/:id/accept` | Accept folder → Moved |
-| POST | `/api/organizer/:id/reject` | Reject folder → Quarantined |
-| POST | `/api/organizer/accept-all` | Move all Confident folders |
-| POST | `/api/organizer/reject-all` | Move all Unknown folders to quarantine |
-| GET | `/api/config` | Get current settings |
-| PUT | `/api/config` | Update settings |
-| GET | `/api/sse` | Server-Sent Events stream |
-| GET | `/api/jobs` | List jobs |
-| DELETE | `/api/jobs/:id` | Cancel job |
+| GET | `/v1/ripper/drives` | List available drives |
+| POST | `/v1/ripper/drives/:index/rename` | Rename disc (user-set title/year) |
+| GET | `/v1/ripper/status` | Check MakeMKV installation status |
+| POST | `/v1/ripper/:index/start` | Start ripping |
+| POST | `/v1/ripper/:index/cancel` | Cancel rip |
+| POST | `/v1/ripper/:index/eject` | Eject disc |
+| GET | `/v1/ripper/autorip` | Get autorip-enabled drives |
+| POST | `/v1/ripper/autorip/:index/toggle` | Toggle autorip for drive |
+
+### Organizer (Folders)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/folders` | List folders (optional `?status=` filter) |
+| GET | `/v1/folders/stats` | Get folder counts by status |
+| POST | `/v1/folders/scan` | Scan configured directory |
+| GET | `/v1/folders/:id` | Get single folder |
+| DELETE | `/v1/folders/:id` | Delete folder |
+| POST | `/v1/folders/:id/analyze` | Run TMDb search for folder |
+| POST | `/v1/folders/:id/accept` | Accept folder → Confident |
+| POST | `/v1/folders/:id/reject` | Reject folder → Unknown |
+| POST | `/v1/folders/accept-all` | Move all Confident folders |
+| POST | `/v1/folders/reject-all` | Move all Unknown folders to quarantine |
+| POST | `/v1/folders/:id/move` | Move single confident folder |
+| GET | `/v1/folders/:id/preview` | Preview move destination |
+
+### Config
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/config` | Get current settings |
+| PUT | `/v1/config` | Update settings |
+| POST | `/v1/config/reset` | Reset to defaults |
+
+### Jobs
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/jobs` | List jobs |
+| GET | `/v1/jobs/:id` | Get job status |
+| POST | `/v1/jobs/:id/cancel` | Cancel job |
+
+### SSE & Health
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/sse` | Server-Sent Events stream |
+| GET | `/health` | Health check |
+| GET | `/ready` | Readiness check (database ping) |
+| GET | `/metrics` | Prometheus metrics |
 
 ---
 

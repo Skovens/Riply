@@ -13,6 +13,10 @@
   /** @type {Record<number, { pct: number, eta: number | null, stage: string }>} */
   let ripProgress = $state({});
 
+  // ── Rip naming status (ADR-024) ────────────────────────────
+  /** @type {Record<number, { discName: string, foundName: string | null, status: string }>} */
+  let ripNaming = $state({});
+
   // ── Autorip ────────────────────────────────────────────────
   let autoripDrives = $state([]);
 
@@ -94,6 +98,21 @@
         ripProgress = Object.fromEntries(Object.entries(ripProgress).filter(([k]) => k !== String(idx)));
       }, 5000);
       fetchDrives();
+    }
+
+    // Auto-naming events
+    if (kind === 'rip' && action === 'naming') {
+      ripNaming = { ...ripNaming, [idx]: { discName: drive.disc_name || '', foundName: null, status: 'naming' } };
+    }
+
+    if (kind === 'rip' && action === 'naming_complete') {
+      const parts = detail.split(' → ').map(s => s.trim());
+      const foundName = parts.length > 1 ? parts[1] : null;
+      ripNaming = { ...ripNaming, [idx]: { discName: drive.disc_name || '', foundName, status: 'complete' } };
+    }
+
+    if (kind === 'rip' && action === 'naming_failed') {
+      ripNaming = { ...ripNaming, [idx]: { discName: drive.disc_name || '', foundName: null, status: 'failed' } };
     }
   }
 
@@ -243,6 +262,32 @@
             </div>
           {/if}
 
+          <!-- Auto-naming status -->
+          {#if ripNaming[drive.index]}
+            <div class="drive-card__naming">
+              {#if ripNaming[drive.index].status === 'naming'}
+                <span class="drive-card__disc-name">{ripNaming[drive.index].discName}</span>
+                <span class="drive-card__arrow">→</span>
+                <span class="drive-card__naming-status">Searching...</span>
+              {:else if ripNaming[drive.index].status === 'complete'}
+                <span class="drive-card__disc-name">{ripNaming[drive.index].discName}</span>
+                <span class="drive-card__arrow">→</span>
+                <span class="drive-card__derived-name">{ripNaming[drive.index].foundName}</span>
+              {:else}
+                <span class="drive-card__disc-name">{ripNaming[drive.index].discName}</span>
+                <span class="drive-card__arrow">→</span>
+                <span class="drive-card__failed-name">Not found</span>
+              {/if}
+            </div>
+          {/if}
+
+          <!-- Unidentified message -->
+          {#if (drive.state === 'Complete' || drive.state === 'Error') && !drive.derived_name}
+            <div class="drive-card__naming">
+              <span class="drive-card__failed-name">Unidentified — view in Organizer</span>
+            </div>
+          {/if}
+
           <!-- Actions -->
           <div class="drive-card__actions">
             <div class="drive-card__action-row">
@@ -287,7 +332,7 @@
               {/if}
 
               <!-- Eject button -->
-              {#if drive.state === 'Complete' || drive.state === 'Error'}
+              {#if drive.state === 'Ready' || drive.state === 'Complete' || drive.state === 'Error'}
                 <button
                   class="btn btn--secondary btn--sm"
                   onclick={() => ejectDisc(drive.index)}
@@ -304,6 +349,17 @@
                     Eject
                   </button>
                 </Tooltip>
+              {/if}
+
+              <!-- View in Organizer button (unidentified rips) -->
+              {#if (drive.state === 'Complete' || drive.state === 'Error') && !drive.derived_name}
+                <a
+                  href="/organizer"
+                  class="btn btn--primary btn--sm"
+                  title="View in Organizer"
+                >
+                  View in Organizer
+                </a>
               {/if}
             </div>
 
@@ -424,6 +480,46 @@
     color: var(--color-text-muted);
     font-size: var(--text-xs);
     font-style: italic;
+  }
+
+  /* ── Auto-naming ────────────────────────────────────────── */
+  .drive-card__naming {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-top: var(--space-2);
+    font-size: var(--text-xs);
+  }
+
+  .drive-card__disc-name {
+    color: var(--color-text-muted);
+    font-style: italic;
+  }
+
+  .drive-card__arrow {
+    color: var(--color-text-muted);
+    margin: 0 var(--space-1);
+    opacity: 0.6;
+  }
+
+  .drive-card__derived-name {
+    color: var(--color-primary);
+    font-weight: 500;
+  }
+
+  .drive-card__failed-name {
+    color: var(--color-warning);
+    font-style: italic;
+  }
+
+  .drive-card__naming-status {
+    color: var(--color-text-muted);
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
   }
 
   /* ── Progress ───────────────────────────────────────────── */

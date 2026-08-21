@@ -74,6 +74,9 @@ pub struct Config {
     /// Temp directory for unorganized rips (auto-cleaned on restart)
     #[serde(default = "default_temp_directory")]
     pub temp_directory: String,
+    /// Age in days before temp rip content is eligible for cleanup (default: 7)
+    #[serde(default = "default_tmp_cleanup_age")]
+    pub tmp_cleanup_age_days: u64,
     /// Enable verbose logging
     pub verbose: bool,
     /// TMDb API key (optional, enables metadata lookups)
@@ -109,6 +112,10 @@ fn default_temp_directory() -> String {
     "/tmp/riply".to_string()
 }
 
+fn default_tmp_cleanup_age() -> u64 {
+    7
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -118,6 +125,7 @@ impl Default for Config {
             tv_directory: "tv".to_string(),
             rip_output_directory: None,
             temp_directory: default_temp_directory(),
+            tmp_cleanup_age_days: default_tmp_cleanup_age(),
             verbose: false,
             tmdb_api_key: None,
             omdb_api_key: None,
