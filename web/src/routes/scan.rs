@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use axum::{extract::State, routing::post, Json, Router};
 use serde::Deserialize;
+use serde_json::json;
 use tracing::info;
 
 use crate::api::{ApiResponse, AppState, JobStartedResponse};
@@ -69,11 +70,11 @@ pub async fn start_scan(
 
                 progress.set_total(records.len());
 
-                sse.send_status(&format!("scan:starting:{}", records.len()));
+                sse.send_json(json!({"kind":"scan","action":"starting","index":0,"data":{"total":records.len(),"job_id":"scan"}}));
 
                 for (i, record) in records.iter().enumerate() {
                     if cancel.is_cancelled() {
-                        sse.send_status("scan:cancelled");
+                        sse.send_json(json!({"kind":"scan","action":"cancelled","index":0,"data":{"job_id":"scan"}}));
                         return Ok(());
                     }
 
@@ -98,11 +99,11 @@ pub async fn start_scan(
                     }
                     progress.increment();
                     if (i + 1) % 10 == 0 || i + 1 == records.len() {
-                        sse.send_status(&format!("scan:progress:{}:{}", i + 1, records.len()));
+                        sse.send_json(json!({"kind":"scan","action":"progress","index":0,"data":{"job_id":"scan","processed":i+1,"total":records.len()}}));
                     }
                 }
 
-                sse.send_status(&format!("scan:complete:{}", records.len()));
+                sse.send_json(json!({"kind":"scan","action":"complete","index":0,"data":{"job_id":"scan"}}));
                 info!(count = records.len(), dir = %directory, "Scan complete");
                 Ok(())
             }

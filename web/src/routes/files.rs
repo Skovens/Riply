@@ -7,6 +7,7 @@ use axum::{
 };
 use riply_core::FileRecord;
 use serde::Deserialize;
+use serde_json::json;
 
 use crate::api::{ApiResponse, AppState, PaginatedResponse};
 use crate::error::WebError;
@@ -156,9 +157,7 @@ pub async fn reset_db(
         .await
         .map_err(|e| WebError::Internal(e.to_string()))?;
 
-    state
-        .sse
-        .send_status(&format!("db:reset:deleted={}", deleted));
+    state.sse.send_json(json!({"kind":"db","action":"reset","index":0,"data":{"deleted":deleted}}));
 
     Ok(Json(ApiResponse::ok(deleted)))
 }

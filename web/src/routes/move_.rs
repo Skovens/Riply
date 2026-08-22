@@ -7,6 +7,7 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use tracing::info;
 
 use crate::api::{ApiResponse, AppState, JobStartedResponse};
@@ -74,12 +75,12 @@ pub async fn start_move(
             async move {
                 let files = db.get_files_by_status("Confirmed").await?;
                 if files.is_empty() {
-                    sse.send_status("move:complete:moved=0,errors=0");
+                    sse.send_json(json!({"kind":"move","action":"complete","index":0,"data":{"job_id":"move","moved":0,"errors":0}}));
                     return Ok(());
                 }
 
                 progress.set_total(files.len());
-                sse.send_status(&format!("move:starting:{}", files.len()));
+                sse.send_json(json!({"kind":"move","action":"starting","index":0,"data":{"total":files.len(),"job_id":"move"}}));
 
                 let mover = app::MoverService::new();
                 let mut moved = 0;
@@ -87,7 +88,7 @@ pub async fn start_move(
 
                 for (i, file) in files.iter().enumerate() {
                     if cancel.is_cancelled() {
-                        sse.send_status("move:cancelled");
+                        sse.send_json(json!({"kind":"move","action":"cancelled","index":0,"data":{"job_id":"move"}}));
                         return Ok(());
                     }
                     match mover.move_file(file, &movies_path, &tv_path).await {
@@ -112,11 +113,11 @@ pub async fn start_move(
                     }
                     progress.increment();
                     if (i + 1) % 10 == 0 || i + 1 == files.len() {
-                        sse.send_status(&format!("move:progress:{}:{}", i + 1, files.len()));
+                        sse.send_json(json!({"kind":"move","action":"progress","index":0,"data":{"job_id":"move","processed":i+1,"total":files.len()}}));
                     }
                 }
 
-                sse.send_status(&format!("move:complete:moved={},errors={}", moved, errors));
+                sse.send_json(json!({"kind":"move","action":"complete","index":0,"data":{"job_id":"move","moved":moved,"errors":errors}}));
                 info!(moved, errors, "Move complete");
                 Ok(())
             }

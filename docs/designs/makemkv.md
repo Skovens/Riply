@@ -405,18 +405,18 @@ Detection priority:
    - TV: Multiple similarly-sized files (std dev < 30% of mean)
 3. **User confirmation** — Always required, one-click flip Movie ↔ TV Show
 
-### SSE Events
+### SSE Events (JSON format)
 
-| Event | Format | When |
+| Event | data fields | When |
 |---|---|---|
-| `rip:starting` | `rip:starting:{index}` | Rip begins |
-| `rip:progress` | `rip:progress:{index}:{pct}:{eta}` | Every progress update |
-| `rip:named` | `rip:named:{index}:{type}:{title} ({year})` | Auto-naming succeeded (`type` = movie or tv) |
-| `rip:naming_failed` | `rip:naming_failed:{index}` | Auto-naming failed |
-| `rip:complete` | `rip:complete:{index}` | Rip finished, files moved |
-| `rip:renamed` | `rip:renamed:{index}:{new_name}` | Post-rip rename/move |
-| `rip:error` | `rip:error:{index}:{message}` | Rip failed |
-| `rip:message` | `rip:message:{index}:{text}` | Status messages |
+| `rip:starting` | `{}` | Rip begins |
+| `rip:progress` | `{ "pct": N, "eta": N \| null, "stage": "text" }` | Every progress update |
+| `rip:named` | `{ "title": "Movie", "year": 2010, "type": "movie" }` | Auto-naming succeeded |
+| `rip:naming_failed` | `{}` | Auto-naming failed |
+| `rip:complete` | `{ "dest": "/path/to/output" }` | Rip finished, files moved |
+| `rip:error` | `{ "message": "error text" }` | Rip failed |
+| `rip:message` | `{ "text": "MakeMKV status" }` | Status messages |
+| `rip:cancelled` | `{}` | Rip cancelled |
 
 ---
 

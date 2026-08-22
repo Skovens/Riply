@@ -8,6 +8,7 @@ use axum::{
 };
 use riply_core::{DriveInfo, DriveState, MetadataSearcher, RipEvent, RipHandle};
 use serde::Deserialize;
+use serde_json::json;
 use tracing::{info, warn};
 
 use crate::api::{ApiResponse, AppState, DiscNameInfo};
@@ -261,25 +262,23 @@ async fn process_rip_events(
                     &mut rate,
                 );
 
-                match eta_secs {
-                    Some(eta) => {
-                        sse.send_status(&format!("rip:progress:{}:{}:{}", index, pct, eta));
-                    }
-                    None => {
-                        sse.send_status(&format!("rip:progress:{}:{}", index, pct));
-                    }
-                }
+                let event = if let Some(eta) = eta_secs {
+                    json!({"kind":"rip","action":"progress","index":index,"data":{"pct":pct,"eta":eta,"stage":""}})
+                } else {
+                    json!({"kind":"rip","action":"progress","index":index,"data":{"pct":pct,"eta":null,"stage":""}})
+                };
+                sse.send_json(event);
             }
             RipEvent::Complete => {
-                sse.send_status(&format!("rip:complete:{}", index));
+                sse.send_json(json!({"kind":"rip","action":"complete","index":index,"data":{}}));
                 return Ok(());
             }
             RipEvent::Error(e) => {
-                sse.send_status(&format!("rip:error:{}:{}", index, e));
+                sse.send_json(json!({"kind":"rip","action":"error","index":index,"data":{"message":format!("{}", e)}}));
                 return Err(e);
             }
             RipEvent::Message(msg) => {
-                sse.send_status(&format!("rip:message:{}:{}", index, msg));
+                sse.send_json(json!({"kind":"rip","action":"message","index":index,"data":{"text":msg}}));
             }
         }
     }
@@ -406,7 +405,7 @@ pub async fn start_rip(
     let searcher = state.searcher.clone();
     let state_clone = Arc::clone(&state);
     let rip_handle = tokio::spawn(async move {
-        sse.send_status(&format!("rip:starting:{}", index));
+        sse.send_json(json!({"kind":"rip","action":"starting","index":index,"data":{}}));
 
         // Process rip progress events
         let rip_result = process_rip_events(&mut handle, &sse, index).await;
@@ -421,13 +420,13 @@ pub async fn start_rip(
             if let Some(ref disc) = disc_name {
                 let auto_name = resolve_rip_title(disc, searcher.as_deref()).await;
                 if !auto_name.0.is_empty() {
-                    let display_name = format_title_display(&auto_name.0, auto_name.1);
-                    sse.send_status(&format!("rip:named:{}:{}", index, display_name));
+                    let year = auto_name.1.map(|y| y as u32);
+                    sse.send_json(json!({"kind":"rip","action":"named","index":index,"data":{"title":auto_name.0,"year":year,"type":"movie"}}));
                 } else {
-                    sse.send_status(&format!("rip:naming_failed:{}", index));
+                    sse.send_json(json!({"kind":"rip","action":"naming_failed","index":index,"data":{}}));
                 }
             } else {
-                sse.send_status(&format!("rip:naming_failed:{}", index));
+                sse.send_json(json!({"kind":"rip","action":"naming_failed","index":index,"data":{}}));
             }
 
             // Move to Organizer scan directory for processing
@@ -451,18 +450,18 @@ pub async fn start_rip(
                         to = %final_dest_str,
                         "Post-rip move to Organizer completed"
                     );
-                    sse.send_status(&format!("rip:complete:{}:{}", index, final_dest_str));
+                    sse.send_json(json!({"kind":"rip","action":"complete","index":index,"data":{"dest":final_dest_str}}));
                 }
                 Err(e) => {
                     warn!(error = %e, from = %temp_folder, to = %final_dest_str, "Post-rip move failed");
-                    sse.send_status(&format!("rip:message:{}:Move failed: {}", index, e));
+                    sse.send_json(json!({"kind":"rip","action":"message","index":index,"data":{"text":format!("Move failed: {}", e)}}));
                 }
             }
         } else {
             // Rip failed — clean up temp folder
             info!(rip_folder = %temp_folder, "Cleaning up failed rip");
             let _ = std::fs::remove_dir_all(&temp_folder);
-            sse.send_status(&format!("rip:message:{}:Rip failed, cleaned up", index));
+            sse.send_json(json!({"kind":"rip","action":"message","index":index,"data":{"text":"Rip failed, cleaned up"}}));
         }
     });
 
@@ -481,7 +480,7 @@ pub async fn cancel_rip(
     let mut rips = state.active_rips.write().await;
     if let Some(handle) = rips.remove(&index) {
         handle.abort();
-        state.sse.send_status(&format!("rip:cancelled:{}", index));
+        state.sse.send_json(json!({"kind":"rip","action":"cancelled","index":index,"data":{}}));
         info!(drive = index, "Cancelled rip");
         Json(ApiResponse::ok(format!("Drive {} rip cancelled", index)))
     } else {
@@ -589,10 +588,10 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
             let prev = prev_states.insert(drive.index, drive.state.clone());
             match (prev, &drive.state) {
                 (Some(DriveState::Empty) | None, &DriveState::Ready) => {
-                    sse.send_status(&format!("drive:inserted:{}", drive.index));
+                    sse.send_json(json!({"kind":"drive","action":"inserted","index":drive.index,"data":{}}));
                 }
                 (Some(DriveState::Ready), &DriveState::Empty) => {
-                    sse.send_status(&format!("drive:ejected:{}", drive.index));
+                    sse.send_json(json!({"kind":"drive","action":"ejected","index":drive.index,"data":{}}));
                 }
                 _ => {}
             }
@@ -603,7 +602,7 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
             drives.iter().map(|d| d.index).collect();
         for idx in prev_states.keys().copied() {
             if !current_indices.contains(&idx) {
-                sse.send_status(&format!("drive:removed:{}", idx));
+                sse.send_json(json!({"kind":"drive","action":"removed","index":idx,"data":{}}));
             }
         }
         drop(enabled);
@@ -691,7 +690,7 @@ async fn execute_rip(state: Arc<AppState>, index: usize, eject_after: bool) -> R
     let mut handle = backend.start_rip(index, &temp_folder).map_err(|e| e.to_string())?;
 
     let sse = state.sse.clone();
-    sse.send_status(&format!("rip:starting:{}", index));
+    sse.send_json(json!({"kind":"rip","action":"starting","index":index,"data":{}}));
 
     let searcher = state.searcher.clone();
     let state_clone = Arc::clone(&state);
@@ -707,13 +706,13 @@ async fn execute_rip(state: Arc<AppState>, index: usize, eject_after: bool) -> R
             if let Some(ref disc) = disc_name {
                 let auto_name = resolve_rip_title(disc, searcher.as_deref()).await;
                 if !auto_name.0.is_empty() {
-                    let display_name = format_title_display(&auto_name.0, auto_name.1);
-                    sse.send_status(&format!("rip:named:{}:{}", index, display_name));
+                    let year = auto_name.1.map(|y| y as u32);
+                    sse.send_json(json!({"kind":"rip","action":"named","index":index,"data":{"title":auto_name.0,"year":year,"type":"movie"}}));
                 } else {
-                    sse.send_status(&format!("rip:naming_failed:{}", index));
+                    sse.send_json(json!({"kind":"rip","action":"naming_failed","index":index,"data":{}}));
                 }
             } else {
-                sse.send_status(&format!("rip:naming_failed:{}", index));
+                sse.send_json(json!({"kind":"rip","action":"naming_failed","index":index,"data":{}}));
             }
 
             // Move to Organizer scan directory for processing
@@ -736,11 +735,11 @@ async fn execute_rip(state: Arc<AppState>, index: usize, eject_after: bool) -> R
                         to = %final_dest_str,
                         "Post-rip move to Organizer completed"
                     );
-                    sse.send_status(&format!("rip:complete:{}:{}", index, final_dest_str));
+                    sse.send_json(json!({"kind":"rip","action":"complete","index":index,"data":{"dest":final_dest_str}}));
                 }
                 Err(e) => {
                     warn!(error = %e, from = %temp_folder, to = %final_dest_str, "Post-rip move failed");
-                    sse.send_status(&format!("rip:message:{}:Move failed: {}", index, e));
+                    sse.send_json(json!({"kind":"rip","action":"message","index":index,"data":{"text":format!("Move failed: {}", e)}}));
                 }
             }
         }
@@ -748,7 +747,7 @@ async fn execute_rip(state: Arc<AppState>, index: usize, eject_after: bool) -> R
             // Rip failed — clean up temp folder
             info!(rip_folder = %temp_folder, "Cleaning up failed rip");
             let _ = std::fs::remove_dir_all(&temp_folder);
-            sse.send_status(&format!("rip:message:{}:Rip failed, cleaned up", index));
+            sse.send_json(json!({"kind":"rip","action":"message","index":index,"data":{"text":"Rip failed, cleaned up"}}));
         }
     }
 
@@ -764,7 +763,7 @@ async fn execute_rip(state: Arc<AppState>, index: usize, eject_after: bool) -> R
             if let Some(ref device_path) = drive.device_path {
                 let path = device_path.clone();
                 let _ = tokio::task::spawn_blocking(move || infra::eject_disc(&path)).await;
-                sse.send_status(&format!("autorip:ejected:{}", index));
+                sse.send_json(json!({"kind":"autorip","action":"ejected","index":index,"data":{}}));
                 info!(drive = index, "Auto-rip ejected disc");
             }
         }

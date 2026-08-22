@@ -40,18 +40,8 @@
   let scanLoading = $state(false);
   let moveLoading = $state(false);
 
-  /** @param {string} data */
-  function parseEvent(data) {
-    const parts = data.split(':');
-    if (parts.length < 2) return null;
-    return { kind: parts[0], action: parts[1], detail: parts.slice(2).join(':') };
-  }
-
-  /** @param {string} data */
-  function handleSSEEvent(data) {
-    const event = parseEvent(data);
-    if (!event) return;
-
+  /** @param {import('$lib/api/sse').SseEvent} event */
+  function handleSSEEvent(event) {
     const { kind, action } = event;
 
     if (action === 'starting' || action === 'progress') {

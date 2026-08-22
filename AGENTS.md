@@ -379,6 +379,22 @@ the module. Write `warn!(error = %e, "Ping failed")` instead.
 
 ---
 
+## SSE Protocol Refactor
+
+The SSE event format is being migrated from colon-delimited strings to structured JSON.
+A detailed plan is in `refactor.md`. **Delete `refactor.md` when the refactor is complete.**
+
+The current colon format (`"rip:progress:0:50:120"`) has parsing bugs:
+- ETA silently dropped (frontend looks for separate `rip:eta` event that never fires)
+- Auto-naming never shows (frontend listens for `rip:naming_complete`, backend sends `rip:named`)
+- Message text after colon drops (title-safe parsing broken)
+- Title with colon breaks `ripEventIndex()`
+
+The JSON format (`{"kind":"rip","action":"progress","index":0,"data":{"pct":50,"eta":120,"stage":""}}`)
+fixes all of these. See `refactor.md` for the phased implementation plan, file list, and event shapes.
+
+After completion, update `docs/designs/sse.md` and `docs/designs/makemkv.md` to document the JSON format.
+
 ## Known Gotchas
 
 1. **Axum 0.7 route syntax**: Use `:param` not `{param}`. Chain methods:

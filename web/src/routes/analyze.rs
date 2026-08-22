@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use axum::{extract::State, routing::post, Json, Router};
+use serde_json::json;
 use tracing::info;
 
 use crate::api::{ApiResponse, AppState, JobStartedResponse};
@@ -29,12 +30,12 @@ pub async fn start_analyze(
             async move {
                 let records = db.get_files_by_status("Scanned").await?;
                 if records.is_empty() {
-                    sse.send_status("analyze:complete:0");
+                    sse.send_json(json!({"kind":"analyze","action":"complete","index":0,"data":{"job_id":"analyze","matched":0,"review":0}}));
                     return Ok(());
                 }
 
                 progress.set_total(records.len());
-                sse.send_status(&format!("analyze:starting:{}", records.len()));
+                sse.send_json(json!({"kind":"analyze","action":"starting","index":0,"data":{"total":records.len(),"job_id":"analyze"}}));
 
                 let searcher: Option<Box<dyn riply_core::MetadataSearcher>> =
                     if config.tmdb_api_key.is_some() || config.omdb_api_key.is_some() {
@@ -53,7 +54,7 @@ pub async fn start_analyze(
 
                 for (i, record) in records.iter().enumerate() {
                     if cancel.is_cancelled() {
-                        sse.send_status("analyze:cancelled");
+                        sse.send_json(json!({"kind":"analyze","action":"cancelled","index":0,"data":{"job_id":"analyze"}}));
                         return Ok(());
                     }
                     match analyzer.analyze_file(record).await {
@@ -74,14 +75,11 @@ pub async fn start_analyze(
                     }
                     progress.increment();
                     if (i + 1) % 10 == 0 || i + 1 == records.len() {
-                        sse.send_status(&format!("analyze:progress:{}:{}", i + 1, records.len()));
+                        sse.send_json(json!({"kind":"analyze","action":"progress","index":0,"data":{"job_id":"analyze","processed":i+1,"total":records.len()}}));
                     }
                 }
 
-                sse.send_status(&format!(
-                    "analyze:complete:matched={},review={}",
-                    matched, review
-                ));
+                sse.send_json(json!({"kind":"analyze","action":"complete","index":0,"data":{"job_id":"analyze","matched":matched,"review":review}}));
                 info!(matched, review, "Analysis complete");
                 Ok(())
             }
@@ -124,12 +122,12 @@ pub async fn retry_failed(
             async move {
                 let records = db.get_files_by_status("Scanned").await?;
                 if records.is_empty() {
-                    sse.send_status("analyze:complete:0");
+                    sse.send_json(json!({"kind":"analyze","action":"complete","index":0,"data":{"job_id":"analyze","matched":0,"review":0}}));
                     return Ok(());
                 }
 
                 progress.set_total(records.len());
-                sse.send_status(&format!("analyze:starting:{}", records.len()));
+                sse.send_json(json!({"kind":"analyze","action":"starting","index":0,"data":{"total":records.len(),"job_id":"analyze"}}));
 
                 let searcher: Option<Box<dyn riply_core::MetadataSearcher>> =
                     if m.is_some() || o.is_some() {
@@ -145,7 +143,7 @@ pub async fn retry_failed(
 
                 for (i, record) in records.iter().enumerate() {
                     if cancel.is_cancelled() {
-                        sse.send_status("analyze:cancelled");
+                        sse.send_json(json!({"kind":"analyze","action":"cancelled","index":0,"data":{"job_id":"analyze"}}));
                         return Ok(());
                     }
                     match analyzer.analyze_file(record).await {
@@ -167,11 +165,11 @@ pub async fn retry_failed(
 
                     progress.increment();
                     if i % 5 == 0 {
-                        sse.send_status(&format!("analyze:progress:{}:{}", i + 1, records.len()));
+                        sse.send_json(json!({"kind":"analyze","action":"progress","index":0,"data":{"job_id":"analyze","processed":i+1,"total":records.len()}}));
                     }
                 }
 
-                sse.send_status(&format!("analyze:complete:{}", records.len()));
+                sse.send_json(json!({"kind":"analyze","action":"complete","index":0,"data":{"job_id":"analyze","matched":matched,"review":review}}));
                 info!(matched, review, "Analysis complete (retry)");
                 Ok(())
             }

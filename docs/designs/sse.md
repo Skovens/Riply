@@ -3,7 +3,7 @@
 > ⚠️ **Note:** Product behavior is defined in [PRODUCT.md](../PRODUCT.md). This document describes the technical implementation details.
 
 ## Purpose
-Broadcast real-time updates to all connected web clients. Used for job progress, rip progress, drive state changes, and scan/review notifications. This document describes the *current* behavior of the SSE manager.
+Broadcast real-time updates to all connected web clients. Used for job progress, rip progress, drive state changes, and scan/review notifications.
 
 ---
 
@@ -41,47 +41,57 @@ Returns a new receiver for each SSE connection.
 
 ## Broadcasting Methods
 
-### `send_status(status: &str)`
+### `send_json(event: Value)`
 
-Broadcast a status update event.
+Broadcast a structured JSON event. This is the primary method.
+
+**Event envelope format:**
+```json
+{
+  "kind": "rip",
+  "action": "progress",
+  "index": 0,
+  "data": { "pct": 50, "eta": 120, "stage": "Ripping title 1" }
+}
+```
+
+### `send_status(status: &str)` (legacy)
+
+Kept for backward compatibility. Broadcasts in the old colon-delimited format.
 
 **Format:** `event:status\ndata:{status}`
 
-**Examples:**
-- `"drive:inserted:0"`
-- `"drive:ejected:0"`
-- `"drive:removed:0"`
-- `"scan:starting:1"`
-- `"scan:complete:1"`
-- `"rip:progress:0:50:120"`
-- `"rip:complete:0"`
+### `send_progress(message: &str)` (legacy)
 
-### `send_progress(message: &str)`
+Kept for backward compatibility.
 
-Broadcast a progress update.
+### `send_log(level: &str, message: &str)` (legacy)
 
-**Format:** `event:progress\ndata:{message}`
-
-### `send_log(level: &str, message: &str)`
-
-Broadcast a log message.
-
-**Format:** `event:log\ndata:{level}:{message}`
+Kept for backward compatibility.
 
 ---
 
 ## SSE Event Format
 
-### Raw Message Format
+### JSON Envelope (primary)
 
-Messages are formatted as:
-```
-event:{name}\ndata:{payload}
+All events use this structure:
+
+```json
+{
+  "kind": "<event-domain>",
+  "action": "<event-action>",
+  "index": <drive-or-job-index>,
+  "data": { <action-specific-fields> }
+}
 ```
 
-Or simply:
+### Wire Format
+
+The JSON string is sent as the SSE data payload:
 ```
-data:{payload}
+event:status
+data:{"kind":"rip","action":"progress","index":0,"data":{"pct":50,"eta":120,"stage":"Ripping title 1"}}
 ```
 
 ### Conversion to SSE Event
@@ -99,10 +109,16 @@ pub fn message_to_event(msg: &str) -> Event
 2. If message starts with `data:`: strip prefix, use as data
 3. Otherwise: use entire message as data
 
-**Example:**
+**Example (legacy):**
 ```
 Input:  "event:status\ndata:scan:complete:1"
 Output: Event { event: "status", data: "scan:complete:1" }
+```
+
+**Example (JSON):**
+```
+Input:  {"kind":"scan","action":"complete","index":0,"data":{"job_id":"scan"}}
+Output: Event { event: "status", data: '{"kind":"scan","action":"complete","index":0,"data":{"job_id":"scan"}}' }
 ```
 
 ---
@@ -118,10 +134,10 @@ Output: Event { event: "status", data: "scan:complete:1" }
 2. Streams events as SSE format:
    ```
    event:status
-   data:scan:complete:1
+   data:{"kind":"rip","action":"progress","index":0,"data":{"pct":50,"eta":120,"stage":"Ripping title 1"}}
 
    event:status
-   data:rip:progress:0:50:120
+   data:{"kind":"rip","action":"complete","index":0,"data":{"dest":"/path/to/movie"}}
 
    ...
    ```
@@ -139,45 +155,49 @@ Output: Event { event: "status", data: "scan:complete:1" }
 
 ### Job Events
 
-| Event | Format | Triggered By |
+| Event | data fields | Triggered By |
 |---|---|---|
-| `scan:starting` | `scan:starting:{job_id}` | Scan job starts |
-| `scan:progress` | `scan:progress:{job_id}:{processed}:{total}` | Scan progress |
-| `scan:complete` | `scan:complete:{job_id}` | Scan succeeds |
-| `scan:cancelled` | `scan:cancelled:{job_id}` | Scan cancelled |
-| `scan:failed` | `scan:failed:{job_id}:{error}` | Scan fails |
+| `scan:starting` | `{ "total": N, "job_id": "scan" }` | Scan job starts |
+| `scan:progress` | `{ "job_id": "scan", "processed": N, "total": N }` | Scan progress |
+| `scan:complete` | `{ "job_id": "scan" }` | Scan succeeds |
+| `scan:cancelled` | `{ "job_id": "scan" }` | Scan cancelled |
+| `scan:failed` | `{ "job_id": "scan", "message": "error text" }` | Scan fails |
 
 Same pattern for `analyze` and `move`.
 
 ### Rip Events
 
-| Event | Format | Triggered By |
+| Event | data fields | Triggered By |
 |---|---|---|
-| `rip:starting` | `rip:starting:{drive}` | Rip starts |
-| `rip:progress` | `rip:progress:{drive}:{pct}` | Progress update |
-| `rip:progress` | `rip:progress:{drive}:{pct}:{eta}` | Progress with ETA |
-| `rip:complete` | `rip:complete:{drive}` | Rip succeeds |
-| `rip:error` | `rip:error:{drive}:{msg}` | Rip fails |
-| `rip:message` | `rip:message:{drive}:{msg}` | Status message |
-| `rip:cancelled` | `rip:cancelled:{drive}` | Rip cancelled |
+| `rip:starting` | `{}` | Rip starts |
+| `rip:progress` | `{ "pct": N, "eta": N \| null, "stage": "text" }` | Progress update |
+| `rip:complete` | `{ "dest": "/path/to/output" }` | Rip succeeds |
+| `rip:error` | `{ "message": "error text" }` | Rip fails |
+| `rip:message` | `{ "text": "MakeMKV status message" }` | Status message |
+| `rip:cancelled` | `{}` | Rip cancelled |
+| `rip:named` | `{ "title": "Movie", "year": 2010, "type": "movie" }` | Auto-naming succeeded |
+| `rip:naming_failed` | `{}` | Auto-naming failed |
 
 ### Drive Events
 
-| Event | Format | Triggered By |
+| Event | data fields | Triggered By |
 |---|---|---|
-| `drive:inserted` | `drive:inserted:{index}` | Disc inserted |
-| `drive:ejected` | `drive:ejected:{index}` | Disc ejected |
-| `drive:removed` | `drive:removed:{index}` | Drive disappeared |
-| `drive:changed` | `drive:changed:{index}` | State changed (legacy) |
+| `drive:inserted` | `{}` | Disc inserted |
+| `drive:ejected` | `{}` | Disc ejected |
+| `drive:removed` | `{}` | Drive disappeared |
 
-### Review/Scan Events
+### Review Events
 
-| Event | Format | Triggered By |
+| Event | data fields | Triggered By |
 |---|---|---|
-| `scan:complete` | `scan:complete` | Scan finishes |
-| `scan:cancelled` | `scan:cancelled` | Scan cancelled |
-| `review:accepted` | `review:accepted` | File accepted in review |
-| `review:rejected` | `review:rejected` | File rejected in review |
+| `review:accepted` | `{ "id": "file-id" }` | File accepted in review |
+| `review:rejected` | `{ "id": "file-id" }` | File rejected in review |
+
+### Auto-rip Events
+
+| Event | data fields | Triggered By |
+|---|---|---|
+| `autorip:ejected` | `{}` | Auto-rip ejected disc |
 
 ---
 
@@ -190,49 +210,35 @@ Same pattern for `analyze` and `move`.
 const eventSource = new EventSource('/v1/sse');
 ```
 
-**Event handling:**
+**Event handling (JSON format):**
 ```typescript
-eventSource.addEventListener('status', (event) => {
-    const data = event.data;
-    // Parse event: "kind:action:detail"
-    const [kind, action, ...rest] = data.split(':');
-    // Route to appropriate handler
-    handleSSEEvent(kind, action, rest.join(':'));
+eventSource.addEventListener('status', (event: MessageEvent) => {
+    const parsed = JSON.parse(event.data) as SseEvent;
+    onMessage(parsed);
 });
 ```
 
-**Event dispatch:**
+**SseEvent type:**
+```typescript
+type SseEvent = {
+  kind: string;
+  action: string;
+  index: number;
+  data: Record<string, unknown>;
+};
+```
 
-| Kind | Action | Handler |
-|---|---|---|
-| `rip` | `starting` | Show rip progress bar |
-| `rip` | `progress` | Update progress bar |
-| `rip` | `progress` (with ETA) | Update progress bar + ETA |
-| `rip` | `complete` | Show success toast, trigger auto-scan |
-| `rip` | `error` | Show error toast |
-| `rip` | `cancelled` | Hide rip progress bar |
-| `rip` | `message` | Update rip stage text |
-| `drive` | `inserted` | Re-fetch drives |
-| `drive` | `ejected` | Re-fetch drives |
-| `drive` | `removed` | Re-fetch drives |
-| `drive` | `changed` | Re-fetch drives |
-| `scan` | `starting` | Add job to list |
-| `scan` | `progress` | Update job progress |
-| `scan` | `complete` | Set job status to Complete |
-| `scan` | `cancelled` | Set job status to Cancelled |
-| `scan` | `failed` | Set job status to Failed |
-| `analyze` | `starting` | Add job to list |
-| `analyze` | `progress` | Update job progress |
-| `analyze` | `complete` | Set job status to Complete |
-| `analyze` | `cancelled` | Set job status to Cancelled |
-| `analyze` | `failed` | Set job status to Failed |
-| `move` | `starting` | Add job to list |
-| `move` | `progress` | Update job progress |
-| `move` | `complete` | Set job status to Complete |
-| `move` | `cancelled` | Set job status to Cancelled |
-| `move` | `failed` | Set job status to Failed |
-| `review` | `accepted` | Refresh review queue + stats |
-| `review` | `rejected` | Refresh review queue + stats |
+**Event dispatch (type guards):**
+```typescript
+if (isRipProgress(event)) {
+    const { pct, eta, stage } = ripProgressFields(event);
+    // Update progress bar
+}
+if (isRipNamed(event)) {
+    const { title, year } = ripNamedInfo(event);
+    // Show auto-naming result
+}
+```
 
 ---
 
@@ -243,9 +249,11 @@ eventSource.addEventListener('status', (event) => {
 | SseManager | `web/src/sse.rs` |
 | SSE endpoint | `web/src/routes/sse_handler.rs` |
 | SSE client | `web/svelte/src/lib/api/sse.ts` |
-| SSE event handling | `web/svelte/src/routes/+page.svelte` |
+| Event helpers | `web/svelte/src/lib/api/parse-event.ts` |
 | Rip SSE events | `web/src/routes/ripper.rs` |
-| Job SSE events | `app/src/jobs.rs` |
+| Job SSE events | `web/src/routes/scan.rs`, `web/src/routes/analyze.rs`, `web/src/routes/move_.rs` |
+| Drive SSE events | `web/src/routes/ripper.rs` |
+| Review SSE events | `web/src/routes/review.rs` |
 
 ---
 
@@ -253,9 +261,10 @@ eventSource.addEventListener('status', (event) => {
 
 - **Broadcast channel** — All connected clients receive all events
 - **Capacity 256** — Oldest messages dropped if channel is full
-- **Event/data format** — Follows SSE specification
+- **JSON format** — Structured events with `kind`, `action`, `index`, `data` fields
 - **Reconnection** — Client reconnects automatically on disconnect
 - **No acknowledgment** — Events are fire-and-forget
 - **SSE excluded from timeout** — Long-lived stream must not be cut by 30s timeout
-- **Status event type** — Most events use `event:status` type
-- **Event parsing** — Client splits on `:` to extract kind, action, detail
+- **Status event type** — All events use `event:status` type
+- **Title-safe** — JSON format handles colons and special characters in text fields
+- **Legacy support** — `send_status`, `send_progress`, `send_log` kept for backward compat

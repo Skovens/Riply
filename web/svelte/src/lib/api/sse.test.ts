@@ -1,148 +1,249 @@
 import { describe, it, expect } from 'vitest';
-import { parseEvent, ripEventIndex, ripProgressFields, ripMessageText } from './parse-event';
+import {
+  isRipProgress,
+  isRipComplete,
+  isRipError,
+  isRipMessage,
+  isRipNamed,
+  isRipNamingFailed,
+  isRipStarting,
+  isRipCancelled,
+  isDriveEvent,
+  isScanEvent,
+  isAnalyzeEvent,
+  isMoveEvent,
+  isReviewEvent,
+  ripEventIndex,
+  ripProgressFields,
+  ripMessageText,
+  ripCompleteDest,
+  ripErrorMessage,
+  ripNamedInfo,
+} from './parse-event';
+import type { SseEvent } from './sse';
 
-describe('parseEvent', () => {
-  it('parses simple kind:action', () => {
-    expect(parseEvent('drive:changed')).toEqual({
-      kind: 'drive',
-      action: 'changed',
-      detail: '',
-    });
+// ── Helpers ──────────────────────────────────────────────────
+
+function makeEvent(overrides: Partial<SseEvent>): SseEvent {
+  return {
+    kind: 'rip',
+    action: 'progress',
+    index: 0,
+    data: {},
+    ...overrides,
+  };
+}
+
+// ── Type guards ──────────────────────────────────────────────
+
+describe('Type guards', () => {
+  it('isRipProgress matches rip:progress', () => {
+    expect(isRipProgress(makeEvent({ kind: 'rip', action: 'progress' }))).toBe(true);
   });
 
-  it('parses kind:action with detail', () => {
-    expect(parseEvent('rip:starting:0')).toEqual({
-      kind: 'rip',
-      action: 'starting',
-      detail: '0',
-    });
+  it('isRipProgress rejects rip:complete', () => {
+    expect(isRipProgress(makeEvent({ kind: 'rip', action: 'complete' }))).toBe(false);
   });
 
-  it('parses rip:progress with index, pct, and eta', () => {
-    expect(parseEvent('rip:progress:0:50:120')).toEqual({
-      kind: 'rip',
-      action: 'progress',
-      detail: '0:50:120',
-    });
+  it('isRipComplete matches rip:complete', () => {
+    expect(isRipComplete(makeEvent({ kind: 'rip', action: 'complete' }))).toBe(true);
   });
 
-  it('parses rip:complete', () => {
-    expect(parseEvent('rip:complete:0')).toEqual({
-      kind: 'rip',
-      action: 'complete',
-      detail: '0',
-    });
+  it('isRipError matches rip:error', () => {
+    expect(isRipError(makeEvent({ kind: 'rip', action: 'error' }))).toBe(true);
   });
 
-  it('parses rip:error with message containing colons', () => {
-    expect(parseEvent('rip:error:2:Drive not found: /dev/sr0')).toEqual({
-      kind: 'rip',
-      action: 'error',
-      detail: '2:Drive not found: /dev/sr0',
-    });
+  it('isRipMessage matches rip:message', () => {
+    expect(isRipMessage(makeEvent({ kind: 'rip', action: 'message' }))).toBe(true);
   });
 
-  it('returns null for data with no colon separator', () => {
-    expect(parseEvent('malformed')).toBeNull();
+  it('isRipNamed matches rip:named', () => {
+    expect(isRipNamed(makeEvent({ kind: 'rip', action: 'named' }))).toBe(true);
   });
 
-  it('returns null for empty string', () => {
-    expect(parseEvent('')).toBeNull();
+  it('isRipNamingFailed matches rip:naming_failed', () => {
+    expect(isRipNamingFailed(makeEvent({ kind: 'rip', action: 'naming_failed' }))).toBe(true);
   });
 
-  it('parses scan:progress', () => {
-    expect(parseEvent('scan:progress:5:10')).toEqual({
-      kind: 'scan',
-      action: 'progress',
-      detail: '5:10',
-    });
+  it('isRipStarting matches rip:starting', () => {
+    expect(isRipStarting(makeEvent({ kind: 'rip', action: 'starting' }))).toBe(true);
   });
 
-  it('parses scan:complete', () => {
-    expect(parseEvent('scan:complete')).toEqual({
-      kind: 'scan',
-      action: 'complete',
-      detail: '',
-    });
+  it('isRipCancelled matches rip:cancelled', () => {
+    expect(isRipCancelled(makeEvent({ kind: 'rip', action: 'cancelled' }))).toBe(true);
   });
 
-  it('parses move:complete', () => {
-    expect(parseEvent('move:complete')).toEqual({
-      kind: 'move',
-      action: 'complete',
-      detail: '',
-    });
+  it('isDriveEvent matches drive:inserted', () => {
+    expect(isDriveEvent(makeEvent({ kind: 'drive', action: 'inserted' }))).toBe(true);
+  });
+
+  it('isScanEvent matches scan:starting', () => {
+    expect(isScanEvent(makeEvent({ kind: 'scan', action: 'starting' }))).toBe(true);
+  });
+
+  it('isAnalyzeEvent matches analyze:progress', () => {
+    expect(isAnalyzeEvent(makeEvent({ kind: 'analyze', action: 'progress' }))).toBe(true);
+  });
+
+  it('isMoveEvent matches move:complete', () => {
+    expect(isMoveEvent(makeEvent({ kind: 'move', action: 'complete' }))).toBe(true);
+  });
+
+  it('isReviewEvent matches review:accepted', () => {
+    expect(isReviewEvent(makeEvent({ kind: 'review', action: 'accepted' }))).toBe(true);
   });
 });
+
+// ── ripEventIndex ────────────────────────────────────────────
 
 describe('ripEventIndex', () => {
-  it('extracts index from simple detail', () => {
-    expect(ripEventIndex('0')).toBe(0);
+  it('extracts index from event', () => {
+    expect(ripEventIndex(makeEvent({ index: 0 }))).toBe(0);
   });
 
-  it('extracts index from progress detail', () => {
-    expect(ripEventIndex('0:50:120')).toBe(0);
-  });
-
-  it('extracts index from error detail with message', () => {
-    expect(ripEventIndex('2:Drive not found')).toBe(2);
-  });
-
-  it('returns NaN for empty string', () => {
-    expect(Number.isNaN(ripEventIndex(''))).toBe(true);
+  it('extracts index 2 from drive event', () => {
+    expect(ripEventIndex(makeEvent({ kind: 'drive', action: 'removed', index: 2 }))).toBe(2);
   });
 });
 
+// ── ripProgressFields ────────────────────────────────────────
+
 describe('ripProgressFields', () => {
-  it('extracts index, pct, eta from valid detail', () => {
-    const result = ripProgressFields('0:50:120');
-    expect(result).toEqual({ index: 0, pct: 50, eta: 120 });
+  it('extracts index, pct, eta from valid event', () => {
+    const result = ripProgressFields(makeEvent({
+      index: 0,
+      data: { pct: 50, eta: 120 },
+    }));
+    expect(result).toEqual({ index: 0, pct: 50, eta: 120, stage: '' });
   });
 
   it('clamps pct to 0-100 range', () => {
-    expect(ripProgressFields('0:-5:10').pct).toBe(0);
-    expect(ripProgressFields('0:150:10').pct).toBe(100);
+    expect(ripProgressFields(makeEvent({ data: { pct: -5 } })).pct).toBe(0);
+    expect(ripProgressFields(makeEvent({ data: { pct: 150 } })).pct).toBe(100);
   });
 
   it('handles missing eta', () => {
-    expect(ripProgressFields('0:50')).toEqual({ index: 0, pct: 50, eta: null });
+    expect(ripProgressFields(makeEvent({ data: { pct: 50 } })).eta).toBeNull();
   });
 
   it('handles zero pct', () => {
-    expect(ripProgressFields('0:0')).toEqual({ index: 0, pct: 0, eta: null });
+    expect(ripProgressFields(makeEvent({ data: { pct: 0 } })).pct).toBe(0);
   });
 
-  it('handles non-numeric strings returning 0', () => {
-    const result = ripProgressFields('abc:def');
-    expect(result.index).toBeNaN();
+  it('handles non-numeric pct returning 0', () => {
+    const result = ripProgressFields(makeEvent({ data: { pct: 'abc' as unknown as number } }));
     expect(result.pct).toBe(0);
-    expect(result.eta).toBeNull();
+  });
+
+  it('extracts stage from data', () => {
+    const result = ripProgressFields(makeEvent({
+      index: 1,
+      data: { pct: 25, eta: 60, stage: 'Ripping title 3' },
+    }));
+    expect(result).toEqual({ index: 1, pct: 25, eta: 60, stage: 'Ripping title 3' });
   });
 });
 
+// ── ripMessageText ───────────────────────────────────────────
+
 describe('ripMessageText', () => {
-  it('extracts message after index', () => {
-    expect(ripMessageText('0:Getting disc info…')).toBe('Getting disc info…');
+  it('extracts message text', () => {
+    expect(ripMessageText(makeEvent({
+      index: 0,
+      data: { text: 'Getting disc info…' },
+    }))).toBe('Getting disc info…');
   });
 
   it('extracts multi-word message', () => {
-    expect(ripMessageText('0:Scanning title 5 of 12')).toBe('Scanning title 5 of 12');
+    expect(ripMessageText(makeEvent({
+      index: 0,
+      data: { text: 'Scanning title 5 of 12' },
+    }))).toBe('Scanning title 5 of 12');
   });
 
   it('handles empty message', () => {
-    expect(ripMessageText('0:')).toBe('');
+    expect(ripMessageText(makeEvent({ index: 0, data: {} }))).toBe('');
   });
 });
 
-describe('rip:message event integration', () => {
-  it('rip:message payload parseEvent + ripMessageText round-trips', () => {
-    const raw = 'rip:message:0:Getting disc info…';
-    const event = parseEvent(raw);
-    expect(event).not.toBeNull();
-    expect(event!.kind).toBe('rip');
-    expect(event!.action).toBe('message');
-    expect(event!.detail).toBe('0:Getting disc info…');
-    expect(ripEventIndex(event!.detail)).toBe(0);
-    expect(ripMessageText(event!.detail)).toBe('Getting disc info…');
+// ── ripCompleteDest ──────────────────────────────────────────
+
+describe('ripCompleteDest', () => {
+  it('extracts destination path', () => {
+    expect(ripCompleteDest(makeEvent({
+      index: 0,
+      data: { dest: '/home/user/Movies/Inception (2010)' },
+    }))).toBe('/home/user/Movies/Inception (2010)');
+  });
+
+  it('handles missing dest', () => {
+    expect(ripCompleteDest(makeEvent({ index: 0, data: {} }))).toBe('');
+  });
+});
+
+// ── ripErrorMessage ──────────────────────────────────────────
+
+describe('ripErrorMessage', () => {
+  it('extracts error message', () => {
+    expect(ripErrorMessage(makeEvent({
+      index: 2,
+      data: { message: 'Drive not found: /dev/sr0' },
+    }))).toBe('Drive not found: /dev/sr0');
+  });
+
+  it('handles missing message', () => {
+    expect(ripErrorMessage(makeEvent({ index: 0, data: {} }))).toBe('');
+  });
+});
+
+// ── ripNamedInfo ─────────────────────────────────────────────
+
+describe('ripNamedInfo', () => {
+  it('extracts title, year, type', () => {
+    const result = ripNamedInfo(makeEvent({
+      index: 0,
+      data: { title: 'Inception', year: 2010, type: 'movie' },
+    }));
+    expect(result).toEqual({ title: 'Inception', year: 2010, type: 'movie' });
+  });
+
+  it('handles missing year', () => {
+    const result = ripNamedInfo(makeEvent({
+      index: 0,
+      data: { title: 'Braveheart' },
+    }));
+    expect(result).toEqual({ title: 'Braveheart', year: undefined, type: 'movie' });
+  });
+
+  it('handles missing type', () => {
+    const result = ripNamedInfo(makeEvent({
+      index: 0,
+      data: { title: 'Breaking Bad', year: 2008 },
+    }));
+    expect(result).toEqual({ title: 'Breaking Bad', year: 2008, type: 'movie' });
+  });
+});
+
+// ── JSON format robustness ───────────────────────────────────
+
+describe('JSON format robustness', () => {
+  it('rip:message with colon in text does not break parsing', () => {
+    // In the old format, "rip:message:0:Inception: The Movie" would break
+    // In JSON format, the text is a proper string value
+    const event = makeEvent({
+      index: 0,
+      data: { text: 'Inception: The Movie' },
+    });
+    expect(ripMessageText(event)).toBe('Inception: The Movie');
+  });
+
+  it('rip:progress with all fields', () => {
+    const event = makeEvent({
+      index: 1,
+      data: { pct: 75, eta: 300, stage: 'Ripping title 8' },
+    });
+    expect(isRipProgress(event)).toBe(true);
+    const fields = ripProgressFields(event);
+    expect(fields).toEqual({ index: 1, pct: 75, eta: 300, stage: 'Ripping title 8' });
   });
 });

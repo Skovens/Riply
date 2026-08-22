@@ -14,8 +14,12 @@
   let ripProgress = $state({});
 
   // ── Rip naming status (ADR-024) ────────────────────────────
-  /** @type {Record<number, { discName: string, foundName: string | null, status: string }>} */
+  /** @type {Record<number, { discName: string, foundName: string | null, status: 'naming' | 'complete' | 'failed' }>} */
   let ripNaming = $state({});
+
+  // ── Rip poster ─────────────────────────────────────────────
+  /** @type {Record<number, { title: string, year: number, posterUrl: string | null }>} */
+  let ripPosters = $state({});
 
   // ── Autorip ────────────────────────────────────────────────
   let autoripDrives = $state([]);
@@ -73,47 +77,148 @@
 
   // ── SSE ────────────────────────────────────────────────────
 
-  /** @param {string} data */
-  function handleSSEEvent(data) {
-    const parts = data.split(':');
-    if (parts.length < 3) return;
-    const [kind, action, idxStr, ...rest] = parts;
-    const idx = parseInt(idxStr, 10);
-    if (isNaN(idx)) return;
+  /** @param {import('$lib/api/sse').SseEvent} event */
+  function handleSSEEvent(event) {
+    const { kind, action, index: idx, data } = event;
 
-    if (kind === 'rip' && (action === 'progress' || action === 'eta')) {
-      const pct = parseFloat(rest[0]) || 0;
-      const eta = action === 'eta' ? parseFloat(rest[1]) || null : null;
-      const stage = rest.slice(2).join(':') || '';
-      ripProgress = { ...ripProgress, [idx]: { pct, eta, stage } };
+    // Drive events
+    if (kind === 'drive' && (action === 'inserted' || action === 'ejected' || action === 'removed')) {
+      fetchDrives();
+      return;
     }
 
-    if (kind === 'rip' && action === 'starting') {
+    if (kind !== 'rip') return;
+
+    // Rip starting
+    if (action === 'starting') {
       drives = drives.map(d => d.index === idx ? { ...d, state: 'Ripping' } : d);
+      ripProgress = { ...ripProgress, [idx]: { pct: 0, eta: null, stage: '' } };
+      return;
     }
 
-    if (kind === 'rip' && (action === 'complete' || action === 'failed')) {
-      drives = drives.map(d => d.index === idx ? { ...d, state: action === 'complete' ? 'Complete' : 'Error' } : d);
+    // Rip progress
+    if (action === 'progress') {
+      const { pct, eta, stage } = data;
+      ripProgress = { ...ripProgress, [idx]: { pct: pct || 0, eta: eta ?? null, stage: stage || '' } };
+      return;
+    }
+
+    // Rip complete
+    if (action === 'complete') {
+      drives = drives.map(d => d.index === idx ? { ...d, state: 'Complete' } : d);
+      const dest = data.dest || '';
+      if (dest) {
+        // Extract folder name from destination path
+        const folderName = dest.split('/').pop() || '';
+        if (folderName) {
+          // Auto-naming already happened, just show complete
+        }
+      }
       setTimeout(() => {
         ripProgress = Object.fromEntries(Object.entries(ripProgress).filter(([k]) => k !== String(idx)));
       }, 5000);
       fetchDrives();
+      return;
     }
 
-    // Auto-naming events
-    if (kind === 'rip' && action === 'naming') {
-      ripNaming = { ...ripNaming, [idx]: { discName: drive.disc_name || '', foundName: null, status: 'naming' } };
+    // Rip error
+    if (action === 'error') {
+      const message = data.message || 'Unknown error';
+      drives = drives.map(d => d.index === idx ? { ...d, state: 'Error' } : d);
+      ripProgress = { ...ripProgress, [idx]: { pct: 0, eta: null, stage: message } };
+      setTimeout(() => {
+        ripProgress = Object.fromEntries(Object.entries(ripProgress).filter(([k]) => k !== String(idx)));
+      }, 5000);
+      fetchDrives();
+      return;
     }
 
-    if (kind === 'rip' && action === 'naming_complete') {
-      const parts = detail.split(' → ').map(s => s.trim());
-      const foundName = parts.length > 1 ? parts[1] : null;
-      ripNaming = { ...ripNaming, [idx]: { discName: drive.disc_name || '', foundName, status: 'complete' } };
+    // Rip cancelled
+    if (action === 'cancelled') {
+      drives = drives.map(d => d.index === idx ? { ...d, state: 'Ready' } : d);
+      ripProgress = Object.fromEntries(Object.entries(ripProgress).filter(([k]) => k !== String(idx)));
+      return;
     }
 
-    if (kind === 'rip' && action === 'naming_failed') {
-      ripNaming = { ...ripNaming, [idx]: { discName: drive.disc_name || '', foundName: null, status: 'failed' } };
+    // Rip message (MakeMKV status text)
+    if (action === 'message') {
+      const text = data.text || '';
+      ripProgress = { ...ripProgress, [idx]: { ...ripProgress[idx], stage: text } };
+      return;
     }
+
+    // Auto-naming: searching
+    if (action === 'naming') {
+      const discName = drives.find(d => d.index === idx)?.disc_name || '';
+      ripNaming = { ...ripNaming, [idx]: { discName, foundName: null, status: 'naming' } };
+      return;
+    }
+
+    // Auto-naming: found
+    if (action === 'named') {
+      const title = data.title || '';
+      const year = data.year || null;
+      const discName = drives.find(d => d.index === idx)?.disc_name || '';
+      const foundName = year ? `${title} (${year})` : title;
+      ripNaming = { ...ripNaming, [idx]: { discName, foundName, status: 'complete' } };
+
+      // Fetch poster from TMDb
+      fetchPoster(idx, title, year);
+      return;
+    }
+
+    // Auto-naming: failed
+    if (action === 'naming_failed') {
+      const discName = drives.find(d => d.index === idx)?.disc_name || '';
+      ripNaming = { ...ripNaming, [idx]: { discName, foundName: null, status: 'failed' } };
+      return;
+    }
+  }
+
+  // ── TMDb Poster ────────────────────────────────────────────
+
+  /** @param {number} idx - Drive index */
+  /** @param {string} title - Movie/TV title */
+  /** @param {number | null} year - Year */
+  async function fetchPoster(idx, title, year) {
+    if (!title) return;
+
+    // Check if we already have a poster cached
+    if (ripPosters[idx]?.title === title && ripPosters[idx]?.year === year) return;
+
+    try {
+      // Search TMDb for the title
+      const searchUrl = `/v1/search/tmdb?query=${encodeURIComponent(title)}${year ? `&year=${year}` : ''}&media_type=movie`;
+      const res = await fetch(searchUrl);
+      if (!res.ok) return;
+
+      const result = await res.json();
+      const matches = result.data?.results || [];
+      if (!matches.length) return;
+
+      const match = matches[0];
+      const tmdbId = match.id;
+      const posterPath = match.poster_path;
+
+      if (!posterPath) return;
+
+      // TMDb image URL
+      const posterUrl = `https://image.tmdb.org/t/p/w300${posterPath}`;
+
+      ripPosters = { ...ripPosters, [idx]: { title, year, posterUrl } };
+    } catch (e) {
+      console.error('Failed to fetch poster:', e);
+    }
+  }
+
+  /** @param {number} idx - Drive index */
+  /** @returns {string} - SVG placeholder for poster */
+  function posterPlaceholder() {
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 180" fill="none">
+      <rect width="120" height="180" rx="8" fill="#374151"/>
+      <circle cx="60" cy="70" r="25" fill="#4B5563"/>
+      <path d="M20 160 Q60 120 100 160" stroke="#4B5563" stroke-width="3" fill="none"/>
+    </svg>`;
   }
 
   // ── Actions ────────────────────────────────────────────────
@@ -201,6 +306,20 @@
       default: return 'Eject only available after rip completes';
     }
   }
+
+  // ── ETA formatting ─────────────────────────────────────────
+  /** @param {number} seconds */
+  function formatEta(seconds) {
+    if (seconds <= 0) return '0s';
+    // Below 45s: show seconds (no flapping)
+    if (seconds < 45) return `${seconds}s`;
+    // 45s+: show minutes
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    if (mins === 0) return `${secs}s`;
+    if (secs === 0) return `${mins}m`;
+    return `${mins}m ${secs}s`;
+  }
 </script>
 
 <div class="ripper">
@@ -230,6 +349,21 @@
   <div class="ripper__drives">
     {#each drives as drive (drive.index)}
       <div class="drive-card" class:drive-card--active={drive.state === 'Ripping'}>
+        <!-- Poster (left side) -->
+        <div class="drive-card__poster">
+          {#if ripPosters[drive.index]?.posterUrl}
+            <img src={ripPosters[drive.index].posterUrl} alt="Poster" class="drive-card__poster-img" />
+          {:else}
+            <div class="drive-card__poster-placeholder">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 180" width="120" height="180">
+                <rect width="120" height="180" rx="8" fill="#374151"/>
+                <circle cx="60" cy="70" r="25" fill="#4B5563"/>
+                <path d="M20 160 Q60 120 100 160" stroke="#4B5563" stroke-width="3" fill="none"/>
+              </svg>
+            </div>
+          {/if}
+        </div>
+
         <div class="drive-card__info">
           <div class="drive-card__header">
             <span class="drive-card__state" style="color: {driveStateColor(drive.state)}">
@@ -244,6 +378,13 @@
             {/if}
           </div>
 
+          <!-- Status line (MakeMKV stage text) -->
+          {#if ripProgress[drive.index]?.stage}
+            <div class="drive-card__status">
+              {ripProgress[drive.index].stage}
+            </div>
+          {/if}
+
           <!-- Progress bar -->
           {#if ripProgress[drive.index]}
             <div class="drive-card__progress">
@@ -252,11 +393,8 @@
               </div>
               <div class="drive-card__progress-info">
                 <span class="drive-card__progress-pct">{ripProgress[drive.index].pct}%</span>
-                {#if ripProgress[drive.index].stage}
-                  <span class="drive-card__progress-stage">{ripProgress[drive.index].stage}</span>
-                {/if}
-                {#if ripProgress[drive.index].eta}
-                  <span class="drive-card__progress-eta">ETA: {ripProgress[drive.index].eta}s</span>
+                {#if ripProgress[drive.index].eta !== null && ripProgress[drive.index].eta > 0}
+                  <span class="drive-card__progress-eta">ETA: {formatEta(ripProgress[drive.index].eta)}</span>
                 {/if}
               </div>
             </div>
@@ -442,6 +580,8 @@
 
   /* ── Drive Card ─────────────────────────────────────────── */
   .drive-card {
+    display: flex;
+    gap: var(--space-4);
     padding: var(--space-4);
     background: var(--color-bg-secondary);
     border: 1px solid var(--color-border);
@@ -452,6 +592,36 @@
   .drive-card--active {
     border-color: var(--color-primary);
     box-shadow: 0 0 0 1px var(--color-primary);
+  }
+
+  /* ── Poster (left side) ────────────────────────────────── */
+  .drive-card__poster {
+    flex-shrink: 0;
+    width: 120px;
+    height: 180px;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    background: var(--color-bg-tertiary);
+  }
+
+  .drive-card__poster-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: var(--radius-lg);
+  }
+
+  .drive-card__poster-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .drive-card__info {
+    flex: 1;
+    min-width: 0;
   }
 
   .drive-card__header {
@@ -479,6 +649,14 @@
   .drive-card__disc-label {
     color: var(--color-text-muted);
     font-size: var(--text-xs);
+    font-style: italic;
+  }
+
+  /* ── Status line ────────────────────────────────────────── */
+  .drive-card__status {
+    margin-top: var(--space-1);
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
     font-style: italic;
   }
 

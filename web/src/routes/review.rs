@@ -8,6 +8,7 @@ use axum::{
     Json, Router,
 };
 use riply_core::FileRecord;
+use serde_json::json;
 
 /// Router for the review domain
 pub fn router(state: Arc<AppState>) -> Router {
@@ -60,7 +61,7 @@ pub async fn accept_file(
         .await
         .map_err(|e| WebError::Internal(e.to_string()))?;
 
-    state.sse.send_status(&format!("review:accepted:{}", id));
+    state.sse.send_json(json!({"kind":"review","action":"accepted","index":0,"data":{"id":id}}));
 
     Ok(Json(ApiResponse::ok(file)))
 }
@@ -91,7 +92,7 @@ pub async fn reject_file(
         .await
         .map_err(|e| WebError::Internal(e.to_string()))?;
 
-    state.sse.send_status(&format!("review:rejected:{}", id));
+    state.sse.send_json(json!({"kind":"review","action":"rejected","index":0,"data":{"id":id}}));
 
     Ok(Json(ApiResponse::ok(file)))
 }
