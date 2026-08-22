@@ -260,6 +260,7 @@ mod tests {
             tv_directory: "tv".to_string(),
             rip_output_directory: Some("/rips".to_string()),
             temp_directory: "/tmp/riply".to_string(),
+            tmp_cleanup_age_days: 7,
             verbose: true,
             tmdb_api_key: None,
             omdb_api_key: None,

@@ -343,14 +343,6 @@ async fn resolve_rip_title(
     (title, year)
 }
 
-/// Format a title+year pair for display: "Title (Year)" or just "Title".
-fn format_title_display(title: &str, year: Option<u16>) -> String {
-    match year {
-        Some(y) => format!("{} ({})", title, y),
-        None => title.to_string(),
-    }
-}
-
 /// Apply "(Copy N)" suffix if the destination already exists.
 fn apply_copy_n(path: &std::path::Path) -> std::path::PathBuf {
     if path.exists() {
