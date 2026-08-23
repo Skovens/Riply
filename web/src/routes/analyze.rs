@@ -67,10 +67,7 @@ pub async fn start_analyze(
                             let _ = db.update_file(&updated).await;
                         }
                         Err(e) => {
-                            sse.send_log(
-                                "warn",
-                                &format!("Failed to analyze {}: {}", record.filename(), e),
-                            );
+                            tracing::warn!("Failed to analyze {}: {}", record.filename(), e);
                         }
                     }
                     progress.increment();
@@ -156,10 +153,7 @@ pub async fn retry_failed(
                             let _ = db.update_file(&updated).await;
                         }
                         Err(e) => {
-                            sse.send_log(
-                                "warn",
-                                &format!("Failed to analyze {}: {}", record.filename(), e),
-                            );
+                            tracing::warn!("Failed to analyze {}: {}", record.filename(), e);
                         }
                     }
 

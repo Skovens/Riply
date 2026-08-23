@@ -55,7 +55,7 @@ pub async fn start_scan(
                 // Save title groups
                 for group in &groups {
                     if let Err(e) = db.save_title_group(group).await {
-                        sse.send_log("warn", &format!("Failed to save title group: {}", e));
+                        tracing::warn!("Failed to save title group: {}", e);
                     }
                 }
 
@@ -81,21 +81,15 @@ pub async fn start_scan(
                     let mut save_record = record.clone();
                     if let Some(dup_path) = duplicates.get(record.hash()) {
                         *save_record.duplicate_path_mut() = Some(dup_path.clone());
-                        sse.send_log(
-                            "info",
-                            &format!(
-                                "Duplicate found: {} matches {}",
-                                record.filename(),
-                                dup_path.display()
-                            ),
+                        tracing::info!(
+                            "Duplicate found: {} matches {}",
+                            record.filename(),
+                            dup_path.display()
                         );
                     }
 
                     if let Err(e) = db.save_file(&save_record).await {
-                        sse.send_log(
-                            "warn",
-                            &format!("Failed to save {}: {}", record.filename(), e),
-                        );
+                        tracing::warn!("Failed to save {}: {}", record.filename(), e);
                     }
                     progress.increment();
                     if (i + 1) % 10 == 0 || i + 1 == records.len() {

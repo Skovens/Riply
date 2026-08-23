@@ -24,6 +24,16 @@ import type { SseEvent } from './sse';
 
 // ── Helpers ──────────────────────────────────────────────────
 
+function makeRipProgressEvent(overrides: Partial<SseEvent> = {}): Extract<SseEvent, { kind: 'rip'; action: 'progress' }> {
+  return {
+    kind: 'rip',
+    action: 'progress',
+    index: 0,
+    data: {},
+    ...overrides,
+  } as Extract<SseEvent, { kind: 'rip'; action: 'progress' }>;
+}
+
 function makeEvent(overrides: Partial<SseEvent>): SseEvent {
   return {
     kind: 'rip',
@@ -38,7 +48,7 @@ function makeEvent(overrides: Partial<SseEvent>): SseEvent {
 
 describe('Type guards', () => {
   it('isRipProgress matches rip:progress', () => {
-    expect(isRipProgress(makeEvent({ kind: 'rip', action: 'progress' }))).toBe(true);
+    expect(isRipProgress(makeRipProgressEvent())).toBe(true);
   });
 
   it('isRipProgress rejects rip:complete', () => {
@@ -110,7 +120,7 @@ describe('ripEventIndex', () => {
 
 describe('ripProgressFields', () => {
   it('extracts index, pct, eta from valid event', () => {
-    const result = ripProgressFields(makeEvent({
+    const result = ripProgressFields(makeRipProgressEvent({
       index: 0,
       data: { pct: 50, eta: 120 },
     }));
@@ -118,25 +128,25 @@ describe('ripProgressFields', () => {
   });
 
   it('clamps pct to 0-100 range', () => {
-    expect(ripProgressFields(makeEvent({ data: { pct: -5 } })).pct).toBe(0);
-    expect(ripProgressFields(makeEvent({ data: { pct: 150 } })).pct).toBe(100);
+    expect(ripProgressFields(makeRipProgressEvent({ data: { pct: -5 } })).pct).toBe(0);
+    expect(ripProgressFields(makeRipProgressEvent({ data: { pct: 150 } })).pct).toBe(100);
   });
 
   it('handles missing eta', () => {
-    expect(ripProgressFields(makeEvent({ data: { pct: 50 } })).eta).toBeNull();
+    expect(ripProgressFields(makeRipProgressEvent({ data: { pct: 50 } })).eta).toBeNull();
   });
 
   it('handles zero pct', () => {
-    expect(ripProgressFields(makeEvent({ data: { pct: 0 } })).pct).toBe(0);
+    expect(ripProgressFields(makeRipProgressEvent({ data: { pct: 0 } })).pct).toBe(0);
   });
 
   it('handles non-numeric pct returning 0', () => {
-    const result = ripProgressFields(makeEvent({ data: { pct: 'abc' as unknown as number } }));
+    const result = ripProgressFields(makeRipProgressEvent({ data: { pct: 'abc' as unknown as number } }));
     expect(result.pct).toBe(0);
   });
 
   it('extracts stage from data', () => {
-    const result = ripProgressFields(makeEvent({
+    const result = ripProgressFields(makeRipProgressEvent({
       index: 1,
       data: { pct: 25, eta: 60, stage: 'Ripping title 3' },
     }));
@@ -150,6 +160,8 @@ describe('ripMessageText', () => {
   it('extracts message text', () => {
     expect(ripMessageText(makeEvent({
       index: 0,
+      kind: 'rip',
+      action: 'message',
       data: { text: 'Getting disc info…' },
     }))).toBe('Getting disc info…');
   });
@@ -157,12 +169,14 @@ describe('ripMessageText', () => {
   it('extracts multi-word message', () => {
     expect(ripMessageText(makeEvent({
       index: 0,
+      kind: 'rip',
+      action: 'message',
       data: { text: 'Scanning title 5 of 12' },
     }))).toBe('Scanning title 5 of 12');
   });
 
   it('handles empty message', () => {
-    expect(ripMessageText(makeEvent({ index: 0, data: {} }))).toBe('');
+    expect(ripMessageText(makeEvent({ index: 0, kind: 'rip', action: 'message', data: {} }))).toBe('');
   });
 });
 
@@ -172,12 +186,14 @@ describe('ripCompleteDest', () => {
   it('extracts destination path', () => {
     expect(ripCompleteDest(makeEvent({
       index: 0,
+      kind: 'rip',
+      action: 'complete',
       data: { dest: '/home/user/Movies/Inception (2010)' },
     }))).toBe('/home/user/Movies/Inception (2010)');
   });
 
   it('handles missing dest', () => {
-    expect(ripCompleteDest(makeEvent({ index: 0, data: {} }))).toBe('');
+    expect(ripCompleteDest(makeEvent({ index: 0, kind: 'rip', action: 'complete', data: {} }))).toBe('');
   });
 });
 
@@ -187,12 +203,14 @@ describe('ripErrorMessage', () => {
   it('extracts error message', () => {
     expect(ripErrorMessage(makeEvent({
       index: 2,
+      kind: 'rip',
+      action: 'error',
       data: { message: 'Drive not found: /dev/sr0' },
     }))).toBe('Drive not found: /dev/sr0');
   });
 
   it('handles missing message', () => {
-    expect(ripErrorMessage(makeEvent({ index: 0, data: {} }))).toBe('');
+    expect(ripErrorMessage(makeEvent({ index: 0, kind: 'rip', action: 'error', data: {} }))).toBe('');
   });
 });
 
@@ -202,6 +220,8 @@ describe('ripNamedInfo', () => {
   it('extracts title, year, type', () => {
     const result = ripNamedInfo(makeEvent({
       index: 0,
+      kind: 'rip',
+      action: 'named',
       data: { title: 'Inception', year: 2010, type: 'movie' },
     }));
     expect(result).toEqual({ title: 'Inception', year: 2010, type: 'movie' });
@@ -210,6 +230,8 @@ describe('ripNamedInfo', () => {
   it('handles missing year', () => {
     const result = ripNamedInfo(makeEvent({
       index: 0,
+      kind: 'rip',
+      action: 'named',
       data: { title: 'Braveheart' },
     }));
     expect(result).toEqual({ title: 'Braveheart', year: undefined, type: 'movie' });
@@ -218,6 +240,8 @@ describe('ripNamedInfo', () => {
   it('handles missing type', () => {
     const result = ripNamedInfo(makeEvent({
       index: 0,
+      kind: 'rip',
+      action: 'named',
       data: { title: 'Breaking Bad', year: 2008 },
     }));
     expect(result).toEqual({ title: 'Breaking Bad', year: 2008, type: 'movie' });
@@ -228,17 +252,17 @@ describe('ripNamedInfo', () => {
 
 describe('JSON format robustness', () => {
   it('rip:message with colon in text does not break parsing', () => {
-    // In the old format, "rip:message:0:Inception: The Movie" would break
-    // In JSON format, the text is a proper string value
     const event = makeEvent({
       index: 0,
+      kind: 'rip',
+      action: 'message',
       data: { text: 'Inception: The Movie' },
     });
     expect(ripMessageText(event)).toBe('Inception: The Movie');
   });
 
   it('rip:progress with all fields', () => {
-    const event = makeEvent({
+    const event = makeRipProgressEvent({
       index: 1,
       data: { pct: 75, eta: 300, stage: 'Ripping title 8' },
     });

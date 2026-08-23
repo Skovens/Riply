@@ -94,20 +94,14 @@ pub async fn start_move(
                     match mover.move_file(file, &movies_path, &tv_path).await {
                         Ok(updated) => {
                             if let Err(e) = db.update_file(&updated).await {
-                                sse.send_log(
-                                    "warn",
-                                    &format!("Failed to update {}: {}", file.filename(), e),
-                                );
+                                tracing::warn!("Failed to update {}: {}", file.filename(), e);
                                 errors += 1;
                             } else {
                                 moved += 1;
                             }
                         }
                         Err(e) => {
-                            sse.send_log(
-                                "warn",
-                                &format!("Failed to move {}: {}", file.filename(), e),
-                            );
+                            tracing::warn!("Failed to move {}: {}", file.filename(), e);
                             errors += 1;
                         }
                     }
