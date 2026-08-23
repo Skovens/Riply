@@ -120,31 +120,34 @@ export function isJobEvent(event: SseEvent): boolean {
 
 // ── SSE Client ──────────────────────────────────────────────
 
-export function connectSSE(onMessage: (event: SseEvent) => void) {
+export type SseOptions = {
+  onError?: (event: SseEvent | null, raw: string) => void;
+};
+
+export function connectSSE(onMessage: (event: SseEvent) => void, options?: SseOptions) {
   const eventSource = new EventSource('/v1/sse');
 
-  eventSource.addEventListener('status', (event: MessageEvent) => {
+  const parseAndForward = (raw: string) => {
     try {
-      const parsed = JSON.parse(event.data) as SseEvent;
+      const parsed = JSON.parse(raw) as SseEvent;
       onMessage(parsed);
       lastEvent.set(parsed);
     } catch (e) {
-      console.error('SSE parse error:', e, event.data);
-    }
-  });
-
-  eventSource.onmessage = (event) => {
-    try {
-      const parsed = JSON.parse(event.data) as SseEvent;
-      onMessage(parsed);
-      lastEvent.set(parsed);
-    } catch (e) {
-      console.error('SSE parse error:', e, event.data);
+      console.error('SSE parse error:', e, raw);
+      options?.onError?.(null, raw);
     }
   };
 
+  eventSource.addEventListener('status', (event: MessageEvent) => {
+    parseAndForward(event.data);
+  });
+
+  eventSource.onmessage = (event) => {
+    parseAndForward(event.data);
+  };
+
   eventSource.onerror = (error) => {
-    console.error('SSE error:', error);
+    console.error('SSE connection error:', error);
   };
 
   return () => eventSource.close();

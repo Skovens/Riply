@@ -176,6 +176,8 @@
   }
 
   // ── TMDb Poster ────────────────────────────────────────────
+  // Cache key is (title, year) not (idx, title, year) to deduplicate
+  // same title fetched for different drives.
 
   /** @param {number} idx - Drive index */
   /** @param {string} title - Movie/TV title */
@@ -183,11 +185,11 @@
   async function fetchPoster(idx, title, year) {
     if (!title) return;
 
-    // Check if we already have a poster cached
-    if (ripPosters[idx]?.title === title && ripPosters[idx]?.year === year) return;
+    // Deduplicate by (title, year) — not per-drive
+    const cacheKey = `${title}::${year ?? ''}`;
+    if (Object.values(ripPosters).some(p => `${p.title}::${p.year ?? ''}` === cacheKey)) return;
 
     try {
-      // Search TMDb for the title
       const searchUrl = `/v1/search/tmdb?query=${encodeURIComponent(title)}${year ? `&year=${year}` : ''}&media_type=movie`;
       const res = await fetch(searchUrl);
       if (!res.ok) return;
@@ -196,29 +198,13 @@
       const matches = result.data?.results || [];
       if (!matches.length) return;
 
-      const match = matches[0];
-      const tmdbId = match.id;
-      const posterPath = match.poster_path;
-
+      const posterPath = matches[0].poster_path;
       if (!posterPath) return;
 
-      // TMDb image URL
-      const posterUrl = `https://image.tmdb.org/t/p/w300${posterPath}`;
-
-      ripPosters = { ...ripPosters, [idx]: { title, year, posterUrl } };
+      ripPosters = { ...ripPosters, [idx]: { title, year, posterUrl: `https://image.tmdb.org/t/p/w300${posterPath}` } };
     } catch (e) {
       console.error('Failed to fetch poster:', e);
     }
-  }
-
-  /** @param {number} idx - Drive index */
-  /** @returns {string} - SVG placeholder for poster */
-  function posterPlaceholder() {
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 180" fill="none">
-      <rect width="120" height="180" rx="8" fill="#374151"/>
-      <circle cx="60" cy="70" r="25" fill="#4B5563"/>
-      <path d="M20 160 Q60 120 100 160" stroke="#4B5563" stroke-width="3" fill="none"/>
-    </svg>`;
   }
 
   // ── Actions ────────────────────────────────────────────────
