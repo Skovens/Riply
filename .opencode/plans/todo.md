@@ -2,8 +2,27 @@
 
 ## Next Up
 
-> **Next Up:** No pending roadmap items — all of `improvements.md` (Batch 5, §2–§4)
-> is DONE. The last "consider" item **#31** (Merge `web` crate into `cli`) was
+> **Next Up (2026-08-31, hardware-verification):** Full real-hardware test of the
+> DVD ripping subsystem is DONE (see `hardware-verification-2026-08.md`). It
+> surfaced **4 bugs**, now tracked as **GitHub issues** (this is the canonical
+> tracker going forward — see `#10`–`#13`). Pick one, one at a time:
+>
+> - **#12 — Organizer move writes to hardcoded `TODO_MOVIE_DIR`** (final move
+>   non-functional; highest user impact on the organize path).
+> - **#11 — No live rip progress / ETA** (UI bar frozen; recommended fix is a
+>   file-size-growth fallback in `process_rip_events`).
+> - **#10 — Rip cancel leaves orphaned `makemkvcon`** (kill the process group,
+>   not just the `flatpak`/`bwrap` wrapper).
+> - **#13 — `flatpak_permissions_ok` true but rip dir not sandbox-writable**
+>   (add a destination-writability probe; fail fast instead of silent empty rip).
+>
+> Deferred (needs hardware we don't have): TV-series DVD, mid-rip disc removal,
+> multi-drive, `Loading` state. TMDb/OMDb auto-naming + Organizer TMDb matching
+> could not be exercised here (API keys not reachable in the agent sandbox) —
+> re-test once `tmdb_api_key`/`omdb_api_key` are in `config.toml`.
+>
+> **Previous:** No pending roadmap items — all of `improvements.md` (Batch 5,
+> §2–§4) is DONE. The last "consider" item **#31** (Merge `web` crate into `cli`) was
 > **decided against on 2026-08-02** — pure internal refactor with no user value;
 > keeping `web` separate preserves the option of a future second binary (daemon /
 > other UI) sharing the router. The roadmap is now fully closed out.
