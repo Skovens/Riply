@@ -274,7 +274,7 @@ async fn process_rip_events(
                 return Ok(());
             }
             RipEvent::Error(e) => {
-                sse.send_json(json!({"kind":"rip","action":"error","index":index,"data":{"message":format!("{}", e)}}));
+                sse.send_json(json!({"kind":"rip","action":"error","index":index,"data":{"message":e.to_string()}}));
                 return Err(e);
             }
             RipEvent::Message(msg) => {
@@ -592,8 +592,8 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
         // Track removed drives so we emit a removal event
         let current_indices: std::collections::HashSet<usize> =
             drives.iter().map(|d| d.index).collect();
-        for idx in prev_states.keys().copied() {
-            if !current_indices.contains(&idx) {
+        for idx in prev_states.keys() {
+            if !current_indices.contains(idx) {
                 sse.send_json(json!({"kind":"drive","action":"removed","index":idx,"data":{}}));
             }
         }

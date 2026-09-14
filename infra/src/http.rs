@@ -1021,12 +1021,12 @@ mod tests {
 
         let client = HttpClient::for_testing(mock_server.uri(), Some("test_key".to_string()), None);
 
-        // First call — cache miss
-        let enrichment1 = client.fetch_tmdb_enrichment(550, &MediaType::Movie).await.unwrap();
+        // Use trait method to exercise cache logic
+        let enrichment1 = riply_core::MetadataSearcher::fetch_enrichment(&client, 550, &MediaType::Movie).await.unwrap();
         assert_eq!(enrichment1.runtime, Some(139));
 
         // Second call — cache hit
-        let enrichment2 = client.fetch_tmdb_enrichment(550, &MediaType::Movie).await.unwrap();
+        let enrichment2 = riply_core::MetadataSearcher::fetch_enrichment(&client, 550, &MediaType::Movie).await.unwrap();
         assert_eq!(enrichment2.runtime, Some(139));
 
         let cache = client.cache.lock().unwrap();

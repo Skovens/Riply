@@ -105,7 +105,7 @@ pub async fn watch_directory(
                                     let mut new_count = 0;
                                     for record in &result.records {
                                         // Check if file already exists
-                                        let existing = db.find_file_by_hash(&record.hash()).await;
+                                        let existing = db.find_file_by_hash(record.hash()).await;
                                         match existing {
                                             Ok(Some(_)) => {
                                                 // Update existing
