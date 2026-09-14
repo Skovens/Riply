@@ -299,17 +299,17 @@ impl OrganizerService {
         if let Some(ref main_file) = folder.main_file {
             let src = folder.path.join(main_file);
             let dst = format!("{}{}", dest, main_file);
-            fs::rename(&src, &dst).map_err(|e| FolderStoreError::IoError(e))?;
+            fs::rename(&src, &dst).map_err(FolderStoreError::IoError)?;
         }
 
         // Move extras to Extras/ subfolder
         if !folder.extra_files.is_empty() {
             let extras_dir = format!("{}Extras/", dest);
-            fs::create_dir_all(&extras_dir).map_err(|e| FolderStoreError::IoError(e))?;
+            fs::create_dir_all(&extras_dir).map_err(FolderStoreError::IoError)?;
             for extra in &folder.extra_files {
                 let src = folder.path.join(extra);
                 let dst = format!("{}{}", extras_dir, extra);
-                fs::rename(&src, &dst).map_err(|e| FolderStoreError::IoError(e))?;
+                fs::rename(&src, &dst).map_err(FolderStoreError::IoError)?;
             }
         }
 
@@ -358,44 +358,6 @@ fn is_media_file(ext: &str) -> bool {
         ext.to_lowercase().as_str(),
         "mkv" | "mp4" | "avi" | "mov" | "m4v" | "webm"
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use riply_core::FolderRecord;
-    use std::path::PathBuf;
-
-    #[test]
-    fn test_is_media_file() {
-        assert!(is_media_file("mkv"));
-        assert!(is_media_file("MKV"));
-        assert!(is_media_file("mp4"));
-        assert!(is_media_file("mov"));
-        assert!(is_media_file("m4v"));
-        assert!(is_media_file("webm"));
-        assert!(!is_media_file("txt"));
-        assert!(!is_media_file("jpg"));
-        assert!(!is_media_file("pdf"));
-    }
-
-    #[test]
-    fn test_detect_media_type_single_file() {
-        let folder = FolderRecord::new(
-            "test".to_string(),
-            PathBuf::from("/test/Folder"),
-            "Folder".to_string(),
-            1,
-        );
-        assert_eq!(detect_media_type_from_files(&folder), MediaType::Movie);
-    }
-
-    #[test]
-    fn test_organizer_service_creation() {
-        let store = MockFolderStore::new();
-        let service = OrganizerService::new(None, Arc::new(store));
-        assert!(service.get_scan_directory().is_none());
-    }
 }
 
 /// Mock FolderStore for testing
@@ -460,5 +422,43 @@ impl FolderStore for MockFolderStore {
     async fn clear_folders(&self) -> Result<(), FolderStoreError> {
         self.folders.lock().unwrap().clear();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use riply_core::FolderRecord;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_is_media_file() {
+        assert!(is_media_file("mkv"));
+        assert!(is_media_file("MKV"));
+        assert!(is_media_file("mp4"));
+        assert!(is_media_file("mov"));
+        assert!(is_media_file("m4v"));
+        assert!(is_media_file("webm"));
+        assert!(!is_media_file("txt"));
+        assert!(!is_media_file("jpg"));
+        assert!(!is_media_file("pdf"));
+    }
+
+    #[test]
+    fn test_detect_media_type_single_file() {
+        let folder = FolderRecord::new(
+            "test".to_string(),
+            PathBuf::from("/test/Folder"),
+            "Folder".to_string(),
+            1,
+        );
+        assert_eq!(detect_media_type_from_files(&folder), MediaType::Movie);
+    }
+
+    #[test]
+    fn test_organizer_service_creation() {
+        let store = MockFolderStore::new();
+        let service = OrganizerService::new(None, Arc::new(store));
+        assert!(service.get_scan_directory().is_none());
     }
 }

@@ -151,7 +151,7 @@ impl FolderRecord {
             (None, vec![])
         } else {
             let mut sorted = files;
-            sorted.sort_by(|a, b| b.1.cmp(&a.1)); // Sort by size descending
+            sorted.sort_by_key(|a| std::cmp::Reverse(a.1)); // Sort by size descending
             let main = sorted.first().map(|(name, _)| name.clone());
             let extras: Vec<String> = sorted.iter().skip(1).map(|(name, _)| name.clone()).collect();
             (main, extras)

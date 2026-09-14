@@ -1,21 +1,108 @@
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
+use std::sync::Arc;
+use std::time::Duration;
 
 use backon::{ExponentialBuilder, Retryable};
+use lru::LruCache;
 use reqwest::Client;
 use riply_core::{MediaType, MetadataEnrichment, MetadataError, MetadataMatch, MetadataSearcher};
-use tracing::info;
+use tracing::{info, warn};
 
-use crate::rate_limiter::RateLimiter;
+use crate::rate_limiter::{MonthlyQuota, RateLimiter, SlidingWindowLimiter};
+
+/// Maximum LRU cache size for metadata search/enrichment results.
+const CACHE_SIZE: NonZeroUsize = NonZeroUsize::new(500).unwrap();
+
+/// Metadata cache with 24-hour TTL.
+struct MetadataCache {
+    search: LruCache<(String, Option<u32>, bool), Vec<MetadataMatch>>,
+    enrichment: LruCache<(i32, bool), MetadataEnrichment>,
+    search_hits: usize,
+    search_misses: usize,
+    enrichment_hits: usize,
+    enrichment_misses: usize,
+}
+
+impl MetadataCache {
+    fn new() -> Self {
+        MetadataCache {
+            search: LruCache::new(CACHE_SIZE),
+            enrichment: LruCache::new(CACHE_SIZE),
+            search_hits: 0,
+            search_misses: 0,
+            enrichment_hits: 0,
+            enrichment_misses: 0,
+        }
+    }
+
+    fn search_key(query: &str, year: Option<u32>, is_tv: bool) -> (String, Option<u32>, bool) {
+        (query.to_string(), year, is_tv)
+    }
+
+    fn enrichment_key(tmdb_id: i32, is_tv: bool) -> (i32, bool) {
+        (tmdb_id, is_tv)
+    }
+
+    fn get_search(
+        &mut self,
+        key: &(String, Option<u32>, bool),
+    ) -> Option<Vec<MetadataMatch>> {
+        self.search.pop(key)
+    }
+
+    fn put_search(
+        &mut self,
+        key: (String, Option<u32>, bool),
+        value: Vec<MetadataMatch>,
+    ) {
+        self.search.put(key, value);
+    }
+
+    fn record_search_hit(&mut self) {
+        self.search_hits += 1;
+    }
+
+    fn record_search_miss(&mut self) {
+        self.search_misses += 1;
+    }
+
+    fn get_enrichment(
+        &mut self,
+        key: &(i32, bool),
+    ) -> Option<MetadataEnrichment> {
+        self.enrichment.pop(key)
+    }
+
+    fn put_enrichment(
+        &mut self,
+        key: (i32, bool),
+        value: MetadataEnrichment,
+    ) {
+        self.enrichment.put(key, value);
+    }
+
+    fn record_enrichment_hit(&mut self) {
+        self.enrichment_hits += 1;
+    }
+
+    fn record_enrichment_miss(&mut self) {
+        self.enrichment_misses += 1;
+    }
+}
 
 /// HTTP client adapter - handles API requests with retry and rate limiting
+#[derive(Clone)]
 pub struct HttpClient {
     client: Client,
     tmdb_base_url: String,
     omdb_base_url: String,
     tmdb_api_key: Option<String>,
     omdb_api_key: Option<String>,
-    tmdb_limiter: Option<RateLimiter>,
-    omdb_limiter: Option<RateLimiter>,
+    tmdb_limiter: Option<Arc<RateLimiter>>,
+    omdb_limiter: Option<Arc<SlidingWindowLimiter>>,
+    omdb_quota: Option<Arc<MonthlyQuota>>,
+    cache: Arc<std::sync::Mutex<MetadataCache>>,
 }
 
 /// TMDb search result
@@ -139,8 +226,12 @@ impl HttpClient {
             .build()
             .expect("Failed to build HTTP client");
 
-        let tmdb_limiter = tmdb_api_key.is_some().then(|| RateLimiter::new(40, 4.0));
-        let omdb_limiter = omdb_api_key.is_some().then(|| RateLimiter::new(10, 10.0));
+        // TMDb: 4 req/sec token bucket (well under soft limit of ~40/sec)
+        let tmdb_limiter = tmdb_api_key.is_some().then(|| Arc::new(RateLimiter::new(40, 4.0)));
+        // OMDb: 10 req/min sliding window (official limit)
+        let omdb_limiter = omdb_api_key.is_some().then(|| Arc::new(SlidingWindowLimiter::new(10, 60)));
+        // OMDb: 1,000 req/month quota
+        let omdb_quota = omdb_api_key.is_some().then(|| Arc::new(MonthlyQuota::new(1_000)));
 
         HttpClient {
             client,
@@ -150,6 +241,8 @@ impl HttpClient {
             omdb_api_key,
             tmdb_limiter,
             omdb_limiter,
+            omdb_quota,
+            cache: Arc::new(std::sync::Mutex::new(MetadataCache::new())),
         }
     }
 
@@ -162,27 +255,84 @@ impl HttpClient {
         Self::with_urls(base_url.clone(), base_url, tmdb_api_key, omdb_api_key)
     }
 
+    /// Perform a GET request with rate limiting, retries, and 429 handling.
     async fn get_json<T: serde::de::DeserializeOwned>(
         &self,
         url: &str,
         params: &HashMap<String, String>,
         limiter: Option<&RateLimiter>,
+        omdb_limiter: Option<&SlidingWindowLimiter>,
+        omdb_quota: Option<&Arc<MonthlyQuota>>,
     ) -> Result<T, anyhow::Error> {
+        // OMDb monthly quota check
+        if let Some(quota) = omdb_quota {
+            quota.try_acquire().await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        }
+
+        // Apply rate limiting
         if let Some(limiter) = limiter {
             limiter.acquire().await;
         }
+        if let Some(limiter) = omdb_limiter {
+            limiter.acquire().await;
+        }
+
         let url = url.to_string();
         let params = params.clone();
-        let client = self.client.clone();
+        let fallback_url = url.clone();
+        let fallback_params = params.clone();
+        let retry_client = self.client.clone();
+        let fallback_client = self.client.clone();
+
         let resp = (move || {
-            let client = client.clone();
+            let client = retry_client.clone();
             let url = url.clone();
             let params = params.clone();
             async move { client.get(&url).query(&params).send().await }
         })
-        .retry(ExponentialBuilder::default())
+        .retry(
+            ExponentialBuilder::default()
+                .with_max_times(3)
+                .with_min_delay(Duration::from_millis(500))
+                .with_max_delay(Duration::from_secs(10)),
+        )
+        .when(|error: &reqwest::Error| {
+            // Retry on network errors, not on HTTP errors
+            error.is_connect() || error.is_timeout()
+        })
         .await?;
-        Ok(resp.json::<T>().await?)
+
+        // Handle 429 - retry already handled network errors
+        if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let retry_after = resp
+                .headers()
+                .get("Retry-After")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(5);
+
+            warn!(
+                retry_after_secs = retry_after,
+                "API rate limited (429), backing off"
+            );
+
+            tokio::time::sleep(Duration::from_secs(retry_after)).await;
+
+            // One final attempt after backoff
+            let resp = fallback_client
+                .get(&fallback_url)
+                .query(&fallback_params)
+                .send()
+                .await?;
+
+            if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                return Err(anyhow::anyhow!("API rate limited after backoff (429)"));
+            }
+
+            Ok(resp.json::<T>().await?)
+        } else {
+            Ok(resp.json::<T>().await?)
+        }
     }
 
     pub async fn search_tmdb_movies(
@@ -204,7 +354,7 @@ impl HttpClient {
 
         let url = format!("{}/search/movie", self.tmdb_base_url);
         let resp: TmdbSearchResponse = self
-            .get_json(&url, &params, self.tmdb_limiter.as_ref())
+            .get_json(&url, &params, self.tmdb_limiter.as_deref(), None, None)
             .await?;
 
         let matches = resp
@@ -240,7 +390,7 @@ impl HttpClient {
 
         let url = format!("{}/search/tv", self.tmdb_base_url);
         let resp: TmdbSearchResponse = self
-            .get_json(&url, &params, self.tmdb_limiter.as_ref())
+            .get_json(&url, &params, self.tmdb_limiter.as_deref(), None, None)
             .await?;
 
         let matches = resp
@@ -283,7 +433,7 @@ impl HttpClient {
 
         let url = format!("{}/", self.omdb_base_url);
         let resp: OmdbResponse = self
-            .get_json(&url, &params, self.omdb_limiter.as_ref())
+            .get_json(&url, &params, None, self.omdb_limiter.as_deref(), self.omdb_quota.as_ref())
             .await?;
 
         if resp.response.as_deref() == Some("True") {
@@ -324,7 +474,7 @@ impl HttpClient {
 
         let url = format!("{}/", self.omdb_base_url);
         let resp: OmdbResponse = self
-            .get_json(&url, &params, self.omdb_limiter.as_ref())
+            .get_json(&url, &params, None, self.omdb_limiter.as_deref(), self.omdb_quota.as_ref())
             .await?;
 
         if resp.response.as_deref() == Some("True") {
@@ -413,7 +563,7 @@ impl HttpClient {
         ]);
 
         let resp: TmdbDetails = self
-            .get_json(&url, &params, self.tmdb_limiter.as_ref())
+            .get_json(&url, &params, self.tmdb_limiter.as_deref(), None, None)
             .await?;
 
         let genres = (!resp.genres.is_empty())
@@ -473,10 +623,24 @@ impl MetadataSearcher for HttpClient {
         >,
     > {
         let query = query.to_string();
+        let client = self.clone();
         Box::pin(async move {
-            self.search_tmdb_movies(&query, year)
+            let key = MetadataCache::search_key(&query, year, false);
+            {
+                let mut cache = client.cache.lock().unwrap();
+                if let Some(cached) = cache.get_search(&key) {
+                    cache.record_search_hit();
+                    return Ok(cached);
+                }
+                cache.record_search_miss();
+            }
+            let results = client
+                .search_tmdb_movies(&query, year)
                 .await
-                .map_err(|e| MetadataError::ApiError(e.to_string()))
+                .map_err(|e| MetadataError::ApiError(e.to_string()))?;
+            let mut cache = client.cache.lock().unwrap();
+            cache.put_search(key, results.clone());
+            Ok(results)
         })
     }
 
@@ -489,10 +653,24 @@ impl MetadataSearcher for HttpClient {
         >,
     > {
         let query = query.to_string();
+        let client = self.clone();
         Box::pin(async move {
-            self.search_tmdb_tv(&query)
+            let key = MetadataCache::search_key(&query, None, true);
+            {
+                let mut cache = client.cache.lock().unwrap();
+                if let Some(cached) = cache.get_search(&key) {
+                    cache.record_search_hit();
+                    return Ok(cached);
+                }
+                cache.record_search_miss();
+            }
+            let results = client
+                .search_tmdb_tv(&query)
                 .await
-                .map_err(|e| MetadataError::ApiError(e.to_string()))
+                .map_err(|e| MetadataError::ApiError(e.to_string()))?;
+            let mut cache = client.cache.lock().unwrap();
+            cache.put_search(key, results.clone());
+            Ok(results)
         })
     }
 
@@ -508,10 +686,20 @@ impl MetadataSearcher for HttpClient {
     > {
         let query = query.to_string();
         let media_type = media_type.clone();
+        let client = self.clone();
         Box::pin(async move {
-            let mut results = match media_type {
+            let key = MetadataCache::search_key(&query, year, media_type.is_tv());
+            {
+                let mut cache = client.cache.lock().unwrap();
+                if let Some(cached) = cache.get_search(&key) {
+                    cache.record_search_hit();
+                    return Ok(cached);
+                }
+                cache.record_search_miss();
+            }
+            let mut results = match &media_type {
                 MediaType::Tv => {
-                    let mut tv = match self.search_tmdb_tv(&query).await {
+                    let mut tv = match client.search_tmdb_tv(&query).await {
                         Ok(r) => r,
                         Err(e) => {
                             tracing::warn!(error = %e, query = %query, "TMDb TV search failed, falling back to OMDb");
@@ -519,7 +707,7 @@ impl MetadataSearcher for HttpClient {
                         }
                     };
                     if tv.is_empty() {
-                        tv = self
+                        tv = client
                             .search_omdb_tv(&query, year)
                             .await
                             .map_err(|e| MetadataError::ApiError(e.to_string()))?;
@@ -527,7 +715,7 @@ impl MetadataSearcher for HttpClient {
                     tv
                 }
                 MediaType::Movie => {
-                    let mut movies = match self.search_tmdb_movies(&query, year).await {
+                    let mut movies = match client.search_tmdb_movies(&query, year).await {
                         Ok(r) => r,
                         Err(e) => {
                             tracing::warn!(error = %e, query = %query, "TMDb movie search failed, falling back to OMDb");
@@ -535,7 +723,7 @@ impl MetadataSearcher for HttpClient {
                         }
                     };
                     if movies.is_empty() {
-                        movies = self
+                        movies = client
                             .search_omdb(&query, year)
                             .await
                             .map_err(|e| MetadataError::ApiError(e.to_string()))?;
@@ -544,6 +732,8 @@ impl MetadataSearcher for HttpClient {
                 }
             };
             results.truncate(5);
+            let mut cache = client.cache.lock().unwrap();
+            cache.put_search(key, results.clone());
             Ok(results)
         })
     }
@@ -558,10 +748,24 @@ impl MetadataSearcher for HttpClient {
         >,
     > {
         let media_type = media_type.clone();
+        let client = self.clone();
         Box::pin(async move {
-            self.fetch_tmdb_enrichment(tmdb_id, &media_type)
+            let key = MetadataCache::enrichment_key(tmdb_id, media_type.is_tv());
+            {
+                let mut cache = client.cache.lock().unwrap();
+                if let Some(cached) = cache.get_enrichment(&key) {
+                    cache.record_enrichment_hit();
+                    return Ok(cached);
+                }
+                cache.record_enrichment_miss();
+            }
+            let result = client
+                .fetch_tmdb_enrichment(tmdb_id, &media_type)
                 .await
-                .map_err(|e| MetadataError::ApiError(e.to_string()))
+                .map_err(|e| MetadataError::ApiError(e.to_string()))?;
+            let mut cache = client.cache.lock().unwrap();
+            cache.put_enrichment(key, result.clone());
+            Ok(result)
         })
     }
 }
@@ -724,5 +928,109 @@ mod tests {
 
         let results = client.search_omdb("The Matrix", None).await.unwrap();
         assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_search_cache_hit() {
+        let mock_server = MockServer::start().await;
+
+        // Only first call should hit the mock server
+        Mock::given(method("GET"))
+            .and(path_regex(".*/search/movie.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "results": [
+                    {
+                        "id": 550,
+                        "title": "Fight Club",
+                        "release_date": "1999-10-15"
+                    }
+                ]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = HttpClient::for_testing(mock_server.uri(), Some("test_key".to_string()), None);
+
+        // First call — cache miss, hits the mock server
+        let results1 = client.search_movies("Fight Club", Some(1999)).await.unwrap();
+        assert_eq!(results1.len(), 1);
+        assert_eq!(results1[0].title, "Fight Club");
+
+        // Second call — cache hit, should return same result without hitting server
+        let results2 = client.search_movies("Fight Club", Some(1999)).await.unwrap();
+        assert_eq!(results2.len(), 1);
+        assert_eq!(results2[0].title, "Fight Club");
+
+        // Verify cache stats
+        let cache = client.cache.lock().unwrap();
+        assert_eq!(cache.search_hits, 1);
+        assert_eq!(cache.search_misses, 1);
+    }
+
+    #[tokio::test]
+    async fn test_search_cache_miss_different_year() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(".*/search/movie.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "results": [
+                    {
+                        "id": 550,
+                        "title": "Fight Club",
+                        "release_date": "1999-10-15"
+                    }
+                ]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = HttpClient::for_testing(mock_server.uri(), Some("test_key".to_string()), None);
+
+        // Different year = different cache key
+        let results1 = client.search_movies("Fight Club", Some(1999)).await.unwrap();
+        assert_eq!(results1.len(), 1);
+
+        let results2 = client.search_movies("Fight Club", Some(2000)).await.unwrap();
+        assert_eq!(results2.len(), 1);
+
+        let cache = client.cache.lock().unwrap();
+        assert_eq!(cache.search_hits, 0);
+        assert_eq!(cache.search_misses, 2);
+    }
+
+    #[tokio::test]
+    async fn test_enrichment_cache_hit() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(".*/movie/550.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "genres": [{ "name": "Drama" }],
+                "runtime": 139,
+                "overview": "An insomniac office worker.",
+                "credits": { "cast": [{"name": "Brad Pitt"}] },
+                "release_dates": {
+                    "results": [
+                        { "iso_3166_1": "US", "release_dates": [{ "certification": "R" }] }
+                    ]
+                }
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = HttpClient::for_testing(mock_server.uri(), Some("test_key".to_string()), None);
+
+        // First call — cache miss
+        let enrichment1 = client.fetch_tmdb_enrichment(550, &MediaType::Movie).await.unwrap();
+        assert_eq!(enrichment1.runtime, Some(139));
+
+        // Second call — cache hit
+        let enrichment2 = client.fetch_tmdb_enrichment(550, &MediaType::Movie).await.unwrap();
+        assert_eq!(enrichment2.runtime, Some(139));
+
+        let cache = client.cache.lock().unwrap();
+        assert_eq!(cache.enrichment_hits, 1);
+        assert_eq!(cache.enrichment_misses, 1);
     }
 }

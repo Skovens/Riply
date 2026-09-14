@@ -55,12 +55,12 @@ impl MoverService {
         }
 
         // Move the file (with cross-device fallback)
-        match fs::rename(&file.path(), &dest_path) {
+        match fs::rename(file.path(), &dest_path) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
                 info!("Cross-device move detected, falling back to copy+delete");
-                fs::copy(&file.path(), &dest_path)?;
-                let src_size = fs::metadata(&file.path())?.len();
+                fs::copy(file.path(), &dest_path)?;
+                let src_size = fs::metadata(file.path())?.len();
                 let dst_size = fs::metadata(&dest_path)?.len();
                 if src_size != dst_size {
                     let _ = fs::remove_file(&dest_path);
@@ -70,7 +70,7 @@ impl MoverService {
                         dst_size
                     ));
                 }
-                fs::remove_file(&file.path())?;
+                fs::remove_file(file.path())?;
             }
             Err(e) => return Err(e.into()),
         }
