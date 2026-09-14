@@ -14,15 +14,38 @@ use crate::rate_limiter::{MonthlyQuota, RateLimiter, SlidingWindowLimiter};
 /// Maximum LRU cache size for metadata search/enrichment results.
 const CACHE_SIZE: NonZeroUsize = NonZeroUsize::new(500).unwrap();
 
+/// Cache entry with 24-hour expiration.
+struct Cached<T> {
+    value: T,
+    expires_at: std::time::Instant,
+}
+
+impl<T> Cached<T> {
+    fn new(value: T, ttl: Duration) -> Self {
+        Self {
+            value,
+            expires_at: std::time::Instant::now() + ttl,
+        }
+    }
+
+    fn is_expired(&self) -> bool {
+        std::time::Instant::now() >= self.expires_at
+    }
+}
+
 /// Metadata cache with 24-hour TTL.
 struct MetadataCache {
-    search: LruCache<(String, Option<u32>, bool), Vec<MetadataMatch>>,
-    enrichment: LruCache<(i32, bool), MetadataEnrichment>,
+    search: LruCache<(String, Option<u32>, bool), Cached<Vec<MetadataMatch>>>,
+    enrichment: LruCache<(i32, bool), Cached<MetadataEnrichment>>,
     search_hits: usize,
     search_misses: usize,
     enrichment_hits: usize,
     enrichment_misses: usize,
+    total_requests: usize,
+    throttled_events: usize,
 }
+
+const CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60); // 24 hours
 
 impl MetadataCache {
     fn new() -> Self {
@@ -33,6 +56,8 @@ impl MetadataCache {
             search_misses: 0,
             enrichment_hits: 0,
             enrichment_misses: 0,
+            total_requests: 0,
+            throttled_events: 0,
         }
     }
 
@@ -48,7 +73,17 @@ impl MetadataCache {
         &mut self,
         key: &(String, Option<u32>, bool),
     ) -> Option<Vec<MetadataMatch>> {
-        self.search.pop(key)
+        if let Some(cached) = self.search.pop(key) {
+            if cached.is_expired() {
+                self.search_misses += 1;
+                return None;
+            }
+            self.search_hits += 1;
+            Some(cached.value)
+        } else {
+            self.search_misses += 1;
+            None
+        }
     }
 
     fn put_search(
@@ -56,22 +91,24 @@ impl MetadataCache {
         key: (String, Option<u32>, bool),
         value: Vec<MetadataMatch>,
     ) {
-        self.search.put(key, value);
-    }
-
-    fn record_search_hit(&mut self) {
-        self.search_hits += 1;
-    }
-
-    fn record_search_miss(&mut self) {
-        self.search_misses += 1;
+        self.search.put(key, Cached::new(value, CACHE_TTL));
     }
 
     fn get_enrichment(
         &mut self,
         key: &(i32, bool),
     ) -> Option<MetadataEnrichment> {
-        self.enrichment.pop(key)
+        if let Some(cached) = self.enrichment.pop(key) {
+            if cached.is_expired() {
+                self.enrichment_misses += 1;
+                return None;
+            }
+            self.enrichment_hits += 1;
+            Some(cached.value)
+        } else {
+            self.enrichment_misses += 1;
+            None
+        }
     }
 
     fn put_enrichment(
@@ -79,15 +116,30 @@ impl MetadataCache {
         key: (i32, bool),
         value: MetadataEnrichment,
     ) {
-        self.enrichment.put(key, value);
+        self.enrichment.put(key, Cached::new(value, CACHE_TTL));
     }
 
-    fn record_enrichment_hit(&mut self) {
-        self.enrichment_hits += 1;
+    /// Record a successful API request.
+    fn record_request(&mut self) {
+        self.total_requests += 1;
     }
 
-    fn record_enrichment_miss(&mut self) {
-        self.enrichment_misses += 1;
+    /// Record a rate-limit (429) event.
+    fn record_throttle(&mut self) {
+        self.throttled_events += 1;
+    }
+
+    /// Log cache and usage statistics to tracing.
+    pub fn log_stats(&self) {
+        info!(
+            total_requests = self.total_requests,
+            search_hits = self.search_hits,
+            search_misses = self.search_misses,
+            enrichment_hits = self.enrichment_hits,
+            enrichment_misses = self.enrichment_misses,
+            throttled_events = self.throttled_events,
+            "Metadata API usage statistics"
+        );
     }
 }
 
@@ -102,7 +154,7 @@ pub struct HttpClient {
     tmdb_limiter: Option<Arc<RateLimiter>>,
     omdb_limiter: Option<Arc<SlidingWindowLimiter>>,
     omdb_quota: Option<Arc<MonthlyQuota>>,
-    cache: Arc<std::sync::Mutex<MetadataCache>>,
+    cache: Arc<tokio::sync::Mutex<MetadataCache>>,
 }
 
 /// TMDb search result
@@ -242,7 +294,7 @@ impl HttpClient {
             tmdb_limiter,
             omdb_limiter,
             omdb_quota,
-            cache: Arc::new(std::sync::Mutex::new(MetadataCache::new())),
+            cache: Arc::new(tokio::sync::Mutex::new(MetadataCache::new())),
         }
     }
 
@@ -304,6 +356,10 @@ impl HttpClient {
 
         // Handle 429 - retry already handled network errors
         if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let mut cache = self.cache.lock().await;
+            cache.record_throttle();
+            drop(cache);
+
             let retry_after = resp
                 .headers()
                 .get("Retry-After")
@@ -329,8 +385,16 @@ impl HttpClient {
                 return Err(anyhow::anyhow!("API rate limited after backoff (429)"));
             }
 
+            let mut cache = self.cache.lock().await;
+            cache.record_request();
+            drop(cache);
+
             Ok(resp.json::<T>().await?)
         } else {
+            let mut cache = self.cache.lock().await;
+            cache.record_request();
+            drop(cache);
+
             Ok(resp.json::<T>().await?)
         }
     }
@@ -627,18 +691,16 @@ impl MetadataSearcher for HttpClient {
         Box::pin(async move {
             let key = MetadataCache::search_key(&query, year, false);
             {
-                let mut cache = client.cache.lock().unwrap();
+                let mut cache = client.cache.lock().await;
                 if let Some(cached) = cache.get_search(&key) {
-                    cache.record_search_hit();
                     return Ok(cached);
                 }
-                cache.record_search_miss();
             }
             let results = client
                 .search_tmdb_movies(&query, year)
                 .await
                 .map_err(|e| MetadataError::ApiError(e.to_string()))?;
-            let mut cache = client.cache.lock().unwrap();
+            let mut cache = client.cache.lock().await;
             cache.put_search(key, results.clone());
             Ok(results)
         })
@@ -657,18 +719,16 @@ impl MetadataSearcher for HttpClient {
         Box::pin(async move {
             let key = MetadataCache::search_key(&query, None, true);
             {
-                let mut cache = client.cache.lock().unwrap();
+                let mut cache = client.cache.lock().await;
                 if let Some(cached) = cache.get_search(&key) {
-                    cache.record_search_hit();
                     return Ok(cached);
                 }
-                cache.record_search_miss();
             }
             let results = client
                 .search_tmdb_tv(&query)
                 .await
                 .map_err(|e| MetadataError::ApiError(e.to_string()))?;
-            let mut cache = client.cache.lock().unwrap();
+            let mut cache = client.cache.lock().await;
             cache.put_search(key, results.clone());
             Ok(results)
         })
@@ -690,12 +750,10 @@ impl MetadataSearcher for HttpClient {
         Box::pin(async move {
             let key = MetadataCache::search_key(&query, year, media_type.is_tv());
             {
-                let mut cache = client.cache.lock().unwrap();
+                let mut cache = client.cache.lock().await;
                 if let Some(cached) = cache.get_search(&key) {
-                    cache.record_search_hit();
                     return Ok(cached);
                 }
-                cache.record_search_miss();
             }
             let mut results = match &media_type {
                 MediaType::Tv => {
@@ -732,7 +790,7 @@ impl MetadataSearcher for HttpClient {
                 }
             };
             results.truncate(5);
-            let mut cache = client.cache.lock().unwrap();
+            let mut cache = client.cache.lock().await;
             cache.put_search(key, results.clone());
             Ok(results)
         })
@@ -752,21 +810,24 @@ impl MetadataSearcher for HttpClient {
         Box::pin(async move {
             let key = MetadataCache::enrichment_key(tmdb_id, media_type.is_tv());
             {
-                let mut cache = client.cache.lock().unwrap();
+                let mut cache = client.cache.lock().await;
                 if let Some(cached) = cache.get_enrichment(&key) {
-                    cache.record_enrichment_hit();
                     return Ok(cached);
                 }
-                cache.record_enrichment_miss();
             }
             let result = client
                 .fetch_tmdb_enrichment(tmdb_id, &media_type)
                 .await
                 .map_err(|e| MetadataError::ApiError(e.to_string()))?;
-            let mut cache = client.cache.lock().unwrap();
+            let mut cache = client.cache.lock().await;
             cache.put_enrichment(key, result.clone());
             Ok(result)
         })
+    }
+
+    fn log_stats(&self) {
+        let cache = self.cache.blocking_lock();
+        cache.log_stats();
     }
 }
 
@@ -962,7 +1023,7 @@ mod tests {
         assert_eq!(results2[0].title, "Fight Club");
 
         // Verify cache stats
-        let cache = client.cache.lock().unwrap();
+        let cache = client.cache.lock().await;
         assert_eq!(cache.search_hits, 1);
         assert_eq!(cache.search_misses, 1);
     }
@@ -994,7 +1055,7 @@ mod tests {
         let results2 = client.search_movies("Fight Club", Some(2000)).await.unwrap();
         assert_eq!(results2.len(), 1);
 
-        let cache = client.cache.lock().unwrap();
+        let cache = client.cache.lock().await;
         assert_eq!(cache.search_hits, 0);
         assert_eq!(cache.search_misses, 2);
     }
@@ -1029,7 +1090,7 @@ mod tests {
         let enrichment2 = riply_core::MetadataSearcher::fetch_enrichment(&client, 550, &MediaType::Movie).await.unwrap();
         assert_eq!(enrichment2.runtime, Some(139));
 
-        let cache = client.cache.lock().unwrap();
+        let cache = client.cache.lock().await;
         assert_eq!(cache.enrichment_hits, 1);
         assert_eq!(cache.enrichment_misses, 1);
     }

@@ -91,4 +91,8 @@ pub trait MetadataSearcher: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Result<MetadataEnrichment, MetadataError>> + Send + '_>> {
         Box::pin(async { Ok(MetadataEnrichment::default()) })
     }
+
+    /// Log cache and usage statistics. Default is a no-op so mocks don't need
+    /// to implement it.
+    fn log_stats(&self) {}
 }
