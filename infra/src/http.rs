@@ -256,6 +256,18 @@ pub struct TmdbEpisodeDetail {
     pub air_date: Option<String>,
 }
 
+/// Extract the US content rating from TMDb release dates.
+fn find_us_certification(release_dates: &Option<TmdbReleaseDates>) -> Option<String> {
+    let rd = release_dates.as_ref()?;
+    let us = rd.results.iter().find(|c| c.iso_3166_1.as_deref() == Some("US"))?;
+    let cert = us.release_dates.iter().find(|d| {
+        d.certification
+            .as_deref()
+            .is_some_and(|s| !s.is_empty())
+    })?;
+    cert.certification.clone()
+}
+
 impl HttpClient {
     pub fn new(tmdb_api_key: Option<String>, omdb_api_key: Option<String>) -> Self {
         info!("Initializing HTTP client");
@@ -307,15 +319,16 @@ impl HttpClient {
         Self::with_urls(base_url.clone(), base_url, tmdb_api_key, omdb_api_key)
     }
 
-    /// Perform a GET request with rate limiting, retries, and 429 handling.
-    async fn get_json<T: serde::de::DeserializeOwned>(
+    /// Perform a GET request with rate limiting and retries.
+    /// Returns raw response; caller handles deserialization and 429.
+    async fn get_json(
         &self,
         url: &str,
         params: &HashMap<String, String>,
         limiter: Option<&RateLimiter>,
         omdb_limiter: Option<&SlidingWindowLimiter>,
         omdb_quota: Option<&Arc<MonthlyQuota>>,
-    ) -> Result<T, anyhow::Error> {
+    ) -> Result<reqwest::Response, anyhow::Error> {
         // OMDb monthly quota check
         if let Some(quota) = omdb_quota {
             quota.try_acquire().await.map_err(|e| anyhow::anyhow!("{}", e))?;
@@ -331,13 +344,10 @@ impl HttpClient {
 
         let url = url.to_string();
         let params = params.clone();
-        let fallback_url = url.clone();
-        let fallback_params = params.clone();
-        let retry_client = self.client.clone();
-        let fallback_client = self.client.clone();
+        let client = self.client.clone();
 
         let resp = (move || {
-            let client = retry_client.clone();
+            let client = client.clone();
             let url = url.clone();
             let params = params.clone();
             async move { client.get(&url).query(&params).send().await }
@@ -352,51 +362,75 @@ impl HttpClient {
             // Retry on network errors, not on HTTP errors
             error.is_connect() || error.is_timeout()
         })
-        .await?;
+        .await
+        .map_err(anyhow::Error::from)?;
 
-        // Handle 429 - retry already handled network errors
+        Ok(resp)
+    }
+
+    /// Handle a 429 response: record throttle, back off, retry once.
+    /// Caller must deserialize the response after calling this.
+    async fn handle_429(
+        &self,
+        resp: reqwest::Response,
+        url: &str,
+        params: &HashMap<String, String>,
+    ) -> Result<reqwest::Response, anyhow::Error> {
+        let mut cache = self.cache.lock().await;
+        cache.record_throttle();
+        drop(cache);
+
+        let retry_after = resp
+            .headers()
+            .get("Retry-After")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(5);
+
+        warn!(
+            retry_after_secs = retry_after,
+            "API rate limited (429), backing off"
+        );
+
+        tokio::time::sleep(Duration::from_secs(retry_after)).await;
+
+        // One final attempt after backoff
+        let resp = self
+            .client
+            .get(url)
+            .query(params)
+            .send()
+            .await?;
+
         if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            let mut cache = self.cache.lock().await;
-            cache.record_throttle();
-            drop(cache);
-
-            let retry_after = resp
-                .headers()
-                .get("Retry-After")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.parse::<u64>().ok())
-                .unwrap_or(5);
-
-            warn!(
-                retry_after_secs = retry_after,
-                "API rate limited (429), backing off"
-            );
-
-            tokio::time::sleep(Duration::from_secs(retry_after)).await;
-
-            // One final attempt after backoff
-            let resp = fallback_client
-                .get(&fallback_url)
-                .query(&fallback_params)
-                .send()
-                .await?;
-
-            if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                return Err(anyhow::anyhow!("API rate limited after backoff (429)"));
-            }
-
-            let mut cache = self.cache.lock().await;
-            cache.record_request();
-            drop(cache);
-
-            Ok(resp.json::<T>().await?)
-        } else {
-            let mut cache = self.cache.lock().await;
-            cache.record_request();
-            drop(cache);
-
-            Ok(resp.json::<T>().await?)
+            return Err(anyhow::anyhow!("API rate limited after backoff (429)"));
         }
+
+        Ok(resp)
+    }
+
+    /// Handle HTTP status: 429 triggers backoff retry, success deserializes.
+    async fn handle_http_status(
+        &self,
+        resp: reqwest::Response,
+        url: &str,
+        params: &HashMap<String, String>,
+    ) -> Result<reqwest::Response, anyhow::Error> {
+        if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            return self.handle_429(resp, url, params).await;
+        }
+        Ok(resp)
+    }
+
+    /// Deserialize a response, recording cache metrics.
+    async fn record_and_deserialize<T: serde::de::DeserializeOwned>(
+        &self,
+        resp: reqwest::Response,
+    ) -> Result<T, anyhow::Error> {
+        let mut cache = self.cache.lock().await;
+        cache.record_request();
+        drop(cache);
+        Ok(resp.json::<T>().await?)
     }
 
     pub async fn search_tmdb_movies(
@@ -417,9 +451,11 @@ impl HttpClient {
         }
 
         let url = format!("{}/search/movie", self.tmdb_base_url);
-        let resp: TmdbSearchResponse = self
+        let resp = self
             .get_json(&url, &params, self.tmdb_limiter.as_deref(), None, None)
             .await?;
+        let resp = self.handle_http_status(resp, &url, &params).await?;
+        let resp: TmdbSearchResponse = self.record_and_deserialize(resp).await?;
 
         let matches = resp
             .results
@@ -453,9 +489,11 @@ impl HttpClient {
         params.insert("query".to_string(), query.to_string());
 
         let url = format!("{}/search/tv", self.tmdb_base_url);
-        let resp: TmdbSearchResponse = self
+        let resp = self
             .get_json(&url, &params, self.tmdb_limiter.as_deref(), None, None)
             .await?;
+        let resp = self.handle_http_status(resp, &url, &params).await?;
+        let resp: TmdbSearchResponse = self.record_and_deserialize(resp).await?;
 
         let matches = resp
             .results
@@ -496,9 +534,11 @@ impl HttpClient {
         }
 
         let url = format!("{}/", self.omdb_base_url);
-        let resp: OmdbResponse = self
+        let resp = self
             .get_json(&url, &params, None, self.omdb_limiter.as_deref(), self.omdb_quota.as_ref())
             .await?;
+        let resp = self.handle_http_status(resp, &url, &params).await?;
+        let resp: OmdbResponse = self.record_and_deserialize(resp).await?;
 
         if resp.response.as_deref() == Some("True") {
             let year = resp.year.as_ref().and_then(|y| y.trim().parse().ok());
@@ -537,9 +577,11 @@ impl HttpClient {
         }
 
         let url = format!("{}/", self.omdb_base_url);
-        let resp: OmdbResponse = self
+        let resp = self
             .get_json(&url, &params, None, self.omdb_limiter.as_deref(), self.omdb_quota.as_ref())
             .await?;
+        let resp = self.handle_http_status(resp, &url, &params).await?;
+        let resp: OmdbResponse = self.record_and_deserialize(resp).await?;
 
         if resp.response.as_deref() == Some("True") {
             let year = resp.year.as_ref().and_then(|y| y.trim().parse().ok());
@@ -626,9 +668,11 @@ impl HttpClient {
             ),
         ]);
 
-        let resp: TmdbDetails = self
+        let resp = self
             .get_json(&url, &params, self.tmdb_limiter.as_deref(), None, None)
             .await?;
+        let resp = self.handle_http_status(resp, &url, &params).await?;
+        let resp: TmdbDetails = self.record_and_deserialize(resp).await?;
 
         let genres = (!resp.genres.is_empty())
             .then(|| {
@@ -651,20 +695,7 @@ impl HttpClient {
             })
             .filter(|v| !v.is_empty());
 
-        let content_rating = resp
-            .release_dates
-            .as_ref()
-            .and_then(|rd| {
-                rd.results
-                    .iter()
-                    .find(|c| c.iso_3166_1.as_deref() == Some("US"))
-            })
-            .and_then(|c| {
-                c.release_dates
-                    .iter()
-                    .find(|d| d.certification.as_deref().is_some_and(|s| !s.is_empty()))
-            })
-            .and_then(|d| d.certification.clone());
+        let content_rating = find_us_certification(&resp.release_dates);
 
         Ok(MetadataEnrichment {
             genres,
@@ -1093,5 +1124,81 @@ mod tests {
         let cache = client.cache.lock().await;
         assert_eq!(cache.enrichment_hits, 1);
         assert_eq!(cache.enrichment_misses, 1);
+    }
+
+    #[tokio::test]
+    async fn test_cache_metrics_recording() {
+        let client = HttpClient::new(Some("test_key".to_string()), None);
+
+        // Initial state
+        {
+            let cache = client.cache.lock().await;
+            assert_eq!(cache.total_requests, 0);
+            assert_eq!(cache.throttled_events, 0);
+        }
+
+        // Manually record a request
+        {
+            let mut cache = client.cache.lock().await;
+            cache.record_request();
+            assert_eq!(cache.total_requests, 1);
+        }
+
+        // Manually record a throttle
+        {
+            let mut cache = client.cache.lock().await;
+            cache.record_throttle();
+            assert_eq!(cache.throttled_events, 1);
+        }
+
+        // Verify stats logging doesn't panic (use spawn_blocking to avoid blocking_lock in runtime)
+        let client2 = client.clone();
+        tokio::task::spawn_blocking(move || client2.log_stats()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_cache_ttl_expiration() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(".*/search/movie.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "results": [
+                    {
+                        "id": 550,
+                        "title": "Fight Club",
+                        "release_date": "1999-10-15"
+                    }
+                ]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = HttpClient::for_testing(mock_server.uri(), Some("test_key".to_string()), None);
+
+        // First call — cache miss
+        let results1 = client.search_movies("Fight Club", Some(1999)).await.unwrap();
+        assert_eq!(results1.len(), 1);
+
+        // Manually expire the cache entry
+        {
+            let mut cache = client.cache.lock().await;
+            let key = ("Fight Club".to_string(), Some(1999), false);
+            if let Some(cached) = cache.search.pop(&key) {
+                let expired = Cached {
+                    value: cached.value,
+                    expires_at: std::time::Instant::now() - Duration::from_secs(1),
+                };
+                cache.search.put(key, expired);
+            }
+        }
+
+        // Second call — cache expired, should hit server again
+        let results2 = client.search_movies("Fight Club", Some(1999)).await.unwrap();
+        assert_eq!(results2.len(), 1);
+
+        let cache = client.cache.lock().await;
+        assert_eq!(cache.search_hits, 0);
+        assert_eq!(cache.search_misses, 2);
     }
 }
