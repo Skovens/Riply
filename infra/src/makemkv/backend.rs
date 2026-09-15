@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
 
 use riply_core::{DriveInfo, DriveState, RipBackend, RipError, RipHandle};
@@ -11,6 +11,44 @@ use super::session::MakemkvSession;
 #[derive(Debug)]
 pub struct MakemkvBackend {
     command: Vec<String>,
+}
+
+/// Default temp directory for ripped content.
+/// For Flatpak MakeMKV, this is `/tmp/riply` (Flatpak has access).
+/// For native MakeMKV, it falls back to the same for consistency.
+pub const DEFAULT_RIP_TEMP_DIR: &str = "/tmp/riply";
+
+/// Resolve a default destination for a Flatpak MakeMKV rip.
+/// Uses `/tmp/riply/{disc_name}` which is always accessible.
+pub fn resolve_rip_destination_flatpak(disc_name: &str) -> (PathBuf, Option<String>) {
+    (PathBuf::from(DEFAULT_RIP_TEMP_DIR).join(disc_name), None)
+}
+
+/// Resolve a default destination for a native MakeMKV rip.
+/// Uses `/tmp/riply/{disc_name}` for consistency.
+pub fn resolve_rip_destination_native(disc_name: &str) -> (PathBuf, Option<String>) {
+    (PathBuf::from(DEFAULT_RIP_TEMP_DIR).join(disc_name), None)
+}
+
+/// Check if a path is within Flatpak's default sandbox access.
+pub fn is_flatpak_accessible(path: &Path) -> bool {
+    let p = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    // /tmp is always accessible
+    if p.starts_with("/tmp") {
+        return true;
+    }
+    // ~/Documents, ~/Downloads, ~/.var/app
+    if let Ok(home) = std::env::var("HOME") {
+        let home = PathBuf::from(home);
+        let flatpak_apps = home.join(".var/app");
+        if p.starts_with(home.join("Documents"))
+            || p.starts_with(home.join("Downloads"))
+            || p.starts_with(&flatpak_apps)
+        {
+            return true;
+        }
+    }
+    false
 }
 
 impl MakemkvBackend {
@@ -30,6 +68,11 @@ impl MakemkvBackend {
     /// Return the full command as a single string (for display/detection).
     pub fn command_string(&self) -> String {
         self.command.join(" ")
+    }
+
+    /// Check if this backend uses Flatpak.
+    pub fn is_flatpak(&self) -> bool {
+        self.command.first().map(|c| c.contains("flatpak")).unwrap_or(false)
     }
 
     /// Auto-detect makemkvcon installation.
@@ -175,13 +218,15 @@ impl RipBackend for MakemkvBackend {
             .kill_on_drop(true)
             .spawn()?;
 
-        // Pipe "n\n" to stdin so MakeMKV never blocks waiting for a user
-        // response to overwrite prompts (the destination dir is already
-        // unique, but this is a defensive safety net).
+        // Stdin handler: MakeMKV prompts for overwrite (answer "n") and
+        // disk space warnings (answer "y"). Since we can't read prompts from
+        // stdin, send both responses with a delay to let MakeMKV consume them.
         if let Some(mut stdin) = child.stdin.take() {
             tokio::spawn(async move {
                 use tokio::io::AsyncWriteExt;
                 let _ = stdin.write_all(b"n\n").await;
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                let _ = stdin.write_all(b"y\n").await;
             });
         }
 
