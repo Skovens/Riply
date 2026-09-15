@@ -9,7 +9,7 @@ use reqwest::Client;
 use riply_core::{MediaType, MetadataEnrichment, MetadataError, MetadataMatch, MetadataSearcher};
 use tracing::{info, warn};
 
-use crate::rate_limiter::{MonthlyQuota, RateLimitPolicy, RateLimitRegistry, RateLimiter, SlidingWindowLimiter};
+use crate::rate_limiter::{MonthlyQuota, RateLimit, RateLimitPolicy, RateLimitRegistry, RateLimiter, SlidingWindowLimiter};
 
 /// Maximum LRU cache size for metadata search/enrichment results.
 const CACHE_SIZE: NonZeroUsize = NonZeroUsize::new(500).unwrap();
@@ -33,16 +33,37 @@ impl<T> Cached<T> {
     }
 }
 
-/// Metadata cache with 24-hour TTL.
+/// Usage metrics for API calls and cache performance.
+/// Separate from cache so it can be swapped independently.
+#[derive(Default, Clone)]
+pub struct UsageMetrics {
+    pub search_hits: usize,
+    pub search_misses: usize,
+    pub enrichment_hits: usize,
+    pub enrichment_misses: usize,
+    pub total_requests: usize,
+    pub throttled_events: usize,
+}
+
+impl UsageMetrics {
+    /// Log cache and usage statistics to tracing.
+    pub fn log_stats(&self) {
+        info!(
+            total_requests = self.total_requests,
+            search_hits = self.search_hits,
+            search_misses = self.search_misses,
+            enrichment_hits = self.enrichment_hits,
+            enrichment_misses = self.enrichment_misses,
+            throttled_events = self.throttled_events,
+            "Metadata API usage statistics"
+        );
+    }
+}
+
+/// Metadata cache with 24-hour TTL. Pure LRU storage, no metrics.
 struct MetadataCache {
     search: LruCache<(String, Option<u32>, bool), Cached<Vec<MetadataMatch>>>,
     enrichment: LruCache<(i32, bool), Cached<MetadataEnrichment>>,
-    search_hits: usize,
-    search_misses: usize,
-    enrichment_hits: usize,
-    enrichment_misses: usize,
-    total_requests: usize,
-    throttled_events: usize,
 }
 
 const CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60); // 24 hours
@@ -52,12 +73,6 @@ impl MetadataCache {
         MetadataCache {
             search: LruCache::new(CACHE_SIZE),
             enrichment: LruCache::new(CACHE_SIZE),
-            search_hits: 0,
-            search_misses: 0,
-            enrichment_hits: 0,
-            enrichment_misses: 0,
-            total_requests: 0,
-            throttled_events: 0,
         }
     }
 
@@ -75,13 +90,10 @@ impl MetadataCache {
     ) -> Option<Vec<MetadataMatch>> {
         if let Some(cached) = self.search.pop(key) {
             if cached.is_expired() {
-                self.search_misses += 1;
                 return None;
             }
-            self.search_hits += 1;
             Some(cached.value)
         } else {
-            self.search_misses += 1;
             None
         }
     }
@@ -100,13 +112,10 @@ impl MetadataCache {
     ) -> Option<MetadataEnrichment> {
         if let Some(cached) = self.enrichment.pop(key) {
             if cached.is_expired() {
-                self.enrichment_misses += 1;
                 return None;
             }
-            self.enrichment_hits += 1;
             Some(cached.value)
         } else {
-            self.enrichment_misses += 1;
             None
         }
     }
@@ -117,29 +126,6 @@ impl MetadataCache {
         value: MetadataEnrichment,
     ) {
         self.enrichment.put(key, Cached::new(value, CACHE_TTL));
-    }
-
-    /// Record a successful API request.
-    fn record_request(&mut self) {
-        self.total_requests += 1;
-    }
-
-    /// Record a rate-limit (429) event.
-    fn record_throttle(&mut self) {
-        self.throttled_events += 1;
-    }
-
-    /// Log cache and usage statistics to tracing.
-    pub fn log_stats(&self) {
-        info!(
-            total_requests = self.total_requests,
-            search_hits = self.search_hits,
-            search_misses = self.search_misses,
-            enrichment_hits = self.enrichment_hits,
-            enrichment_misses = self.enrichment_misses,
-            throttled_events = self.throttled_events,
-            "Metadata API usage statistics"
-        );
     }
 }
 
@@ -153,6 +139,7 @@ pub struct HttpClient {
     omdb_api_key: Option<String>,
     registry: RateLimitRegistry,
     cache: Arc<tokio::sync::Mutex<MetadataCache>>,
+    metrics: Arc<tokio::sync::Mutex<UsageMetrics>>,
 }
 
 /// TMDb search result
@@ -315,6 +302,7 @@ impl HttpClient {
             omdb_api_key,
             registry,
             cache: Arc::new(tokio::sync::Mutex::new(MetadataCache::new())),
+            metrics: Arc::new(tokio::sync::Mutex::new(UsageMetrics::default())),
         }
     }
 
@@ -380,9 +368,9 @@ impl HttpClient {
         url: &str,
         params: &HashMap<String, String>,
     ) -> Result<reqwest::Response, anyhow::Error> {
-        let mut cache = self.cache.lock().await;
-        cache.record_throttle();
-        drop(cache);
+        let mut metrics = self.metrics.lock().await;
+        metrics.throttled_events += 1;
+        drop(metrics);
 
         let retry_after = resp
             .headers()
@@ -426,14 +414,14 @@ impl HttpClient {
         Ok(resp)
     }
 
-    /// Deserialize a response, recording cache metrics.
+    /// Deserialize a response, recording usage metrics.
     async fn record_and_deserialize<T: serde::de::DeserializeOwned>(
         &self,
         resp: reqwest::Response,
     ) -> Result<T, anyhow::Error> {
-        let mut cache = self.cache.lock().await;
-        cache.record_request();
-        drop(cache);
+        let mut metrics = self.metrics.lock().await;
+        metrics.total_requests += 1;
+        drop(metrics);
         Ok(resp.json::<T>().await?)
     }
 
@@ -724,8 +712,10 @@ impl MetadataSearcher for HttpClient {
             {
                 let mut cache = client.cache.lock().await;
                 if let Some(cached) = cache.get_search(&key) {
+                    client.metrics.lock().await.search_hits += 1;
                     return Ok(cached);
                 }
+                client.metrics.lock().await.search_misses += 1;
             }
             let results = client
                 .search_tmdb_movies(&query, year)
@@ -752,8 +742,10 @@ impl MetadataSearcher for HttpClient {
             {
                 let mut cache = client.cache.lock().await;
                 if let Some(cached) = cache.get_search(&key) {
+                    client.metrics.lock().await.search_hits += 1;
                     return Ok(cached);
                 }
+                client.metrics.lock().await.search_misses += 1;
             }
             let results = client
                 .search_tmdb_tv(&query)
@@ -783,8 +775,10 @@ impl MetadataSearcher for HttpClient {
             {
                 let mut cache = client.cache.lock().await;
                 if let Some(cached) = cache.get_search(&key) {
+                    client.metrics.lock().await.search_hits += 1;
                     return Ok(cached);
                 }
+                client.metrics.lock().await.search_misses += 1;
             }
             let mut results = match &media_type {
                 MediaType::Tv => {
@@ -843,8 +837,10 @@ impl MetadataSearcher for HttpClient {
             {
                 let mut cache = client.cache.lock().await;
                 if let Some(cached) = cache.get_enrichment(&key) {
+                    client.metrics.lock().await.enrichment_hits += 1;
                     return Ok(cached);
                 }
+                client.metrics.lock().await.enrichment_misses += 1;
             }
             let result = client
                 .fetch_tmdb_enrichment(tmdb_id, &media_type)
@@ -856,9 +852,13 @@ impl MetadataSearcher for HttpClient {
         })
     }
 
-    fn log_stats(&self) {
-        let cache = self.cache.blocking_lock();
-        cache.log_stats();
+    /// Log cache and usage statistics to tracing (async, non-blocking).
+    fn log_stats(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
+        let metrics = self.metrics.clone();
+        Box::pin(async move {
+            let m = metrics.lock().await;
+            m.log_stats();
+        })
     }
 }
 
@@ -1054,9 +1054,9 @@ mod tests {
         assert_eq!(results2[0].title, "Fight Club");
 
         // Verify cache stats
-        let cache = client.cache.lock().await;
-        assert_eq!(cache.search_hits, 1);
-        assert_eq!(cache.search_misses, 1);
+        let metrics = client.metrics.lock().await;
+        assert_eq!(metrics.search_hits, 1);
+        assert_eq!(metrics.search_misses, 1);
     }
 
     #[tokio::test]
@@ -1086,9 +1086,9 @@ mod tests {
         let results2 = client.search_movies("Fight Club", Some(2000)).await.unwrap();
         assert_eq!(results2.len(), 1);
 
-        let cache = client.cache.lock().await;
-        assert_eq!(cache.search_hits, 0);
-        assert_eq!(cache.search_misses, 2);
+        let metrics = client.metrics.lock().await;
+        assert_eq!(metrics.search_hits, 0);
+        assert_eq!(metrics.search_misses, 2);
     }
 
     #[tokio::test]
@@ -1121,9 +1121,9 @@ mod tests {
         let enrichment2 = riply_core::MetadataSearcher::fetch_enrichment(&client, 550, &MediaType::Movie).await.unwrap();
         assert_eq!(enrichment2.runtime, Some(139));
 
-        let cache = client.cache.lock().await;
-        assert_eq!(cache.enrichment_hits, 1);
-        assert_eq!(cache.enrichment_misses, 1);
+        let metrics = client.metrics.lock().await;
+        assert_eq!(metrics.enrichment_hits, 1);
+        assert_eq!(metrics.enrichment_misses, 1);
     }
 
     #[tokio::test]
@@ -1132,28 +1132,29 @@ mod tests {
 
         // Initial state
         {
-            let cache = client.cache.lock().await;
-            assert_eq!(cache.total_requests, 0);
-            assert_eq!(cache.throttled_events, 0);
+            let metrics = client.metrics.lock().await;
+            assert_eq!(metrics.total_requests, 0);
+            assert_eq!(metrics.throttled_events, 0);
         }
 
         // Manually record a request
         {
-            let mut cache = client.cache.lock().await;
-            cache.record_request();
-            assert_eq!(cache.total_requests, 1);
+            let mut metrics = client.metrics.lock().await;
+            metrics.total_requests += 1;
+            assert_eq!(metrics.total_requests, 1);
         }
 
         // Manually record a throttle
         {
-            let mut cache = client.cache.lock().await;
-            cache.record_throttle();
-            assert_eq!(cache.throttled_events, 1);
+            let mut metrics = client.metrics.lock().await;
+            metrics.throttled_events += 1;
+            assert_eq!(metrics.throttled_events, 1);
         }
 
-        // Verify stats logging doesn't panic (use spawn_blocking to avoid blocking_lock in runtime)
+        // Verify stats logging works (now async, no blocking_lock needed)
+        use riply_core::MetadataSearcher;
         let client2 = client.clone();
-        tokio::task::spawn_blocking(move || client2.log_stats()).await.unwrap();
+        client2.log_stats().await;
     }
 
     #[tokio::test]
@@ -1197,8 +1198,8 @@ mod tests {
         let results2 = client.search_movies("Fight Club", Some(1999)).await.unwrap();
         assert_eq!(results2.len(), 1);
 
-        let cache = client.cache.lock().await;
-        assert_eq!(cache.search_hits, 0);
-        assert_eq!(cache.search_misses, 2);
+        let metrics = client.metrics.lock().await;
+        assert_eq!(metrics.search_hits, 0);
+        assert_eq!(metrics.search_misses, 2);
     }
 }

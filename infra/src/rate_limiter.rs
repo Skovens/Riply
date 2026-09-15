@@ -6,9 +6,24 @@ use tokio::time::Instant;
 
 use chrono::Datelike;
 
+// ── RateLimit trait ──────────────────────────────────────────────────────────
+
+/// Unified rate limiting policy trait.
+///
+/// All concrete rate limiters implement this trait, allowing the registry
+/// to manage them uniformly without knowing their internal algorithm.
+#[async_trait::async_trait]
+pub trait RateLimit: Send + Sync {
+    /// Wait until a request is allowed, then consume a token.
+    async fn acquire(&self);
+
+    /// Returns the number of requests remaining (approximate).
+    async fn remaining(&self) -> u64;
+}
+
 // ── RateLimitPolicy enum ─────────────────────────────────────────────────────
 
-/// Unified rate limiting policy.
+/// Enum wrapping concrete rate limiters behind the `RateLimit` trait.
 ///
 /// Stores any of the concrete rate limiter types via `Arc` for shared ownership.
 /// This avoids the need for async trait objects (which don't work with `dyn`
@@ -20,9 +35,9 @@ pub enum RateLimitPolicy {
     MonthlyQuota(Arc<MonthlyQuota>),
 }
 
-impl RateLimitPolicy {
-    /// Wait until a request is allowed, then consume a token.
-    pub async fn acquire(&self) {
+#[async_trait::async_trait]
+impl RateLimit for RateLimitPolicy {
+    async fn acquire(&self) {
         match self {
             RateLimitPolicy::TokenBucket(l) => l.acquire().await,
             RateLimitPolicy::SlidingWindow(l) => l.acquire().await,
@@ -30,8 +45,7 @@ impl RateLimitPolicy {
         }
     }
 
-    /// Returns the number of requests remaining (approximate).
-    pub async fn remaining(&self) -> u64 {
+    async fn remaining(&self) -> u64 {
         match self {
             RateLimitPolicy::TokenBucket(l) => l.remaining().await,
             RateLimitPolicy::SlidingWindow(l) => l.remaining().await,
@@ -158,6 +172,17 @@ impl RateLimiter {
     }
 }
 
+#[async_trait::async_trait]
+impl RateLimit for RateLimiter {
+    async fn acquire(&self) {
+        RateLimiter::acquire(self).await;
+    }
+
+    async fn remaining(&self) -> u64 {
+        RateLimiter::remaining(self).await
+    }
+}
+
 // ── Sliding-window rate limiter (per-minute, for OMDb) ──────────────────────
 
 /// A sliding-window rate limiter that enforces N requests per 60-second window.
@@ -224,6 +249,17 @@ impl SlidingWindowLimiter {
         let window = Duration::from_secs(self.window_secs);
         let used = state.timestamps.iter().filter(|t| now.duration_since(**t) < window).count();
         (self.max_requests as usize - used) as u64
+    }
+}
+
+#[async_trait::async_trait]
+impl RateLimit for SlidingWindowLimiter {
+    async fn acquire(&self) {
+        SlidingWindowLimiter::acquire(self).await;
+    }
+
+    async fn remaining(&self) -> u64 {
+        SlidingWindowLimiter::remaining(self).await
     }
 }
 
@@ -298,6 +334,17 @@ impl MonthlyQuota {
             return self.limit;
         }
         (self.limit as i64 - state.count as i64).max(0) as u64
+    }
+}
+
+#[async_trait::async_trait]
+impl RateLimit for MonthlyQuota {
+    async fn acquire(&self) {
+        MonthlyQuota::acquire(self).await;
+    }
+
+    async fn remaining(&self) -> u64 {
+        MonthlyQuota::remaining(self).await
     }
 }
 

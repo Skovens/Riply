@@ -96,7 +96,7 @@ pub async fn serve(
 
     // Log metadata API usage stats on shutdown
     if let Some(searcher) = &state.searcher {
-        searcher.log_stats();
+        searcher.log_stats().await;
     }
 
     info!("Server shut down gracefully");

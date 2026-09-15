@@ -94,5 +94,7 @@ pub trait MetadataSearcher: Send + Sync {
 
     /// Log cache and usage statistics. Default is a no-op so mocks don't need
     /// to implement it.
-    fn log_stats(&self) {}
+    fn log_stats(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        Box::pin(async {})
+    }
 }
