@@ -1,8 +1,102 @@
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
 use chrono::Datelike;
+
+// ── RateLimitPolicy enum ─────────────────────────────────────────────────────
+
+/// Unified rate limiting policy.
+///
+/// Stores any of the concrete rate limiter types via `Arc` for shared ownership.
+/// This avoids the need for async trait objects (which don't work with `dyn`
+/// in stable Rust) while still allowing heterogeneous storage in the registry.
+#[derive(Clone)]
+pub enum RateLimitPolicy {
+    TokenBucket(Arc<RateLimiter>),
+    SlidingWindow(Arc<SlidingWindowLimiter>),
+    MonthlyQuota(Arc<MonthlyQuota>),
+}
+
+impl RateLimitPolicy {
+    /// Wait until a request is allowed, then consume a token.
+    pub async fn acquire(&self) {
+        match self {
+            RateLimitPolicy::TokenBucket(l) => l.acquire().await,
+            RateLimitPolicy::SlidingWindow(l) => l.acquire().await,
+            RateLimitPolicy::MonthlyQuota(q) => q.acquire().await,
+        }
+    }
+
+    /// Returns the number of requests remaining (approximate).
+    pub async fn remaining(&self) -> u64 {
+        match self {
+            RateLimitPolicy::TokenBucket(l) => l.remaining().await,
+            RateLimitPolicy::SlidingWindow(l) => l.remaining().await,
+            RateLimitPolicy::MonthlyQuota(q) => q.remaining().await,
+        }
+    }
+}
+
+impl std::fmt::Debug for RateLimitPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RateLimitPolicy").finish()
+    }
+}
+
+// ── RateLimitRegistry ────────────────────────────────────────────────────────
+
+/// Registry of rate limiting policies keyed by API base URL prefix.
+///
+/// Allows `HttpClient` to manage rate limits without adding individual fields
+/// for each API. New APIs are registered at construction time.
+#[derive(Clone)]
+pub struct RateLimitRegistry {
+    policies: HashMap<String, RateLimitPolicy>,
+    quota_policies: Vec<RateLimitPolicy>,
+}
+
+impl RateLimitRegistry {
+    pub fn new() -> Self {
+        Self {
+            policies: HashMap::new(),
+            quota_policies: Vec::new(),
+        }
+    }
+
+    /// Register a rate limiter for a specific API base URL prefix.
+    pub fn register(&mut self, prefix: &str, policy: RateLimitPolicy) {
+        self.policies.insert(prefix.to_string(), policy);
+    }
+
+    /// Register a quota policy (applies to all APIs).
+    pub fn register_quota(&mut self, policy: RateLimitPolicy) {
+        self.quota_policies.push(policy);
+    }
+
+    /// Get the rate limiter for a given URL, if any.
+    pub fn get(&self, url: &str) -> Option<&RateLimitPolicy> {
+        self.policies.get(url).or_else(|| {
+            self.policies
+                .iter()
+                .find(|(prefix, _)| url.starts_with(prefix.as_str()))
+                .map(|(_, policy)| policy)
+        })
+    }
+
+    /// Get all quota policies.
+    pub fn quotas(&self) -> &[RateLimitPolicy] {
+        &self.quota_policies
+    }
+}
+
+impl Default for RateLimitRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 // ── Token-bucket rate limiter (per-second, for TMDb) ────────────────────────
 
@@ -55,6 +149,12 @@ impl RateLimiter {
             drop(state);
             tokio::time::sleep(wait).await;
         }
+    }
+
+    /// Returns the number of tokens remaining.
+    pub async fn remaining(&self) -> u64 {
+        let state = self.state.lock().await;
+        state.tokens as u64
     }
 }
 
@@ -118,12 +218,12 @@ impl SlidingWindowLimiter {
     }
 
     /// Returns the number of requests remaining in the current window.
-    pub async fn remaining(&self) -> u32 {
+    pub async fn remaining(&self) -> u64 {
         let state = self.state.lock().await;
         let now = Instant::now();
         let window = Duration::from_secs(self.window_secs);
         let used = state.timestamps.iter().filter(|t| now.duration_since(**t) < window).count();
-        (self.max_requests as usize - used) as u32
+        (self.max_requests as usize - used) as u64
     }
 }
 
@@ -175,6 +275,18 @@ impl MonthlyQuota {
 
         state.count += 1;
         Ok(())
+    }
+
+    /// Wait until a request is allowed, then consume it.
+    /// Retries with a 60-second backoff if quota is exhausted.
+    pub async fn acquire(&self) {
+        loop {
+            if self.try_acquire().await.is_ok() {
+                return;
+            }
+            // Quota exhausted — sleep briefly and retry
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        }
     }
 
     /// Returns the number of requests remaining this month.

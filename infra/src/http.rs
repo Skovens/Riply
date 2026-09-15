@@ -9,7 +9,7 @@ use reqwest::Client;
 use riply_core::{MediaType, MetadataEnrichment, MetadataError, MetadataMatch, MetadataSearcher};
 use tracing::{info, warn};
 
-use crate::rate_limiter::{MonthlyQuota, RateLimiter, SlidingWindowLimiter};
+use crate::rate_limiter::{MonthlyQuota, RateLimitPolicy, RateLimitRegistry, RateLimiter, SlidingWindowLimiter};
 
 /// Maximum LRU cache size for metadata search/enrichment results.
 const CACHE_SIZE: NonZeroUsize = NonZeroUsize::new(500).unwrap();
@@ -151,9 +151,7 @@ pub struct HttpClient {
     omdb_base_url: String,
     tmdb_api_key: Option<String>,
     omdb_api_key: Option<String>,
-    tmdb_limiter: Option<Arc<RateLimiter>>,
-    omdb_limiter: Option<Arc<SlidingWindowLimiter>>,
-    omdb_quota: Option<Arc<MonthlyQuota>>,
+    registry: RateLimitRegistry,
     cache: Arc<tokio::sync::Mutex<MetadataCache>>,
 }
 
@@ -290,12 +288,24 @@ impl HttpClient {
             .build()
             .expect("Failed to build HTTP client");
 
-        // TMDb: 4 req/sec token bucket (well under soft limit of ~40/sec)
-        let tmdb_limiter = tmdb_api_key.is_some().then(|| Arc::new(RateLimiter::new(40, 4.0)));
-        // OMDb: 10 req/min sliding window (official limit)
-        let omdb_limiter = omdb_api_key.is_some().then(|| Arc::new(SlidingWindowLimiter::new(10, 60)));
-        // OMDb: 1,000 req/month quota
-        let omdb_quota = omdb_api_key.is_some().then(|| Arc::new(MonthlyQuota::new(1_000)));
+        // Build rate limit registry
+        let mut registry = RateLimitRegistry::new();
+        if let Some(ref _key) = tmdb_api_key {
+            // TMDb: 4 req/sec token bucket (well under soft limit of ~40/sec)
+            registry.register(
+                "https://api.themoviedb.org/3",
+                RateLimitPolicy::TokenBucket(Arc::new(RateLimiter::new(40, 4.0))),
+            );
+        }
+        if let Some(ref _key) = omdb_api_key {
+            // OMDb: 10 req/min sliding window (official limit)
+            registry.register(
+                "http://www.omdbapi.com",
+                RateLimitPolicy::SlidingWindow(Arc::new(SlidingWindowLimiter::new(10, 60))),
+            );
+            // OMDb: 1,000 req/month quota
+            registry.register_quota(RateLimitPolicy::MonthlyQuota(Arc::new(MonthlyQuota::new(1_000))));
+        }
 
         HttpClient {
             client,
@@ -303,9 +313,7 @@ impl HttpClient {
             omdb_base_url,
             tmdb_api_key,
             omdb_api_key,
-            tmdb_limiter,
-            omdb_limiter,
-            omdb_quota,
+            registry,
             cache: Arc::new(tokio::sync::Mutex::new(MetadataCache::new())),
         }
     }
@@ -325,21 +333,17 @@ impl HttpClient {
         &self,
         url: &str,
         params: &HashMap<String, String>,
-        limiter: Option<&RateLimiter>,
-        omdb_limiter: Option<&SlidingWindowLimiter>,
-        omdb_quota: Option<&Arc<MonthlyQuota>>,
     ) -> Result<reqwest::Response, anyhow::Error> {
-        // OMDb monthly quota check
-        if let Some(quota) = omdb_quota {
-            quota.try_acquire().await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        // Apply quota policies (apply to all APIs)
+        for quota in self.registry.quotas() {
+            if let RateLimitPolicy::MonthlyQuota(ref q) = quota {
+                q.try_acquire().await.map_err(|e| anyhow::anyhow!("{}", e))?;
+            }
         }
 
-        // Apply rate limiting
-        if let Some(limiter) = limiter {
-            limiter.acquire().await;
-        }
-        if let Some(limiter) = omdb_limiter {
-            limiter.acquire().await;
+        // Apply rate limiter from registry (by URL prefix match)
+        if let Some(policy) = self.registry.get(url) {
+            policy.acquire().await;
         }
 
         let url = url.to_string();
@@ -452,7 +456,7 @@ impl HttpClient {
 
         let url = format!("{}/search/movie", self.tmdb_base_url);
         let resp = self
-            .get_json(&url, &params, self.tmdb_limiter.as_deref(), None, None)
+            .get_json(&url, &params)
             .await?;
         let resp = self.handle_http_status(resp, &url, &params).await?;
         let resp: TmdbSearchResponse = self.record_and_deserialize(resp).await?;
@@ -490,7 +494,7 @@ impl HttpClient {
 
         let url = format!("{}/search/tv", self.tmdb_base_url);
         let resp = self
-            .get_json(&url, &params, self.tmdb_limiter.as_deref(), None, None)
+            .get_json(&url, &params)
             .await?;
         let resp = self.handle_http_status(resp, &url, &params).await?;
         let resp: TmdbSearchResponse = self.record_and_deserialize(resp).await?;
@@ -535,7 +539,7 @@ impl HttpClient {
 
         let url = format!("{}/", self.omdb_base_url);
         let resp = self
-            .get_json(&url, &params, None, self.omdb_limiter.as_deref(), self.omdb_quota.as_ref())
+            .get_json(&url, &params)
             .await?;
         let resp = self.handle_http_status(resp, &url, &params).await?;
         let resp: OmdbResponse = self.record_and_deserialize(resp).await?;
@@ -578,7 +582,7 @@ impl HttpClient {
 
         let url = format!("{}/", self.omdb_base_url);
         let resp = self
-            .get_json(&url, &params, None, self.omdb_limiter.as_deref(), self.omdb_quota.as_ref())
+            .get_json(&url, &params)
             .await?;
         let resp = self.handle_http_status(resp, &url, &params).await?;
         let resp: OmdbResponse = self.record_and_deserialize(resp).await?;
@@ -612,10 +616,6 @@ impl HttpClient {
             Some(key) => key.clone(),
             None => return Ok(None),
         };
-
-        if let Some(limiter) = &self.tmdb_limiter {
-            limiter.acquire().await;
-        }
 
         let url = format!(
             "{}/tv/{}/season/{}/episode/{}",
@@ -669,7 +669,7 @@ impl HttpClient {
         ]);
 
         let resp = self
-            .get_json(&url, &params, self.tmdb_limiter.as_deref(), None, None)
+            .get_json(&url, &params)
             .await?;
         let resp = self.handle_http_status(resp, &url, &params).await?;
         let resp: TmdbDetails = self.record_and_deserialize(resp).await?;
