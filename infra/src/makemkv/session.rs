@@ -17,14 +17,15 @@ pub struct MakemkvSession {
 
 impl MakemkvSession {
     /// Create a new session from a spawned child process.
-    /// Starts a reader task that parses stdout lines into events.
+    /// Starts reader tasks for stdout (progress events) and stderr (log messages).
+    /// Uses robot mode (-r) output format: DRV:, PRGV:, MSG: lines.
     pub fn new(mut child: Child) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
 
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
 
-        // Reader task for stdout
+        // Reader task for stdout: parse progress events.
         if let Some(stdout) = stdout {
             let tx = tx.clone();
             tokio::spawn(async move {
@@ -55,7 +56,7 @@ impl MakemkvSession {
             });
         }
 
-        // Reader task for stderr (log messages)
+        // Reader task for stderr: log messages.
         if let Some(stderr) = stderr {
             tokio::spawn(async move {
                 let reader = BufReader::new(stderr);
@@ -64,6 +65,8 @@ impl MakemkvSession {
                 while let Ok(Some(line)) = lines.next_line().await {
                     debug!(line = %line, "makemkvcon stderr");
                 }
+
+                debug!("Stderr reader finished");
             });
         }
 

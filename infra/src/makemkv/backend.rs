@@ -13,15 +13,21 @@ pub struct MakemkvBackend {
     command: Vec<String>,
 }
 
-/// Default temp directory for ripped content.
-/// For Flatpak MakeMKV, this is `/tmp/riply` (Flatpak has access).
-/// For native MakeMKV, it falls back to the same for consistency.
+/// Default parent directory for ripped content.
+/// For Flatpak MakeMKV, this is `~/.var/app/com.makemkv.MakeMKV/riply`
+/// (Flatpak namespace, host filesystem, plenty of space).
+/// For native MakeMKV, it is `/tmp/riply`.
 pub const DEFAULT_RIP_TEMP_DIR: &str = "/tmp/riply";
+pub const FLATPAK_RIP_TEMP_DIR: &str =
+    ".var/app/com.makemkv.MakeMKV/riply";
 
 /// Resolve a default destination for a Flatpak MakeMKV rip.
-/// Uses `/tmp/riply/{disc_name}` which is always accessible.
+/// Uses `~/.var/app/com.makemkv.MakeMKV/riply/{disc_name}` — inside the
+/// Flatpak namespace on the host filesystem, avoiding /tmp tmpfs limits.
 pub fn resolve_rip_destination_flatpak(disc_name: &str) -> (PathBuf, Option<String>) {
-    (PathBuf::from(DEFAULT_RIP_TEMP_DIR).join(disc_name), None)
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let dest = PathBuf::from(home).join(FLATPAK_RIP_TEMP_DIR).join(disc_name);
+    (dest, None)
 }
 
 /// Resolve a default destination for a native MakeMKV rip.
@@ -195,13 +201,30 @@ impl RipBackend for MakemkvBackend {
 
     fn start_rip(&self, drive: usize, dest: &str) -> Result<RipHandle, RipError> {
         let dest_path = Path::new(dest);
+
+        // Create the destination directory inside the Flatpak namespace if needed.
+        // MakeMKV inside Flatpak can't see host-created directories in /tmp.
         if !dest_path.exists() {
-            std::fs::create_dir_all(dest_path)?;
+            if self.is_flatpak() {
+                // Create directory using flatpak run so it exists in the Flatpak namespace.
+                StdCommand::new("flatpak")
+                    .args([
+                        "run",
+                        "--command=mkdir",
+                        "com.makemkv.MakeMKV",
+                        "-p",
+                        dest,
+                    ])
+                    .output()
+                    .map_err(|e| RipError::Backend(format!("Failed to create directory: {}", e)))?;
+            } else {
+                std::fs::create_dir_all(dest_path)?;
+            }
         }
 
         info!(drive, dest = %dest, "Starting rip");
 
-        let mut child = tokio::process::Command::new(&self.command[0])
+        let child = tokio::process::Command::new(&self.command[0])
             .args(&self.command[1..])
             .args([
                 "-r",
@@ -212,23 +235,11 @@ impl RipBackend for MakemkvBackend {
                 "all",
                 dest,
             ])
-            .stdin(std::process::Stdio::piped())
+            .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true)
             .spawn()?;
-
-        // Stdin handler: MakeMKV prompts for overwrite (answer "n") and
-        // disk space warnings (answer "y"). Since we can't read prompts from
-        // stdin, send both responses with a delay to let MakeMKV consume them.
-        if let Some(mut stdin) = child.stdin.take() {
-            tokio::spawn(async move {
-                use tokio::io::AsyncWriteExt;
-                let _ = stdin.write_all(b"n\n").await;
-                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                let _ = stdin.write_all(b"y\n").await;
-            });
-        }
 
         let session = MakemkvSession::new(child);
         Ok(RipHandle::new(Box::new(session)))

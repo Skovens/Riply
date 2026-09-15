@@ -182,9 +182,27 @@ pub fn is_error_message(line: &str) -> bool {
 }
 
 /// Check if a line indicates the rip/backup is complete.
-/// MakeMKV outputs MSG:201003,0,0 when done.
+/// MakeMKV outputs MSG:201003,0,0 (non-robot mode) or MSG:5037 (robot mode) when done.
 pub fn is_completion_line(line: &str) -> bool {
-    line.starts_with("MSG:201003,")
+    line.starts_with("MSG:201003,") || line.starts_with("MSG:5037,")
+}
+
+/// Check if a line indicates a critical error during rip.
+/// MakeMKV outputs MSG:2019 when an error occurs.
+pub fn is_rip_error_line(line: &str) -> bool {
+    line.starts_with("MSG:2019,")
+}
+
+/// Parse progress from a robot-mode MSG: line.
+/// Returns Some with progress info for MSG:5014 (saving titles) lines.
+pub fn parse_rip_progress_from_msg(line: &str) -> Option<(u32, u32)> {
+    if let Some(msg) = parse_message_line(line) {
+        // MSG:5014 = "Saving N titles into directory..."
+        if msg.code == 5014 {
+            return Some((msg.flags, msg.flags)); // flags = number of titles
+        }
+    }
+    None
 }
 
 /// Derive a clean media name from a MakeMKV disc name.
