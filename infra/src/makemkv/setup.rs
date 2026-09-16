@@ -22,6 +22,15 @@ pub enum MissingComponent {
     CdromGroup,
 }
 
+/// Describes a specific Flatpak sandbox issue with an actionable fix.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SandboxIssue {
+    /// Human-readable description of the issue.
+    pub message: String,
+    /// The exact command to run to fix it (if applicable).
+    pub fix_command: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstallationStatus {
     pub installed: bool,
@@ -30,6 +39,10 @@ pub struct InstallationStatus {
     pub flathub_configured: bool,
     pub flatpak_permissions_ok: bool,
     pub drive_access_ok: bool,
+    /// Whether the configured rip destination is writable inside the sandbox.
+    pub rip_destination_writable: bool,
+    /// Actionable messages for sandbox issues (e.g. missing filesystem override).
+    pub sandbox_issues: Vec<SandboxIssue>,
     pub missing: Vec<MissingComponent>,
 }
 
@@ -37,6 +50,12 @@ pub struct InstallationStatus {
 
 /// Check installation status. Safe to call from any context (no side effects).
 pub fn check_installation() -> InstallationStatus {
+    check_installation_with_dest(None)
+}
+
+/// Check installation status with a specific rip destination to probe.
+/// When `dest` is None, uses the default `/tmp/riply`.
+pub fn check_installation_with_dest(dest: Option<&str>) -> InstallationStatus {
     let method = match MakemkvBackend::auto_detect() {
         Ok(backend) => {
             let cmd = backend.command_string();
@@ -53,6 +72,15 @@ pub fn check_installation() -> InstallationStatus {
     let flathub_configured = flatpak_available && check_flathub();
     let flatpak_permissions_ok = flatpak_available && check_flatpak_permissions();
     let drive_access_ok = check_cdrom_group();
+
+    // Probe rip destination writability
+    let rip_dest = dest.unwrap_or("/tmp/riply");
+    let (rip_destination_writable, sandbox_issues) = if method == DetectionMethod::Flatpak {
+        check_flatpak_dest_writable(rip_dest)
+    } else {
+        // Native install: just check if we can create the directory
+        (std::fs::create_dir_all(rip_dest).is_ok(), Vec::new())
+    };
 
     let mut missing = Vec::new();
     if !flatpak_available {
@@ -74,6 +102,8 @@ pub fn check_installation() -> InstallationStatus {
         flathub_configured,
         flatpak_permissions_ok,
         drive_access_ok,
+        rip_destination_writable,
+        sandbox_issues,
         missing,
     }
 }
@@ -252,6 +282,76 @@ fn check_flatpak_permissions() -> bool {
     info.contains("device=all") || info.contains("devices=all") || info.contains("device=all-all")
 }
 
+/// Check if the given destination is writable inside the MakeMKV Flatpak sandbox.
+/// Returns (writable, list of actionable sandbox issues).
+///
+/// The probe runs `flatpak run --command=mktemp com.makemkv.MakeMKV <dest>/.riply-write-test`
+/// and checks if a file was created. If not, it suggests the exact `flatpak override` command.
+fn check_flatpak_dest_writable(dest: &str) -> (bool, Vec<SandboxIssue>) {
+    let mut issues = Vec::new();
+
+    // Try to create a temp file inside the destination via the Flatpak sandbox
+    let probe_path = format!("{}/.riply-write-test-{}", dest, std::process::id());
+    let output = match StdCommand::new("flatpak")
+        .args([
+            "run",
+            "--command=mktemp",
+            "com.makemkv.MakeMKV",
+            &format!("{}/.riply-write-test-XXXXXX", dest),
+        ])
+        .output()
+    {
+        Ok(o) => o,
+        Err(_) => {
+            issues.push(SandboxIssue {
+                message: "Cannot run Flatpak MakeMKV command to test write access".to_string(),
+                fix_command: "Ensure Flatpak MakeMKV is installed: flatpak install flathub com.makemkv.MakeMKV"
+                    .to_string(),
+            });
+            return (false, issues);
+        }
+    };
+
+    let success = output.status.success();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    if success {
+        // Clean up the test file
+        let _ = StdCommand::new("flatpak")
+            .args([
+                "run",
+                "--command=rm",
+                "com.makemkv.MakeMKV",
+                &probe_path,
+            ])
+            .output();
+        (true, issues)
+    } else {
+        // Determine the likely cause and provide an actionable fix
+        let fix_msg = if stderr.contains("No such file") || stderr.contains("Failed") {
+            format!(
+                "Rip destination `{}` is not accessible inside the Flatpak sandbox.\nRun: flatpak override --user --filesystem={} com.makemkv.MakeMKV",
+                dest, dest
+            )
+        } else {
+            format!(
+                "Rip destination `{}` is not writable by the MakeMKV sandbox.\nRun: flatpak override --user --filesystem={} com.makemkv.MakeMKV",
+                dest, dest
+            )
+        };
+
+        issues.push(SandboxIssue {
+            message: format!(
+                "MakeMKV cannot write to `{}` inside the Flatpak sandbox",
+                dest
+            ),
+            fix_command: fix_msg,
+        });
+
+        (false, issues)
+    }
+}
+
 fn check_cdrom_group() -> bool {
     let output = match StdCommand::new("id").arg("-nG").output() {
         Ok(o) => o,
@@ -378,15 +478,19 @@ mod tests {
             flathub_configured: false,
             flatpak_permissions_ok: false,
             drive_access_ok: false,
+            rip_destination_writable: false,
+            sandbox_issues: vec![],
             missing: vec![MissingComponent::Flatpak, MissingComponent::MakeMKV],
         };
         let json = serde_json::to_string(&status).unwrap();
         assert!(json.contains("\"installed\":false"));
         assert!(json.contains("\"flatpak_available\":false"));
+        assert!(json.contains("\"rip_destination_writable\":false"));
 
         let back: InstallationStatus = serde_json::from_str(&json).unwrap();
         assert_eq!(status.installed, back.installed);
         assert_eq!(status.missing, back.missing);
+        assert_eq!(status.rip_destination_writable, back.rip_destination_writable);
     }
 
     #[test]

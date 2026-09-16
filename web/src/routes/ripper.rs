@@ -72,8 +72,15 @@ pub fn router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-pub async fn ripper_status() -> Json<ApiResponse<infra::InstallationStatus>> {
-    let status = tokio::task::spawn_blocking(infra::check_installation)
+pub async fn ripper_status(
+    State(state): State<Arc<AppState>>,
+) -> Json<ApiResponse<infra::InstallationStatus>> {
+    let rip_dest = {
+        let config = state.config.read().await;
+        config.temp_directory.clone()
+    };
+
+    let status = tokio::task::spawn_blocking(move || infra::check_installation_with_dest(Some(&rip_dest)))
         .await
         .unwrap_or_else(|e| {
             tracing::error!(error = %e, "check_installation panicked");
@@ -84,6 +91,8 @@ pub async fn ripper_status() -> Json<ApiResponse<infra::InstallationStatus>> {
                 flathub_configured: false,
                 flatpak_permissions_ok: false,
                 drive_access_ok: false,
+                rip_destination_writable: false,
+                sandbox_issues: vec![],
                 missing: vec![infra::MissingComponent::MakeMKV],
             }
         });
