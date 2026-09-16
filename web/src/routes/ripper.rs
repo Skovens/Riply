@@ -313,10 +313,11 @@ fn _unique_rip_destination(candidate: &str, subdir_name: Option<&str>) -> String
 }
 
 /// Resolve a disc name to a title (+ year) for the output directory.
-/// If a metadata searcher is available, search TMDb/OMDb and use the
-/// matched title; otherwise fall back to the raw parsed disc name.
-async fn resolve_rip_title(
+/// For movies, searches TMDb/OMDb and uses the matched title.
+/// For TV episodes, also verifies the ripped video duration against TMDb.
+async fn resolve_rip_title_with_duration(
     disc_name: &str,
+    rip_folder: &str,
     searcher: Option<&dyn MetadataSearcher>,
 ) -> (String, Option<u16>) {
     let (title, year) = infra::makemkv::parser::parse_disc_name(disc_name);
@@ -331,16 +332,45 @@ async fn resolve_rip_title(
     let search_title = riply_core::NameCleaner::clean_name_for_search(&title);
     let search_year = year.map(u32::from);
 
-    if let Ok(results) = searcher
-        .search(&search_title, search_year, &riply_core::MediaType::Movie)
+    // Search for the TV show
+    let metadata = if let Ok(results) = searcher
+        .search(&search_title, search_year, &riply_core::MediaType::Tv)
         .await
     {
-        if let Some(m) = results.first() {
-            return (m.title.clone(), m.year.map(|y| y as u16));
+        results.into_iter().next()
+    } else {
+        None
+    };
+
+    // Check if this is a TV episode and verify duration
+    if let Some(m) = &metadata {
+        if m.is_tv {
+            let season = m.season_number.unwrap_or(0);
+            let episode = m.episode_number.unwrap_or(0);
+            let tmdb_id = m.tmdb_id.unwrap_or(0);
+
+            if season > 0 && episode > 0 && tmdb_id > 0 {
+                // Find the largest video file in the rip folder
+                let video_files = app::find_video_files(std::path::Path::new(rip_folder));
+                if let Some(largest) = video_files.last() {
+                    // Fetch expected duration from TMDb
+                    if let Ok(Some(expected_duration)) = searcher
+                        .fetch_episode_duration(tmdb_id, season, episode)
+                        .await
+                    {
+                        // Verify duration — non-blocking, non-fatal
+                        let _ = app::verify_episode_duration(largest, expected_duration);
+                    }
+                }
+            }
         }
     }
 
-    (title, year)
+    if let Some(m) = metadata {
+        (m.title.clone(), m.year.map(|y| y as u16))
+    } else {
+        (title, year)
+    }
 }
 
 /// Apply "(Copy N)" suffix if the destination already exists.
@@ -408,9 +438,9 @@ pub async fn start_rip(
         // Post-rip: concurrent autodetection during rip is done above;
         // now handle the result
         if let Ok(()) = rip_result {
-            // Successful rip — attempt auto-naming in background
+            // Successful rip — attempt auto-naming and duration verification
             if let Some(ref disc) = disc_name {
-                let auto_name = resolve_rip_title(disc, searcher.as_deref()).await;
+                let auto_name = resolve_rip_title_with_duration(disc, &temp_folder, searcher.as_deref()).await;
                 if !auto_name.0.is_empty() {
                     let year = auto_name.1.map(|y| y as u32);
                     sse.send_json(json!({"kind":"rip","action":"named","index":index,"data":{"title":auto_name.0,"year":year,"type":"movie"}}));
@@ -470,8 +500,9 @@ pub async fn cancel_rip(
     Path(index): Path<usize>,
 ) -> Json<ApiResponse<String>> {
     let mut rips = state.active_rips.write().await;
-    if let Some(handle) = rips.remove(&index) {
-        handle.abort();
+    if let Some(task_handle) = rips.remove(&index) {
+        // Abort the tokio task (which includes cancelling the underlying makemkvcon process)
+        task_handle.abort();
         state.sse.send_json(json!({"kind":"rip","action":"cancelled","index":index,"data":{}}));
         info!(drive = index, "Cancelled rip");
         Json(ApiResponse::ok(format!("Drive {} rip cancelled", index)))
@@ -639,48 +670,61 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
                 "Auto-rip: disc detected"
             );
 
+            // Resolve disc name for the temp folder
+            let temp_dir = {
+                let config = state.config.read().await;
+                config.temp_directory.clone()
+            };
+            let temp_folder = format!("{}/{}", temp_dir, drive.index);
+            if std::fs::create_dir_all(&temp_folder).is_err() {
+                continue;
+            }
+
             // Start the rip in a background task
             let state_clone = Arc::clone(&state);
             let drive_index = drive.index;
             let eject_after = autorip_eject;
+            let disc_name = drive.disc_name.clone();
 
-            let handle = tokio::spawn(async move {
-                if let Err(e) = execute_rip(state_clone.clone(), drive_index, eject_after).await {
+            let backend = match &state.backend {
+                Some(b) => Arc::clone(b),
+                None => continue,
+            };
+
+            let handle = match backend.start_rip(drive_index, &temp_folder) {
+                Ok(h) => h,
+                Err(e) => {
+                    warn!(drive = drive_index, error = %e, "Auto-rip failed to start");
+                    continue;
+                }
+            };
+
+            let rip_task = tokio::spawn(async move {
+                if let Err(e) =
+                    execute_rip(state_clone.clone(), drive_index, handle, disc_name, temp_folder, eject_after).await
+                {
                     tracing::error!(drive = drive_index, error = %e, "Auto-rip failed");
                 }
             });
 
             drop(active);
             drop(enabled);
-            state.active_rips.write().await.insert(drive.index, handle);
+            state.active_rips.write().await.insert(drive.index, rip_task);
             break;
         }
     }
 }
 
 /// Execute a rip on a drive, handling progress events and optional eject.
-/// Used by both manual and auto-rip paths.
-async fn execute_rip(state: Arc<AppState>, index: usize, eject_after: bool) -> Result<(), String> {
-    let backend = state.backend.as_ref().ok_or("No ripping backend")?;
-
-    // Resolve disc name for the temp folder
-    let backend_clone = Arc::clone(backend);
-    let drives = tokio::task::spawn_blocking(move || backend_clone.detect_drives())
-        .await
-        .unwrap_or(Ok(vec![]))
-        .unwrap_or(vec![]);
-
-    let disc_name = drives.iter().find(|d| d.index == index).and_then(|d| d.disc_name.clone());
-
-    // Create temp rip folder: {temp_directory}/{drive_index}/
-    let config = state.config.read().await;
-    let temp_dir = config.temp_directory.clone();
-    drop(config);
-    let temp_folder = format!("{}/{}", temp_dir, index);
-    std::fs::create_dir_all(&temp_folder).map_err(|e| format!("Failed to create temp folder: {}", e))?;
-
-    let mut handle = backend.start_rip(index, &temp_folder).map_err(|e| e.to_string())?;
-
+/// Used by both manual and auto-rip paths. The caller manages active_rips.
+async fn execute_rip(
+    state: Arc<AppState>,
+    index: usize,
+    mut handle: RipHandle,
+    disc_name: Option<String>,
+    temp_folder: String,
+    eject_after: bool,
+) -> Result<(), String> {
     let sse = state.sse.clone();
     sse.send_json(json!({"kind":"rip","action":"starting","index":index,"data":{}}));
 
@@ -688,15 +732,12 @@ async fn execute_rip(state: Arc<AppState>, index: usize, eject_after: bool) -> R
     let state_clone = Arc::clone(&state);
     let result = process_rip_events(&mut handle, &sse, index).await;
 
-    // Remove from active rips (whether success or error)
-    state_clone.active_rips.write().await.remove(&index);
-
     // Post-rip: move or cleanup
     match result {
         Ok(()) => {
-            // Successful rip — attempt auto-naming in background
+            // Successful rip — attempt auto-naming and duration verification
             if let Some(ref disc) = disc_name {
-                let auto_name = resolve_rip_title(disc, searcher.as_deref()).await;
+                let auto_name = resolve_rip_title_with_duration(disc, &temp_folder, searcher.as_deref()).await;
                 if !auto_name.0.is_empty() {
                     let year = auto_name.1.map(|y| y as u32);
                     sse.send_json(json!({"kind":"rip","action":"named","index":index,"data":{"title":auto_name.0,"year":year,"type":"movie"}}));
@@ -745,8 +786,12 @@ async fn execute_rip(state: Arc<AppState>, index: usize, eject_after: bool) -> R
 
     // Eject if configured
     if eject_after {
-        let backend_clone = Arc::clone(backend);
-        let drives = tokio::task::spawn_blocking(move || backend_clone.detect_drives())
+        let backend_eject = state
+            .backend
+            .as_ref()
+            .ok_or("No ripping backend")?;
+        let backend_eject = Arc::clone(backend_eject);
+        let drives = tokio::task::spawn_blocking(move || backend_eject.detect_drives())
             .await
             .unwrap_or(Ok(vec![]))
             .unwrap_or(vec![]);

@@ -239,6 +239,9 @@ pub struct TmdbEpisodeDetail {
     pub episode_number: Option<u32>,
     #[serde(default)]
     pub air_date: Option<String>,
+    /// Runtime in minutes (TMDb returns episode runtime in minutes).
+    #[serde(default)]
+    pub runtime: Option<i32>,
 }
 
 /// Extract the US content rating from TMDb release dates.
@@ -633,6 +636,20 @@ impl HttpClient {
         Ok(Some(detail))
     }
 
+    /// Fetch the expected duration (in seconds) for a TV episode from TMDb.
+    /// Returns `None` if the episode runtime is not available or no API key is configured.
+    pub async fn fetch_episode_duration(
+        &self,
+        tmdb_id: i32,
+        season: u32,
+        episode: u32,
+    ) -> Result<Option<f64>, anyhow::Error> {
+        match self.fetch_tmdb_episode(tmdb_id, season, episode).await? {
+            Some(detail) => Ok(detail.runtime.map(|r| (r as f64) * 60.0)),
+            None => Ok(None),
+        }
+    }
+
     /// Fetch enrichment metadata (genres, runtime, overview, cast, content
     /// rating) for a TMDb title. Uses `append_to_response` to bundle credits
     /// and release dates into one request.
@@ -858,6 +875,25 @@ impl MetadataSearcher for HttpClient {
         Box::pin(async move {
             let m = metrics.lock().await;
             m.log_stats();
+        })
+    }
+
+    fn fetch_episode_duration(
+        &self,
+        tmdb_id: i32,
+        season: u32,
+        episode: u32,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<Option<f64>, MetadataError>> + Send + '_,
+        >,
+    > {
+        let client = self.clone();
+        Box::pin(async move {
+            client
+                .fetch_episode_duration(tmdb_id, season, episode)
+                .await
+                .map_err(|e| MetadataError::ApiError(e.to_string()))
         })
     }
 }

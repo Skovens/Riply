@@ -97,4 +97,19 @@ pub trait MetadataSearcher: Send + Sync {
     fn log_stats(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
         Box::pin(async {})
     }
+
+    /// Fetch the expected duration (in seconds) for a TV show episode from
+    /// TMDb. Returns `None` if the episode runtime is not available or the
+    /// provider does not support episode-level lookups.
+    ///
+    /// Default implementation returns `None` so providers that don't support
+    /// episode-level duration can omit this.
+    fn fetch_episode_duration(
+        &self,
+        _tmdb_id: i32,
+        _season: u32,
+        _episode: u32,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<f64>, MetadataError>> + Send + '_>> {
+        Box::pin(async { Ok(None) })
+    }
 }
