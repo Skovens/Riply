@@ -9,6 +9,7 @@ use axum::{
 };
 use riply_core::{MetadataSearcher, RipBackend};
 use serde::{Deserialize, Serialize};
+use tokio::sync::watch;
 use tokio::sync::RwLock;
 use tower_http::cors::CorsLayer;
 use tower_http::timeout::TimeoutLayer;
@@ -18,6 +19,9 @@ use tracing::info;
 use crate::metrics::Metrics;
 use crate::sse::SseManager;
 use app::JobScheduler;
+
+/// Type for an active rip: (cancellation sender, tokio task handle).
+type ActiveRip = (watch::Sender<()>, tokio::task::JoinHandle<()>);
 use infra::{Config, Database};
 
 use crate::routes::analyze;
@@ -53,7 +57,7 @@ pub struct AppState {
     /// Active rip tasks keyed by drive index. Stores a cancellation channel
     /// (to signal the rip task to cancel) and the JoinHandle (for aborting
     /// the tokio task).
-    pub active_rips: RwLock<HashMap<usize, (tokio::sync::watch::Sender<()>, tokio::task::JoinHandle<()>)>>,
+    pub active_rips: RwLock<HashMap<usize, ActiveRip>>,
     /// Drives with auto-rip enabled (session-only, in-memory).
     pub autorip_drives: RwLock<HashSet<usize>>,
     /// Handle for the autorip background polling task.

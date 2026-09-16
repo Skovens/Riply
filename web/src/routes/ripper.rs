@@ -229,25 +229,140 @@ fn calculate_eta(
     None
 }
 
+/// Estimate total rip size in bytes based on disc type heuristics.
+/// DVD = 4.7 GB, dual-layer DVD = 8.5 GB, Blu-ray = 25/50 GB.
+/// We use a conservative estimate since actual output is usually smaller.
+fn estimate_total_bytes(num_titles: u32, has_dvd: bool) -> u64 {
+    if num_titles == 0 {
+        return 0;
+    }
+    // Per-title estimate: DVD title ~4GB, Blu-ray title ~20GB
+    if has_dvd {
+        num_titles as u64 * 4_000_000_000u64 // ~4GB per DVD title
+    } else {
+        num_titles as u64 * 20_000_000_000u64 // ~20GB per Blu-ray title
+    }
+}
+
+/// Calculate total bytes written to a directory by summing all file sizes.
+fn dir_total_bytes(dir: &str) -> u64 {
+    let mut total = 0u64;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            if let Ok(meta) = entry.metadata() {
+                if meta.is_file() {
+                    total += meta.len();
+                } else if meta.is_dir() {
+                    // Recurse into subdirectories (MakeMKV creates DvdvolumeXX folders)
+                    total += dir_total_bytes(&entry.path().to_string_lossy());
+                }
+            }
+        }
+    }
+    total
+}
+
 /// Shared event loop that processes rip progress events and sends SSE updates.
 /// Extracted to avoid duplication between `start_rip` and `execute_rip`.
+///
+/// When `output_dir` is provided, a file-size-growth fallback is used: if
+/// PRGV progress lines are not emitted (e.g. Flatpak MakeMKV), the function
+/// polls the output directory size every 2 seconds and computes percentage
+/// from the growth rate.
 async fn process_rip_events(
     handle: &mut RipHandle,
     sse: &crate::SseManager,
     index: usize,
+    output_dir: Option<String>,
 ) -> Result<(), String> {
     let mut progress_start: Option<Instant> = None;
     let mut last_update: Option<Instant> = None;
     let mut current_pct: f64 = 0.0;
     let mut rate: Option<f64> = None;
+    let mut prgv_active = true; // true until we confirm PRGV events are coming
+    let mut titles_seen: u32 = 0;
+    let mut has_dvd = true; // assume DVD until we see Blu-ray indicators
 
-    while let Some(event) = handle.next_event().await {
+    // File-size fallback state
+    let fs_start = Instant::now();
+    let mut fs_last_bytes: Option<u64> = None;
+    let mut fs_last_time: Option<Instant> = None;
+    let mut fs_last_pct: u32 = 0;
+
+    // Poll interval for file-size-based progress
+    let poll_interval = std::time::Duration::from_secs(2);
+
+    loop {
+        // Wait for either an event from makemkvcon or a poll tick
+        let event = tokio::select! {
+            biased; // prefer actual events over poll ticks
+            Some(event) = handle.next_event() => event,
+            _ = tokio::time::sleep(poll_interval) => {
+                // Poll tick — only emit progress if PRGV has been inactive
+                if !prgv_active {
+                    if let Some(ref dir) = output_dir {
+                        let written = dir_total_bytes(dir);
+                        let now = Instant::now();
+
+                        // Estimate total once we have some data
+                        let total_est = if titles_seen > 0 {
+                            estimate_total_bytes(titles_seen, has_dvd)
+                        } else {
+                            0
+                        };
+
+                        if total_est > 0 && written > 0 {
+                            let pct = (written as f64 / total_est as f64 * 100.0).clamp(0.0, 100.0) as u32;
+
+                            // Calculate ETA from growth rate
+                            let eta = if let (Some(prev_bytes), Some(prev_time)) = (fs_last_bytes, fs_last_time) {
+                                let delta_bytes = written.saturating_sub(prev_bytes);
+                                let delta_secs = now.duration_since(prev_time).as_secs_f64();
+                                if delta_secs > 0.0 && delta_bytes > 0 {
+                                    let bytes_per_sec = delta_bytes as f64 / delta_secs;
+                                    let remaining = (total_est as f64 - written as f64).max(0.0);
+                                    let secs_left = (remaining / bytes_per_sec).ceil() as u64;
+                                    if secs_left > 0 && now.duration_since(fs_start).as_secs() >= 5 {
+                                        Some(secs_left)
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            };
+
+                            // Only emit if percentage changed
+                            if pct != fs_last_pct && pct > 0 {
+                                fs_last_pct = pct;
+                                let event_data = if let Some(eta) = eta {
+                                    json!({"kind":"rip","action":"progress","index":index,"data":{"pct":pct,"eta":eta,"stage":"ripping"}})
+                                } else {
+                                    json!({"kind":"rip","action":"progress","index":index,"data":{"pct":pct,"eta":null,"stage":"ripping"}})
+                                };
+                                sse.send_json(event_data);
+                            }
+
+                            fs_last_bytes = Some(written);
+                            fs_last_time = Some(now);
+                        }
+                    }
+                }
+                continue;
+            }
+        };
+
         match event {
             RipEvent::Progress {
                 current,
                 total,
                 max,
             } => {
+                prgv_active = true;
+                fs_last_bytes = None; // reset file-size tracking when PRGV is active
+
                 let pct = if total > 0 && max > 0 {
                     (current as f64 / total as f64 * 100.0).clamp(0.0, 100.0) as u32
                 } else {
@@ -279,10 +394,21 @@ async fn process_rip_events(
             }
             RipEvent::Message(msg) => {
                 sse.send_json(json!({"kind":"rip","action":"message","index":index,"data":{"text":msg}}));
+
+                // Check for "Saving N titles" message to kick off file-size fallback
+                if msg.contains("Saving") && msg.contains("titles") {
+                    // Extract number of titles
+                    if let Some(num_str) = msg.split_whitespace().nth(1) {
+                        if let Ok(n) = num_str.parse::<u32>() {
+                            titles_seen = n;
+                        }
+                    }
+                    // Check for Blu-ray indicators
+                    has_dvd = !msg.to_lowercase().contains("bluray") && !msg.to_lowercase().contains("bd");
+                }
             }
         }
     }
-    Ok(())
 }
 
 /// If `candidate` (a full directory path) already exists and contains files,
@@ -432,7 +558,7 @@ pub async fn start_rip(
 
         // Process rip progress events, checking for cancellation
         let rip_result = tokio::select! {
-            result = process_rip_events(&mut handle, &sse, index) => result,
+            result = process_rip_events(&mut handle, &sse, index, Some(temp_folder.clone())) => result,
             _ = cancel_rx.changed() => {
                 // Cancellation requested - cancel the makemkvcon process
                 let _ = handle.cancel().await;
@@ -752,7 +878,7 @@ async fn execute_rip(
 
     let searcher = state.searcher.clone();
     let state_clone = Arc::clone(&state);
-    let result = process_rip_events(&mut handle, &sse, index).await;
+    let result = process_rip_events(&mut handle, &sse, index, Some(temp_folder.clone())).await;
 
     // Post-rip: move or cleanup
     match result {
