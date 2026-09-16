@@ -61,7 +61,7 @@ pub async fn start_scan(
 
                 let mut duplicates = HashMap::new();
                 for record in &records {
-                    if let Ok(Some(existing)) = db.find_file_by_hash(&record.hash()).await {
+                    if let Ok(Some(existing)) = db.find_file_by_hash(record.hash()).await {
                         if existing.path() != record.path() {
                             duplicates.insert(record.hash().to_string(), existing.path().clone());
                         }

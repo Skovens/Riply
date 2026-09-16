@@ -75,7 +75,7 @@ impl Database {
 
         // Check if file already exists
         let existing = sqlx::query_scalar::<_, String>("SELECT id FROM files WHERE id = ?")
-            .bind(&file.id())
+            .bind(file.id())
             .fetch_optional(&self.pool)
             .await?;
 
@@ -93,11 +93,11 @@ impl Database {
                 "#,
             )
             .bind(file.path().to_string_lossy().to_string())
-            .bind(&file.filename())
+            .bind(file.filename())
             .bind(file.size())
-            .bind(&file.hash())
-            .bind(&file.updated_at())
-            .bind(&file.id())
+            .bind(file.hash())
+            .bind(file.updated_at())
+            .bind(file.id())
             .execute(&self.pool)
             .await?;
         } else {
@@ -119,41 +119,41 @@ impl Database {
                 )
                 "#,
             )
-            .bind(&file.id())
+            .bind(file.id())
             .bind(file.path().to_string_lossy().to_string())
-            .bind(&file.filename())
+            .bind(file.filename())
             .bind(file.size())
             .bind(file.duration())
-            .bind(&file.hash())
+            .bind(file.hash())
             .bind(file.status().to_string())
-            .bind(&file.suggested_title())
+            .bind(file.suggested_title())
             .bind(file.suggested_year())
             .bind(file.confidence())
-            .bind(&file.canonical_title())
+            .bind(file.canonical_title())
             .bind(file.canonical_year())
             .bind(file.tmdb_id())
-            .bind(riply_core::content_type_to_str(&file.content_type()))
+            .bind(riply_core::content_type_to_str(file.content_type()))
             .bind(file.media_type().to_string())
-            .bind(&file.series_name())
+            .bind(file.series_name())
             .bind(file.season_number())
             .bind(file.episode_number())
-            .bind(&file.episode_title())
-            .bind(&file.source())
-            .bind(&file.subtitle_text())
+            .bind(file.episode_title())
+            .bind(file.source())
+            .bind(file.subtitle_text())
             .bind(
                 file.duplicate_path()
                     .as_ref()
                     .map(|p| p.to_string_lossy().to_string()),
             )
-            .bind(&file.title_group_id())
-            .bind(json_encode_list(&file.genres()))
+            .bind(file.title_group_id())
+            .bind(json_encode_list(file.genres()))
             .bind(file.runtime())
-            .bind(&file.content_rating())
-            .bind(&file.overview())
-            .bind(json_encode_list(&file.cast_list()))
+            .bind(file.content_rating())
+            .bind(file.overview())
+            .bind(json_encode_list(file.cast_list()))
             .bind(file.reviewed())
-            .bind(&file.created_at())
-            .bind(&file.updated_at())
+            .bind(file.created_at())
+            .bind(file.updated_at())
             .execute(&self.pool)
             .await?;
         }
@@ -269,40 +269,40 @@ impl Database {
             "#,
         )
         .bind(file.path().to_string_lossy().to_string())
-        .bind(&file.filename())
+        .bind(file.filename())
         .bind(file.size())
         .bind(file.duration())
-        .bind(&file.hash())
+        .bind(file.hash())
         .bind(file.status().to_string())
-        .bind(&file.suggested_title())
+        .bind(file.suggested_title())
         .bind(file.suggested_year())
         .bind(file.confidence())
-        .bind(&file.canonical_title())
+        .bind(file.canonical_title())
         .bind(file.canonical_year())
         .bind(file.tmdb_id())
-        .bind(riply_core::content_type_to_str(&file.content_type()))
+        .bind(riply_core::content_type_to_str(file.content_type()))
         .bind(file.media_type().to_string())
-        .bind(&file.series_name())
+        .bind(file.series_name())
         .bind(file.season_number())
         .bind(file.episode_number())
-        .bind(&file.episode_title())
-        .bind(&file.source())
-        .bind(&file.subtitle_text())
+        .bind(file.episode_title())
+        .bind(file.source())
+        .bind(file.subtitle_text())
         .bind(
             file.duplicate_path()
                 .as_ref()
                 .map(|p| p.to_string_lossy().to_string()),
         )
-        .bind(&file.title_group_id())
-        .bind(json_encode_list(&file.genres()))
+        .bind(file.title_group_id())
+        .bind(json_encode_list(file.genres()))
         .bind(file.runtime())
-        .bind(&file.content_rating())
-        .bind(&file.overview())
-        .bind(json_encode_list(&file.cast_list()))
+        .bind(file.content_rating())
+        .bind(file.overview())
+        .bind(json_encode_list(file.cast_list()))
         .bind(file.reviewed())
-        .bind(&file.created_at())
-        .bind(&file.updated_at())
-        .bind(&file.id())
+        .bind(file.created_at())
+        .bind(file.updated_at())
+        .bind(file.id())
         .execute(&self.pool)
         .await?;
 
@@ -325,7 +325,7 @@ impl Database {
                 duration: row.try_get("duration")?,
                 hash: row.try_get("hash")?,
                 status: self.parse_status(row.try_get::<String, _>("status")?),
-                content_type: riply_core::ContentType::from_str(&row.try_get::<String, _>("content_type")?),
+                content_type: riply_core::ContentType::parse(&row.try_get::<String, _>("content_type")?),
                 media_type: self.parse_media_type(row.try_get::<String, _>("media_type")?),
                 title_group_id: row.try_get::<Option<String>, _>("title_group_id")?,
                 duplicate_path: row
@@ -798,8 +798,8 @@ impl Database {
                     "#,
                 )
                 .bind(duplicate.path().to_string_lossy().to_string())
-                .bind(&duplicate.updated_at())
-                .bind(&duplicate.id())
+                .bind(duplicate.updated_at())
+                .bind(duplicate.id())
                 .execute(&self.pool)
                 .await?;
                 marked += 1;

@@ -40,16 +40,29 @@ pub async fn rip_command(command: RipCommand, config: &infra::Config) -> Result<
     match command {
         RipCommand::List { json } => list_drives(json).await,
         RipCommand::Start { index, destination } => {
+            let backend = infra::MakemkvBackend::auto_detect()
+                .map_err(|e| anyhow::anyhow!("Failed to detect ripping backend: {}", e))?;
+
             let dest = match destination {
                 Some(d) => d,
                 None => {
-                    config
-                        .validate_for_ripping()
-                        .map_err(|e| anyhow::anyhow!(e))?;
-                    config
-                        .rip_output_directory
-                        .clone()
-                        .unwrap_or_else(|| ".".to_string())
+                    // Use Flatpak-aware default destination
+                    let drives = backend.detect_drives()
+                        .map_err(|e| anyhow::anyhow!("Failed to detect drives: {}", e))?;
+                    let disc_name = drives.iter()
+                        .find(|d| d.index == index)
+                        .and_then(|d| d.disc_name.clone())
+                        .unwrap_or_else(|| format!("Disc_{}", index));
+                    let (path, _) = if backend.is_flatpak() {
+                        infra::makemkv::backend::resolve_rip_destination_flatpak(
+                            &disc_name,
+                        )
+                    } else {
+                        infra::makemkv::backend::resolve_rip_destination_native(
+                            &disc_name,
+                        )
+                    };
+                    path.to_string_lossy().to_string()
                 }
             };
             start_rip(index, &dest, searcher.as_deref()).await

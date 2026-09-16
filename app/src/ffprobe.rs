@@ -3,7 +3,7 @@ use std::process::Command;
 
 use riply_core::ContentType;
 use serde::Deserialize;
-use tracing::instrument;
+use tracing::{info, instrument, warn};
 
 #[derive(Debug, Deserialize)]
 struct FfprobeOutput {
@@ -85,4 +85,85 @@ pub fn extract_metadata(path: &Path) -> Result<FfprobeMetadata, anyhow::Error> {
         codec,
         content_type,
     })
+}
+
+/// Video file extensions that ffprobe can inspect.
+const VIDEO_EXTENSIONS: &[&str] = &["mkv", "mp4", "avi", "mov", "wmv", "flv", "webm"];
+
+/// Find all video files in a directory (non-recursive).
+pub fn find_video_files(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut videos = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    if VIDEO_EXTENSIONS.contains(&ext.to_lowercase().as_str()) {
+                        videos.push(path);
+                    }
+                }
+            }
+        }
+    }
+    videos.sort_by_key(|p| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0));
+    videos
+}
+
+/// Check if a video file's duration matches the expected duration from TMDb.
+///
+/// Uses a tolerance of ±5 seconds or ±1% (whichever is larger) to account for
+/// minor encoding differences between the disc source and the ripped file.
+///
+/// Returns `Ok(())` if the duration matches, `Err` with a description if it
+/// differs significantly. Returns `Ok(None)` if either duration is unavailable.
+pub fn verify_episode_duration(
+    video_path: &Path,
+    expected_duration_secs: f64,
+) -> Result<Option<()>, String> {
+    let metadata = extract_metadata(video_path).map_err(|e| e.to_string())?;
+
+    let actual_secs = match metadata.duration_secs {
+        Some(d) => d,
+        None => {
+            warn!(
+                path = %video_path.display(),
+                "Could not determine actual duration from ffprobe"
+            );
+            return Ok(None);
+        }
+    };
+
+    if expected_duration_secs <= 0.0 {
+        return Ok(None);
+    }
+
+    let diff = (actual_secs - expected_duration_secs).abs();
+    // Tolerance: ±5 seconds or ±1%, whichever is larger
+    let tolerance = 5.0_f64.max(expected_duration_secs * 0.01);
+
+    if diff > tolerance {
+        let pct = (diff / expected_duration_secs) * 100.0;
+        let msg = format!(
+            "Episode duration mismatch: actual {:.1}s vs expected {:.1}s (diff: {:.1}s, {:.1}%)",
+            actual_secs, expected_duration_secs, diff, pct
+        );
+        warn!(
+            path = %video_path.display(),
+            actual_secs = actual_secs,
+            expected_secs = expected_duration_secs,
+            diff_secs = diff,
+            pct_diff = pct,
+            "{}",
+            msg
+        );
+        return Err(msg);
+    }
+
+    info!(
+        path = %video_path.display(),
+        actual_secs = actual_secs,
+        expected_secs = expected_duration_secs,
+        "Episode duration verified"
+    );
+    Ok(Some(()))
 }

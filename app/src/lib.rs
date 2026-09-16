@@ -11,7 +11,7 @@ pub mod organizer;
 pub mod scanner;
 
 pub use analyzer::AnalyzerService;
-pub use ffprobe::extract_metadata;
+pub use ffprobe::{extract_metadata, find_video_files, verify_episode_duration};
 pub use jobs::{
     CancellationToken, JobInfo, JobKind, JobProgress, JobScheduler, JobStatus, ProgressHandle,
 };

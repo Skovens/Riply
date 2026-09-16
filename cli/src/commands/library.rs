@@ -65,7 +65,7 @@ pub async fn scan_library(
 
     for record in &result.records {
         // Check if file already exists by hash
-        let existing = db.find_file_by_hash(&record.hash()).await?;
+        let existing = db.find_file_by_hash(record.hash()).await?;
         if existing.is_some() {
             // Update existing record
             db.update_file(record).await?;

@@ -22,7 +22,7 @@ impl ContentType {
     }
 
     /// Parse from a string value (for deserialization).
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "extra" | "bonus" => ContentType::Extra,
             "main" | "title" => ContentType::Main,
@@ -367,14 +367,14 @@ mod tests {
 
     #[test]
     fn test_content_type_from_str() {
-        assert_eq!(ContentType::from_str("extra"), ContentType::Extra);
-        assert_eq!(ContentType::from_str("EXTRA"), ContentType::Extra);
-        assert_eq!(ContentType::from_str("bonus"), ContentType::Extra);
-        assert_eq!(ContentType::from_str("main"), ContentType::Main);
-        assert_eq!(ContentType::from_str("MAIN"), ContentType::Main);
-        assert_eq!(ContentType::from_str("title"), ContentType::Main);
-        assert_eq!(ContentType::from_str("unknown"), ContentType::Unknown);
-        assert_eq!(ContentType::from_str("foo"), ContentType::Unknown);
+        assert_eq!(ContentType::parse("extra"), ContentType::Extra);
+        assert_eq!(ContentType::parse("EXTRA"), ContentType::Extra);
+        assert_eq!(ContentType::parse("bonus"), ContentType::Extra);
+        assert_eq!(ContentType::parse("main"), ContentType::Main);
+        assert_eq!(ContentType::parse("MAIN"), ContentType::Main);
+        assert_eq!(ContentType::parse("title"), ContentType::Main);
+        assert_eq!(ContentType::parse("unknown"), ContentType::Unknown);
+        assert_eq!(ContentType::parse("foo"), ContentType::Unknown);
     }
 
     #[test]

@@ -99,10 +99,16 @@ async fn scan_folders(
     // Build organizer service with metadata searcher if available
     let searcher = state.searcher.clone();
     let folder_store: Arc<dyn riply_core::FolderStore> = state.db.clone();
+    let (movies_dir, tv_dir) = {
+        let config = state.config.read().await;
+        (config.movies_directory_buf(), config.tv_directory_buf())
+    };
 
     let organizer = app::OrganizerService::new(
         searcher.map(|s| s as Arc<dyn riply_core::MetadataSearcher>),
         folder_store,
+        movies_dir,
+        tv_dir,
     );
 
     let result = organizer
@@ -147,10 +153,16 @@ async fn analyze_folder(
 
     let searcher = state.searcher.clone();
     let folder_store: Arc<dyn riply_core::FolderStore> = state.db.clone();
+    let (movies_dir, tv_dir) = {
+        let config = state.config.read().await;
+        (config.movies_directory_buf(), config.tv_directory_buf())
+    };
 
     let organizer = app::OrganizerService::new(
         searcher.map(|s| s as Arc<dyn riply_core::MetadataSearcher>),
         folder_store,
+        movies_dir,
+        tv_dir,
     );
 
     let result = organizer
@@ -167,8 +179,12 @@ async fn accept_folder(
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<FolderRecord>>, WebError> {
     let folder_store: Arc<dyn riply_core::FolderStore> = state.db.clone();
+    let (movies_dir, tv_dir) = {
+        let config = state.config.read().await;
+        (config.movies_directory_buf(), config.tv_directory_buf())
+    };
 
-    let organizer = app::OrganizerService::new(None, folder_store);
+    let organizer = app::OrganizerService::new(None, folder_store, movies_dir, tv_dir);
 
     let result = organizer
         .accept_folder(&id)
@@ -186,8 +202,12 @@ async fn reject_folder(
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<FolderRecord>>, WebError> {
     let folder_store: Arc<dyn riply_core::FolderStore> = state.db.clone();
+    let (movies_dir, tv_dir) = {
+        let config = state.config.read().await;
+        (config.movies_directory_buf(), config.tv_directory_buf())
+    };
 
-    let organizer = app::OrganizerService::new(None, folder_store);
+    let organizer = app::OrganizerService::new(None, folder_store, movies_dir, tv_dir);
 
     let result = organizer
         .reject_folder(&id)
@@ -204,8 +224,12 @@ async fn accept_all_folders(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<ApiResponse<usize>>, WebError> {
     let folder_store: Arc<dyn riply_core::FolderStore> = state.db.clone();
+    let (movies_dir, tv_dir) = {
+        let config = state.config.read().await;
+        (config.movies_directory_buf(), config.tv_directory_buf())
+    };
 
-    let organizer = app::OrganizerService::new(None, folder_store);
+    let organizer = app::OrganizerService::new(None, folder_store, movies_dir, tv_dir);
 
     let count = organizer
         .accept_all_folders()
@@ -222,8 +246,12 @@ async fn reject_all_folders(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<ApiResponse<usize>>, WebError> {
     let folder_store: Arc<dyn riply_core::FolderStore> = state.db.clone();
+    let (movies_dir, tv_dir) = {
+        let config = state.config.read().await;
+        (config.movies_directory_buf(), config.tv_directory_buf())
+    };
 
-    let organizer = app::OrganizerService::new(None, folder_store);
+    let organizer = app::OrganizerService::new(None, folder_store, movies_dir, tv_dir);
 
     let count = organizer
         .reject_all_folders()
@@ -241,8 +269,12 @@ async fn move_folder(
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<()>>, WebError> {
     let folder_store: Arc<dyn riply_core::FolderStore> = state.db.clone();
+    let (movies_dir, tv_dir) = {
+        let config = state.config.read().await;
+        (config.movies_directory_buf(), config.tv_directory_buf())
+    };
 
-    let organizer = app::OrganizerService::new(None, folder_store);
+    let organizer = app::OrganizerService::new(None, folder_store, movies_dir, tv_dir);
 
     organizer
         .move_folder(&id)
@@ -266,7 +298,12 @@ async fn preview_move(
         .map_err(|e| WebError::Internal(e.to_string()))?
         .ok_or_else(|| WebError::NotFound(format!("Folder not found: {}", id)))?;
 
-    let organizer = app::OrganizerService::new(None, state.db.clone());
+    let (movies_dir, tv_dir) = {
+        let config = state.config.read().await;
+        (config.movies_directory_buf(), config.tv_directory_buf())
+    };
+
+    let organizer = app::OrganizerService::new(None, state.db.clone(), movies_dir, tv_dir);
 
     let destination = organizer
         .preview_move(&folder)
