@@ -426,11 +426,19 @@ pub async fn start_rip(
     let sse = state.sse.clone();
     let searcher = state.searcher.clone();
     let state_clone = Arc::clone(&state);
+    let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(());
     let rip_handle = tokio::spawn(async move {
         sse.send_json(json!({"kind":"rip","action":"starting","index":index,"data":{}}));
 
-        // Process rip progress events
-        let rip_result = process_rip_events(&mut handle, &sse, index).await;
+        // Process rip progress events, checking for cancellation
+        let rip_result = tokio::select! {
+            result = process_rip_events(&mut handle, &sse, index) => result,
+            _ = cancel_rx.changed() => {
+                // Cancellation requested - cancel the makemkvcon process
+                let _ = handle.cancel().await;
+                Err("Rip cancelled".to_string())
+            }
+        };
 
         // Remove from active rips (whether success or error)
         state_clone.active_rips.write().await.remove(&index);
@@ -487,7 +495,7 @@ pub async fn start_rip(
         }
     });
 
-    state.active_rips.write().await.insert(index, rip_handle);
+    state.active_rips.write().await.insert(index, (cancel_tx, rip_handle));
 
     Ok(Json(ApiResponse::ok(format!(
         "Rip started on drive {}",
@@ -500,8 +508,10 @@ pub async fn cancel_rip(
     Path(index): Path<usize>,
 ) -> Json<ApiResponse<String>> {
     let mut rips = state.active_rips.write().await;
-    if let Some(task_handle) = rips.remove(&index) {
-        // Abort the tokio task (which includes cancelling the underlying makemkvcon process)
+    if let Some((cancel_tx, task_handle)) = rips.remove(&index) {
+        // Send cancellation signal to the task (which will cancel makemkvcon)
+        let _ = cancel_tx.send(());
+        // Then abort the tokio task
         task_handle.abort();
         state.sse.send_json(json!({"kind":"rip","action":"cancelled","index":index,"data":{}}));
         info!(drive = index, "Cancelled rip");
@@ -691,25 +701,37 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
                 None => continue,
             };
 
-            let handle = match backend.start_rip(drive_index, &temp_folder) {
-                Ok(h) => h,
-                Err(e) => {
-                    warn!(drive = drive_index, error = %e, "Auto-rip failed to start");
-                    continue;
-                }
-            };
+            let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(());
 
-            let rip_task = tokio::spawn(async move {
-                if let Err(e) =
-                    execute_rip(state_clone.clone(), drive_index, handle, disc_name, temp_folder, eject_after).await
-                {
-                    tracing::error!(drive = drive_index, error = %e, "Auto-rip failed");
-                }
-            });
+            let rip_task = {
+                let handle = match backend.start_rip(drive_index, &temp_folder) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        warn!(drive = drive_index, error = %e, "Auto-rip failed to start");
+                        continue;
+                    }
+                };
+
+                let state_clone_2 = Arc::clone(&state_clone);
+                tokio::spawn(async move {
+                    // Process rip with cancellation support
+                    let rip_result = tokio::select! {
+                        result = execute_rip(state_clone_2.clone(), drive_index, handle, disc_name.clone(), temp_folder.clone(), eject_after) => result,
+                        _ = cancel_rx.changed() => {
+                            // Cancellation requested - cancel the makemkvcon process
+                            Err("Rip cancelled".to_string())
+                        }
+                    };
+
+                    if let Err(e) = rip_result {
+                        tracing::error!(drive = drive_index, error = %e, "Auto-rip failed");
+                    }
+                })
+            };
 
             drop(active);
             drop(enabled);
-            state.active_rips.write().await.insert(drive.index, rip_task);
+            state.active_rips.write().await.insert(drive.index, (cancel_tx, rip_task));
             break;
         }
     }
