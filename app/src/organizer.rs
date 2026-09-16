@@ -22,17 +22,28 @@ pub struct OrganizerService {
     folder_store: Arc<dyn FolderStore>,
     /// Scan directory (configurable)
     scan_directory: std::sync::Mutex<Option<std::path::PathBuf>>,
+    /// Movies destination directory
+    movies_directory: std::path::PathBuf,
+    /// TV Shows destination directory
+    tv_directory: std::path::PathBuf,
 }
 
 impl OrganizerService {
     /// Create a new organizer service
     #[tracing::instrument(skip_all)]
-    pub fn new(searcher: Option<Arc<dyn MetadataSearcher>>, folder_store: Arc<dyn FolderStore>) -> Self {
+    pub fn new(
+        searcher: Option<Arc<dyn MetadataSearcher>>,
+        folder_store: Arc<dyn FolderStore>,
+        movies_directory: std::path::PathBuf,
+        tv_directory: std::path::PathBuf,
+    ) -> Self {
         info!("Organizer service initialized");
         OrganizerService {
             searcher,
             folder_store,
             scan_directory: std::sync::Mutex::new(None),
+            movies_directory,
+            tv_directory,
         }
     }
 
@@ -285,14 +296,21 @@ impl OrganizerService {
             .unwrap_or(&folder.name)
             .clone();
         let suggested_year = folder.suggested_year.unwrap_or(0);
+        let title = format!("{suggested_name} ({suggested_year})");
 
         let dest = if folder.media_type.is_tv() {
             // TV: {Show} ({Year})/Season {NN}/
             let season = "01"; // TODO: get from config or folder metadata
-            format!("{}/{} ({})/Season {}/", "TODO_TV_DIR", suggested_name, suggested_year, season)
+            self.tv_directory
+                .join(format!("{title}/Season {season}/"))
+                .to_string_lossy()
+                .to_string()
         } else {
             // Movie: {Title} ({Year})/
-            format!("{}/{} ({})/", "TODO_MOVIE_DIR", suggested_name, suggested_year)
+            self.movies_directory
+                .join(format!("{title}/"))
+                .to_string_lossy()
+                .to_string()
         };
 
         // Move files
@@ -327,17 +345,12 @@ impl OrganizerService {
     pub fn preview_move(&self, folder: &FolderRecord) -> Option<String> {
         let suggested_name = folder.suggested_name.as_ref().unwrap_or(&folder.name);
         let suggested_year = folder.suggested_year.unwrap_or(0);
+        let title = format!("{suggested_name} ({suggested_year})");
 
         if folder.media_type.is_tv() {
-            Some(format!(
-                "{}/{} ({})/Season 01/",
-                "TODO_TV_DIR", suggested_name, suggested_year
-            ))
+            Some(self.tv_directory.join(format!("{title}/Season 01/")).to_string_lossy().to_string())
         } else {
-            Some(format!(
-                "{}/{} ({})/",
-                "TODO_MOVIE_DIR", suggested_name, suggested_year
-            ))
+            Some(self.movies_directory.join(format!("{title}/")).to_string_lossy().to_string())
         }
     }
 }
@@ -458,7 +471,12 @@ mod tests {
     #[test]
     fn test_organizer_service_creation() {
         let store = MockFolderStore::new();
-        let service = OrganizerService::new(None, Arc::new(store));
+        let service = OrganizerService::new(
+            None,
+            Arc::new(store),
+            std::path::PathBuf::from("movies"),
+            std::path::PathBuf::from("tv"),
+        );
         assert!(service.get_scan_directory().is_none());
     }
 }
