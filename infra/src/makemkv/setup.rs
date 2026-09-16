@@ -20,6 +20,8 @@ pub enum MissingComponent {
     Flathub,
     MakeMKV,
     CdromGroup,
+    /// Flatpak sandbox is blocking SCSI access to optical drives
+    FlatpakScsi,
 }
 
 /// Describes a specific Flatpak sandbox issue with an actionable fix.
@@ -75,12 +77,25 @@ pub fn check_installation_with_dest(dest: Option<&str>) -> InstallationStatus {
 
     // Probe rip destination writability
     let rip_dest = dest.unwrap_or("/tmp/riply");
-    let (rip_destination_writable, sandbox_issues) = if method == DetectionMethod::Flatpak {
+    let (rip_destination_writable, mut sandbox_issues) = if method == DetectionMethod::Flatpak {
         check_flatpak_dest_writable(rip_dest)
     } else {
         // Native install: just check if we can create the directory
         (std::fs::create_dir_all(rip_dest).is_ok(), Vec::new())
     };
+
+    // Check for Flatpak SCSI errors (sandbox blocking drive access)
+    let has_scsi_errors = method == DetectionMethod::Flatpak && check_flatpak_scsi_access();
+    if has_scsi_errors {
+        let flatpak_cmd = "flatpak".to_string();
+        sandbox_issues.push(SandboxIssue {
+            message: "MakeMKV cannot access optical drives — SCSI commands are blocked by the Flatpak sandbox".to_string(),
+            fix_command: format!(
+                "Grant drive access: flatpak override --system {} --device=all",
+                flatpak_cmd
+            ),
+        });
+    }
 
     let mut missing = Vec::new();
     if !flatpak_available {
@@ -93,6 +108,9 @@ pub fn check_installation_with_dest(dest: Option<&str>) -> InstallationStatus {
     }
     if !drive_access_ok {
         missing.push(MissingComponent::CdromGroup);
+    }
+    if has_scsi_errors {
+        missing.push(MissingComponent::FlatpakScsi);
     }
 
     InstallationStatus {
@@ -280,6 +298,30 @@ fn check_flatpak_permissions() -> bool {
     };
     let info = String::from_utf8_lossy(&output.stdout);
     info.contains("device=all") || info.contains("devices=all") || info.contains("device=all-all")
+}
+
+/// Check if the Flatpak MakeMKV sandbox can access optical drives via SCSI.
+/// Tries to run `makemkvcon info disc:9999` (a safe no-op) and checks if
+/// SCSI errors appear in stderr. Returns true if SCSI access is blocked.
+fn check_flatpak_scsi_access() -> bool {
+    let output = match StdCommand::new("flatpak")
+        .args([
+            "run",
+            "--command=makemkvcon",
+            "com.makemkv.MakeMKV",
+            "-r",
+            "--cache=1",
+            "info",
+            "disc:9999",
+        ])
+        .output()
+    {
+        Ok(o) => o,
+        Err(_) => return false,
+    };
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // Look for SCSI errors that indicate sandbox blocking drive access
+    stderr.contains("Scsi error") || stderr.contains("SCSI") || stderr.contains("ILLEGAL REQUEST")
 }
 
 /// Check if the given destination is writable inside the MakeMKV Flatpak sandbox.
@@ -491,6 +533,15 @@ mod tests {
         assert_eq!(status.installed, back.installed);
         assert_eq!(status.missing, back.missing);
         assert_eq!(status.rip_destination_writable, back.rip_destination_writable);
+    }
+
+    #[test]
+    fn test_flatpak_scsi_component_serialization() {
+        let missing = vec![MissingComponent::FlatpakScsi];
+        let json = serde_json::to_string(&missing).unwrap();
+        assert!(json.contains("FlatpakScsi"));
+        let back: Vec<MissingComponent> = serde_json::from_str(&json).unwrap();
+        assert_eq!(missing, back);
     }
 
     #[test]
