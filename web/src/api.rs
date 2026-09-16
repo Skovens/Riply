@@ -50,8 +50,10 @@ pub struct AppState {
     pub backend: Option<Arc<dyn RipBackend>>,
     pub searcher: Option<Arc<dyn MetadataSearcher>>,
     pub scheduler: JobScheduler,
-    /// Active rip tasks keyed by drive index. Used for cancellation.
-    pub active_rips: RwLock<HashMap<usize, tokio::task::JoinHandle<()>>>,
+    /// Active rip tasks keyed by drive index. Stores a cancellation channel
+    /// (to signal the rip task to cancel) and the JoinHandle (for aborting
+    /// the tokio task).
+    pub active_rips: RwLock<HashMap<usize, (tokio::sync::watch::Sender<()>, tokio::task::JoinHandle<()>)>>,
     /// Drives with auto-rip enabled (session-only, in-memory).
     pub autorip_drives: RwLock<HashSet<usize>>,
     /// Handle for the autorip background polling task.
