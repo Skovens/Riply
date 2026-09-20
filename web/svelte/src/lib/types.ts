@@ -10,7 +10,13 @@ export type PipelineStatus =
 
 // ── Folder Status (Organizer) ────────────────────────────────
 
-export type FolderStatus = 'Scanned' | 'Confident' | 'Unknown' | 'Quarantined' | 'Moved';
+export type FolderStatus =
+  | 'Scanned'
+  | 'Confident'
+  | 'Uncertain'
+  | 'Unknown'
+  | 'Quarantined'
+  | 'Moved';
 
 // ── Media Types ──────────────────────────────────────────────
 
@@ -22,14 +28,15 @@ export interface FolderRecord {
   id: string;
   path: string;
   name: string;
-  size_bytes: number;
-  files: number;
-  status: FolderStatus;
-  title?: string;
-  year?: number;
-  media_type?: MediaType;
-  tmdb_id?: number;
+  suggested_name?: string;
+  suggested_year?: number;
   confidence?: number;
+  tmdb_id?: number;
+  media_type?: MediaType;
+  file_count: number;
+  main_file?: string;
+  extra_files: string[];
+  status: FolderStatus;
   created_at: string;
   updated_at: string;
 }

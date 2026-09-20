@@ -2,10 +2,15 @@
   import { onMount } from 'svelte';
   import { organizerApi } from '$lib/api';
   import Tooltip from '$lib/components/Tooltip.svelte';
+  import PreviewModal from '$lib/components/PreviewModal.svelte';
 
   /** @type {import('$lib/types').FolderRecord[]} */
   let folders = $state([]);
   let foldersLoading = $state(true);
+
+  // ── Preview Modal ──────────────────────────────────────────
+  /** @type {import('$lib/types').FolderRecord | null} */
+  let previewFolder = $state(null);
 
   // ── Filter ─────────────────────────────────────────────────
   let filterStatus = $state('All');
@@ -49,6 +54,38 @@
       stats = counts;
     } catch (e) {
       console.error('Failed to load stats:', e);
+    }
+  }
+
+  // ── Preview Modal ──────────────────────────────────────────
+
+  function openPreview(folder) {
+    previewFolder = folder;
+  }
+
+  function closePreview() {
+    previewFolder = null;
+  }
+
+  async function handlePreviewAccept(id) {
+    try {
+      await organizerApi.accept(id);
+      await fetchFolders();
+      await fetchStats();
+      closePreview();
+    } catch (e) {
+      console.error('Accept failed:', e);
+    }
+  }
+
+  async function handlePreviewReject(id) {
+    try {
+      await organizerApi.reject(id);
+      await fetchFolders();
+      await fetchStats();
+      closePreview();
+    } catch (e) {
+      console.error('Reject failed:', e);
     }
   }
 
@@ -161,6 +198,7 @@
     switch (status) {
       case 'Scanned': return 'var(--color-text-muted)';
       case 'Confident': return 'var(--color-success)';
+      case 'Uncertain': return 'var(--color-warning)';
       case 'Unknown': return 'var(--color-warning)';
       case 'Quarantined': return 'var(--color-danger)';
       case 'Moved': return 'var(--color-accent)';
@@ -175,11 +213,12 @@
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
   }
 
-  const statusFilterOptions = ['All', 'Scanned', 'Confident', 'Unknown', 'Quarantined', 'Moved'];
+  const statusFilterOptions = ['All', 'Scanned', 'Confident', 'Uncertain', 'Unknown', 'Quarantined', 'Moved'];
 
   function getAnalyzeDisabledTooltip(status) {
     switch (status) {
       case 'Confident': return 'Already analyzed and accepted';
+      case 'Uncertain': return 'Uncertain — Preview or Accept first';
       case 'Unknown': return 'Unknown status — Accept or Reject first';
       case 'Quarantined': return 'Quarantined — cannot analyze';
       case 'Moved': return 'Already moved — no action needed';
@@ -190,28 +229,39 @@
   function getAcceptDisabledTooltip(status) {
     switch (status) {
       case 'Confident': return 'Already accepted';
+      case 'Uncertain': return 'Preview to review before accepting';
       case 'Quarantined': return 'Quarantined — cannot accept';
       case 'Moved': return 'Already moved — no action needed';
-      default: return 'Accept only available for scanned/unknown folders';
+      default: return 'Accept only available for scanned/uncertain folders';
     }
   }
 
   function getRejectDisabledTooltip(status) {
     switch (status) {
       case 'Confident': return 'Already accepted — cannot reject';
+      case 'Uncertain': return 'Preview to review before rejecting';
       case 'Quarantined': return 'Already quarantined';
       case 'Moved': return 'Already moved — no action needed';
-      default: return 'Reject only available for scanned/unknown folders';
+      default: return 'Reject only available for scanned/uncertain folders';
     }
   }
 
   function getMoveDisabledTooltip(status) {
     switch (status) {
       case 'Scanned': return 'Must analyze or accept first';
+      case 'Uncertain': return 'Preview to review before moving';
       case 'Unknown': return 'Unknown — Accept or Reject first';
       case 'Quarantined': return 'Quarantined — cannot move';
       case 'Moved': return 'Already moved — no action needed';
       default: return 'Move only available for confident folders';
+    }
+  }
+
+  function getPreviewDisabledTooltip(status) {
+    switch (status) {
+      case 'Moved': return 'Already moved — no preview needed';
+      case 'Quarantined': return 'Quarantined — no preview needed';
+      default: return 'Preview available for all active folders';
     }
   }
 </script>
@@ -265,11 +315,15 @@
   <div class="organizer__stats">
     <div class="stat-card">
       <span class="stat-card__label">Total</span>
-      <span class="stat-card__value">{stats['Scanned'] || 0} + {stats['Confident'] || 0} + {stats['Unknown'] || 0}</span>
+      <span class="stat-card__value">{stats['Scanned'] || 0} + {stats['Confident'] || 0} + {stats['Uncertain'] || 0} + {stats['Unknown'] || 0}</span>
     </div>
     <div class="stat-card stat-card--success">
       <span class="stat-card__label">Confident</span>
       <span class="stat-card__value">{stats['Confident'] || 0}</span>
+    </div>
+    <div class="stat-card stat-card--warning">
+      <span class="stat-card__label">Uncertain</span>
+      <span class="stat-card__value">{stats['Uncertain'] || 0}</span>
     </div>
     <div class="stat-card stat-card--warning">
       <span class="stat-card__label">Unknown</span>
@@ -306,7 +360,7 @@
       <div class="organizer__empty">No folders found. Scan a directory to get started.</div>
     {:else}
       {#each folders as folder (folder.id)}
-        <div class="folder-card">
+        <div class="folder-card" class:folder-card--accepted={folder.status === 'Confident'} class:folder-card--rejected={folder.status === 'Unknown'} class:folder-card--moved={folder.status === 'Moved'}>
           <div class="folder-card__info">
             <div class="folder-card__header">
               <span class="folder-card__status" style="color: {statusColor(folder.status)}">
@@ -317,14 +371,13 @@
                 <span class="folder-card__media-type">{folder.media_type}</span>
               {/if}
             </div>
-            {#if folder.title}
+            {#if folder.suggested_name}
               <div class="folder-card__title">
-                {folder.title}{#if folder.year} ({folder.year}){/if}
+                {folder.suggested_name}{#if folder.suggested_year} ({folder.suggested_year}){/if}
               </div>
             {/if}
             <div class="folder-card__meta">
-              <span>{formatSize(folder.size_bytes)}</span>
-              <span>{folder.files} file{folder.files !== 1 ? 's' : ''}</span>
+              <span>{folder.file_count} file{folder.file_count !== 1 ? 's' : ''}</span>
               {#if folder.confidence}
                 <span>{(folder.confidence * 100).toFixed(0)}% confidence</span>
               {/if}
@@ -334,6 +387,24 @@
             </div>
           </div>
           <div class="folder-card__actions">
+            <!-- Preview button -->
+            {#if folder.status !== 'Moved' && folder.status !== 'Quarantined'}
+              <button
+                class="btn btn--secondary btn--sm"
+                onclick={() => openPreview(folder)}
+                disabled={actionLoading !== null}
+                title="Preview changes before moving"
+              >
+                Preview
+              </button>
+            {:else}
+              <Tooltip text={getPreviewDisabledTooltip(folder.status)}>
+                <button class="btn btn--secondary btn--sm btn--disabled" disabled>
+                  Preview
+                </button>
+              </Tooltip>
+            {/if}
+
             <!-- Analyze button -->
             {#if folder.status === 'Scanned'}
               <button
@@ -353,7 +424,7 @@
             {/if}
 
             <!-- Accept button -->
-            {#if folder.status === 'Scanned' || folder.status === 'Unknown'}
+            {#if folder.status === 'Scanned' || folder.status === 'Uncertain'}
               <button
                 class="btn btn--success btn--sm"
                 onclick={() => handleAccept(folder.id)}
@@ -371,7 +442,7 @@
             {/if}
 
             <!-- Reject button -->
-            {#if folder.status === 'Scanned' || folder.status === 'Unknown'}
+            {#if folder.status === 'Scanned' || folder.status === 'Uncertain'}
               <button
                 class="btn btn--warning btn--sm"
                 onclick={() => handleReject(folder.id)}
@@ -419,6 +490,16 @@
       {/each}
     {/if}
   </div>
+
+  <!-- Preview Modal -->
+  {#if previewFolder}
+    <PreviewModal
+      folder={previewFolder}
+      onClose={closePreview}
+      onAccept={handlePreviewAccept}
+      onReject={handlePreviewReject}
+    />
+  {/if}
 </div>
 
 <style>
@@ -520,7 +601,7 @@
   .filter-btn {
     padding: var(--space-1) var(--space-3);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-full);
+    border-radius: var(--radius-full, 9999px);
     background: var(--color-bg-secondary);
     color: var(--color-text-muted);
     font-size: var(--text-xs);
@@ -566,6 +647,23 @@
     border: 1px solid var(--color-border);
     border-radius: var(--radius-xl);
     gap: var(--space-3);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  }
+
+  .folder-card--accepted {
+    border-color: var(--color-success);
+    background: var(--color-success-muted);
+  }
+
+  .folder-card--rejected {
+    border-color: var(--color-warning);
+    background: var(--color-warning-muted);
+  }
+
+  .folder-card--moved {
+    border-color: var(--color-accent);
+    background: var(--color-accent-muted);
+    opacity: 0.75;
   }
 
   .folder-card__info {
@@ -637,6 +735,7 @@
     .folder-card__actions {
       width: 100%;
       justify-content: flex-start;
+      flex-wrap: wrap;
     }
 
     .organizer__stats {

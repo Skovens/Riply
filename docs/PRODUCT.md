@@ -193,22 +193,27 @@ When the user clicks a thumbnail or gray placeholder:
 
 ### Preview
 
-Clicking "Preview" shows a dry-run list of all changes before committing:
+Clicking "Preview" on a folder card opens a centered modal showing the dry-run of changes:
 
-**Basic view (collapsed):**
-```
-SPEED/ → Speed (1994)/
-INCEPTION_2010/ → Inception (2010)/
-```
+**Basic view (always visible):**
+- Source path → Destination path (computed from TMDb match)
+- Suggested title and year
+- Confidence badge (High/Medium/Low with percentage)
+- File count
 
-**Expanded view:**
+**Expanded view (click "Show file details"):**
 ```
 SPEED/ → Speed (1994)/
   ├─ SPEED.mkv → Speed (1994).mkv
   └─ Behind the Scenes.mkv → Extras/Behind the Scenes.mkv
 ```
 
-After preview, a "Confirm" button appears. Nothing moves until the user clicks Confirm.
+**Accept/Reject buttons (in modal):**
+- **Accept** — marks the folder as `Confident`, closes modal, folder card turns green
+- **Reject** — marks the folder as `Unknown`, closes modal, folder card turns amber
+- **Cancel** — closes modal without changes
+
+Nothing moves until the user clicks Accept (which sets `Confident` status) and then Move.
 
 ### Per-folder accept/reject
 
@@ -219,9 +224,23 @@ folders individually, then click "Accept All" to move all accepted folders at on
 
 | Button | What it does |
 |--------|-------------|
-| Accept All | Apply all accepted renames and moves at once |
-| Per-folder accept/reject | Granular control — one folder at a time |
-| Preview | Show what will change before committing anything |
+| Preview | Opens modal showing source/destination, confidence, and file-level details |
+| Accept (in modal or card) | Marks folder as `Confident` — green border on card |
+| Reject (in modal or card) | Marks folder as `Unknown` — amber border on card |
+| Accept All | Accepts all `Confident` folders at once |
+| Reject All | Rejects all `Unknown` folders (moves to `Quarantined`) |
+| Move | Moves a `Confident` folder to its destination |
+| Delete | Removes folder record from database |
+
+### Folder card visual states
+
+| State | Visual indicator |
+|-------|-----------------|
+| Pending (Scanned/Uncertain) | Default gray border |
+| Accepted (Confident) | Green border with green background tint |
+| Rejected (Unknown) | Amber border with amber background tint |
+| Moved | Accent border with reduced opacity |
+| Quarantined | Red border |
 
 ### Accept All behavior
 
