@@ -56,14 +56,26 @@ pub enum RipError {
     #[error("No ripping backend available. Install makemkvcon or Flatpak package.")]
     NotAvailable,
 
-    #[error("Backend error: {0}")]
-    Backend(String),
+    #[error("No disc in drive {0}")]
+    NoDisc(usize),
 
     #[error("Drive {0} not found")]
     DriveNotFound(usize),
 
-    #[error("No disc in drive {0}")]
-    NoDisc(usize),
+    #[error("Destination is not writable: {0}")]
+    DestinationNotWritable(String),
+
+    #[error("Destination parent directory does not exist: {0}")]
+    DestinationParentMissing(String),
+
+    #[error("Insufficient disk space: {0}")]
+    InsufficientSpace(String),
+
+    #[error("MakeMKV license not accepted. Accept the license in MakeMKV settings.")]
+    LicenseNotAccepted,
+
+    #[error("Backend error: {0}")]
+    Backend(String),
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),

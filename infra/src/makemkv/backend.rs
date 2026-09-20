@@ -209,10 +209,9 @@ impl RipBackend for MakemkvBackend {
             // Check parent directory writability
             if let Some(parent) = dest_path.parent() {
                 if !parent.exists() {
-                    return Err(RipError::Backend(format!(
-                        "Destination parent directory does not exist: {}",
-                        parent.display()
-                    )));
+                    return Err(RipError::DestinationParentMissing(
+                        parent.display().to_string(),
+                    ));
                 }
                 if !parent.canonicalize()
                     .map(|p| p.is_dir())
@@ -224,10 +223,9 @@ impl RipBackend for MakemkvBackend {
                     .or_else(|_| std::fs::remove_file(parent.join(".riply_writability_test")))
                     .is_ok()
                 {
-                    return Err(RipError::Backend(format!(
-                        "Destination is not writable: {}",
-                        parent.display()
-                    )));
+                    return Err(RipError::DestinationNotWritable(
+                        parent.display().to_string(),
+                    ));
                 }
             }
         }

@@ -1200,6 +1200,85 @@ pub async fn clear_folders(pool: &sqlx::SqlitePool) -> Result<(), anyhow::Error>
     Ok(())
 }
 
+// ── Session State ─────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Default)]
+pub struct SessionState {
+    pub drive_index: usize,
+    pub last_title: String,
+    pub last_year: Option<i32>,
+    pub last_season: Option<i32>,
+    pub last_episode: Option<i32>,
+    pub last_media_type: String,
+    pub last_tmdb_id: Option<i32>,
+}
+
+pub async fn save_session_state(pool: &sqlx::SqlitePool, state: &SessionState) -> Result<(), anyhow::Error> {
+    let now = chrono::Utc::now().to_rfc3339();
+    sqlx::query(
+        r#"
+        INSERT INTO session_state (drive_index, last_title, last_year, last_season, last_episode, last_media_type, last_tmdb_id, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(drive_index) DO UPDATE SET
+            last_title = excluded.last_title,
+            last_year = excluded.last_year,
+            last_season = excluded.last_season,
+            last_episode = excluded.last_episode,
+            last_media_type = excluded.last_media_type,
+            last_tmdb_id = excluded.last_tmdb_id,
+            updated_at = excluded.updated_at
+        "#,
+    )
+    .bind(state.drive_index as i64)
+    .bind(&state.last_title)
+    .bind(state.last_year)
+    .bind(state.last_season)
+    .bind(state.last_episode)
+    .bind(&state.last_media_type)
+    .bind(state.last_tmdb_id)
+    .bind(&now)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn get_session_state(pool: &sqlx::SqlitePool, drive_index: usize) -> Result<Option<SessionState>, anyhow::Error> {
+    let row = sqlx::query(
+        "SELECT drive_index, last_title, last_year, last_season, last_episode, last_media_type, last_tmdb_id FROM session_state WHERE drive_index = ?",
+    )
+    .bind(drive_index as i64)
+    .fetch_optional(pool)
+    .await?;
+
+    match row {
+        Some(row) => {
+            Ok(Some(SessionState {
+                drive_index: row.get::<i64, &str>("drive_index") as usize,
+                last_title: row.get("last_title"),
+                last_year: row.get("last_year"),
+                last_season: row.get("last_season"),
+                last_episode: row.get("last_episode"),
+                last_media_type: row.get("last_media_type"),
+                last_tmdb_id: row.get("last_tmdb_id"),
+            }))
+        }
+        None => Ok(None),
+    }
+}
+
+pub async fn delete_session_state(pool: &sqlx::SqlitePool, drive_index: usize) -> Result<(), anyhow::Error> {
+    sqlx::query("DELETE FROM session_state WHERE drive_index = ?")
+        .bind(drive_index as i64)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn clear_session_state(pool: &sqlx::SqlitePool) -> Result<(), anyhow::Error> {
+    sqlx::query("DELETE FROM session_state").execute(pool).await?;
+    Ok(())
+}
+
 /// Convert a database row to a FolderRecord.
 fn folder_row_to_record(row: &sqlx::sqlite::SqliteRow) -> Result<riply_core::FolderRecord, anyhow::Error> {
     use std::path::PathBuf;
@@ -1475,5 +1554,130 @@ impl riply_core::FolderStore for Database {
 
     async fn clear_folders(&self) -> Result<(), riply_core::FolderStoreError> {
         clear_folders(&self.pool).await.map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
+    }
+}
+
+// ── Session State Tests ───────────────────────────────────────────────
+
+#[cfg(test)]
+mod session_state_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_save_and_get_session_state() {
+        let db = Database::new(":memory:").await.unwrap();
+        db.migrate().await.unwrap();
+        let pool = &db.pool;
+
+        let state = SessionState {
+            drive_index: 0,
+            last_title: "Speed".to_string(),
+            last_year: Some(1994),
+            last_season: None,
+            last_episode: None,
+            last_media_type: "Movie".to_string(),
+            last_tmdb_id: Some(9502),
+        };
+
+        save_session_state(pool, &state).await.unwrap();
+
+        let result = get_session_state(pool, 0).await.unwrap().unwrap();
+        assert_eq!(result.last_title, "Speed");
+        assert_eq!(result.last_year, Some(1994));
+        assert_eq!(result.last_tmdb_id, Some(9502));
+    }
+
+    #[tokio::test]
+    async fn test_get_session_state_not_found() {
+        let db = Database::new(":memory:").await.unwrap();
+        db.migrate().await.unwrap();
+        let pool = &db.pool;
+
+        let result = get_session_state(pool, 99).await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_update_session_state() {
+        let db = Database::new(":memory:").await.unwrap();
+        db.migrate().await.unwrap();
+        let pool = &db.pool;
+
+        let state1 = SessionState {
+            drive_index: 1,
+            last_title: "Speed".to_string(),
+            last_year: Some(1994),
+            last_season: None,
+            last_episode: None,
+            last_media_type: "Movie".to_string(),
+            last_tmdb_id: Some(9502),
+        };
+        save_session_state(pool, &state1).await.unwrap();
+
+        // Update with new values
+        let state2 = SessionState {
+            drive_index: 1,
+            last_title: "Speed 2".to_string(),
+            last_year: Some(1997),
+            last_season: None,
+            last_episode: None,
+            last_media_type: "Movie".to_string(),
+            last_tmdb_id: Some(11708),
+        };
+        save_session_state(pool, &state2).await.unwrap();
+
+        let result = get_session_state(pool, 1).await.unwrap().unwrap();
+        assert_eq!(result.last_title, "Speed 2");
+        assert_eq!(result.last_year, Some(1997));
+    }
+
+    #[tokio::test]
+    async fn test_delete_session_state() {
+        let db = Database::new(":memory:").await.unwrap();
+        db.migrate().await.unwrap();
+        let pool = &db.pool;
+
+        let state = SessionState {
+            drive_index: 2,
+            last_title: "Test".to_string(),
+            last_year: Some(2024),
+            last_season: None,
+            last_episode: None,
+            last_media_type: "Movie".to_string(),
+            last_tmdb_id: None,
+        };
+        save_session_state(pool, &state).await.unwrap();
+
+        delete_session_state(pool, 2).await.unwrap();
+
+        let result = get_session_state(pool, 2).await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_clear_session_state() {
+        let db = Database::new(":memory:").await.unwrap();
+        db.migrate().await.unwrap();
+        let pool = &db.pool;
+
+        for i in 0..3 {
+            let state = SessionState {
+                drive_index: i,
+                last_title: format!("Title {}", i),
+                last_year: Some(2024),
+                last_season: None,
+                last_episode: None,
+                last_media_type: "Movie".to_string(),
+                last_tmdb_id: None,
+            };
+            save_session_state(pool, &state).await.unwrap();
+        }
+
+        clear_session_state(pool).await.unwrap();
+
+        for i in 0..3 {
+            let result = get_session_state(pool, i).await.unwrap();
+            assert!(result.is_none());
+        }
     }
 }
