@@ -202,6 +202,36 @@ impl RipBackend for MakemkvBackend {
     fn start_rip(&self, drive: usize, dest: &str) -> Result<RipHandle, RipError> {
         let dest_path = Path::new(dest);
 
+        // Verify the destination is writable before starting.
+        // This catches permission issues, Flatpak namespace problems, and
+        // disk-full conditions upfront, rather than failing mid-rip.
+        if !dest_path.exists() {
+            // Check parent directory writability
+            if let Some(parent) = dest_path.parent() {
+                if !parent.exists() {
+                    return Err(RipError::Backend(format!(
+                        "Destination parent directory does not exist: {}",
+                        parent.display()
+                    )));
+                }
+                if !parent.canonicalize()
+                    .map(|p| p.is_dir())
+                    .unwrap_or(false)
+                    || !std::fs::write(
+                        parent.join(".riply_writability_test"),
+                        "test",
+                    )
+                    .or_else(|_| std::fs::remove_file(parent.join(".riply_writability_test")))
+                    .is_ok()
+                {
+                    return Err(RipError::Backend(format!(
+                        "Destination is not writable: {}",
+                        parent.display()
+                    )));
+                }
+            }
+        }
+
         // Create the destination directory inside the Flatpak namespace if needed.
         // MakeMKV inside Flatpak can't see host-created directories in /tmp.
         if !dest_path.exists() {
