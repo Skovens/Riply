@@ -101,10 +101,19 @@ Multiple drives are shown simultaneously as individual cards. Each card shows:
 | State | Display |
 |-------|---------|
 | No disc | "No disc" with Rip/Eject buttons disabled |
-| Disc inserted | Disc name + thumbnail (if found) or gray placeholder (if not found) + Rip/Eject buttons enabled |
+| Ready | Disc name + thumbnail (if found) or gray placeholder (if not found) + Rip/Eject buttons enabled |
 | Ripping | Progress bar + stage name + ETA |
 | Complete | Disc cover + auto-detected name + type |
 | Error | Descriptive error message (e.g., "Disc unreadable — clean and retry") |
+
+State transitions:
+- **No disc → Ready**: Disc inserted (detected via sysfs/udev, not polling — continuous polling
+  spins drives and triggers hardware LEDs, which is undesirable)
+- **Ready → Ripping**: User clicks Rip or autorip triggers
+- **Ripping → Complete**: Rip finishes successfully
+- **Ripping → Error**: Rip fails (disc scratch, hardware error)
+- **Complete → Ready**: Disc ejected (manual or autorip)
+- **Error → Ready**: User retries after resolving the error
 
 Each drive is an isolated "island" — two drives can rip different shows simultaneously
 without interfering with each other's session memory.
@@ -199,7 +208,12 @@ SPEED/ → Speed (1994)/
   └─ Behind the Scenes.mkv → Extras/Behind the Scenes.mkv
 ```
 
-Nothing moves until the user confirms.
+After preview, a "Confirm" button appears. Nothing moves until the user clicks Confirm.
+
+### Per-folder accept/reject
+
+Each folder row has an accept button (✓) and a reject button (✗). The user can accept or reject
+folders individually, then click "Accept All" to move all accepted folders at once.
 
 ### Action buttons
 
@@ -246,8 +260,12 @@ The program remembers what you just did, so you don't have to repeat work:
 - **Persistence** — survives restarts. Resettable from Settings
 - **Scope** — each drive is isolated; two drives ripping different shows won't conflict
 - **Same disc twice** — if the disc name is the same, a new folder is created with
-  "Copy N" suffix. If a library folder with that name already exists, the user is
-  prompted to confirm overwrite.
+  "Copy N" suffix (e.g., `Speed (1994) (Copy 1)/`). If the library folder already
+  exists, the user is prompted to confirm overwrite.
+
+- **User-set name overrides auto-detected** — if the user manually sets a name via
+  the search popup, that name is used for the final folder/file naming (not the
+  auto-detected TMDb name).
 
 ---
 
