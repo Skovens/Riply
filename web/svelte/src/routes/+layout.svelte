@@ -3,6 +3,7 @@
   import { onMount } from 'svelte';
   import { connectSSE } from '$lib/api/sse';
   import { jobsApi } from '$lib/api';
+  import FirstRunModal from '$lib/components/FirstRunModal.svelte';
   import '../app.css';
 
   let { children } = $props();
@@ -20,6 +21,7 @@
   }
 
   let defaultDir = '';
+  let showFirstRun = $state(false);
 
   async function loadConfig() {
     try {
@@ -27,6 +29,14 @@
       if (res.ok) {
         const data = await res.json();
         defaultDir = data.data?.scan_directory || '';
+        // Show first-run modal only when all three paths are empty
+        const allEmpty =
+          !data.data?.scan_directory &&
+          !data.data?.movies_directory &&
+          !data.data?.tv_directory;
+        if (allEmpty) {
+          showFirstRun = true;
+        }
       }
     } catch (e) {
       console.error('Config load error:', e);
@@ -34,6 +44,14 @@
   }
 
   loadConfig();
+
+  function handleFirstRunConfirm() {
+    showFirstRun = false;
+  }
+
+  function handleFirstRunClose() {
+    showFirstRun = false;
+  }
 
   /** @type {string | null} */
   let activeJob = $state(null);
@@ -155,4 +173,8 @@
   <footer class="footer">
     Riply &mdash; Media Management
   </footer>
+
+  {#if showFirstRun}
+    <FirstRunModal onConfirm={handleFirstRunConfirm} onClose={handleFirstRunClose} />
+  {/if}
 </div>
