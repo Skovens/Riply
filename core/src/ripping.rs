@@ -197,4 +197,22 @@ mod tests {
         let rip_err: RipError = io_err.into();
         assert!(matches!(rip_err, RipError::Io(_)));
     }
+
+    #[test]
+    fn test_rip_error_new_variants() {
+        let err = RipError::DestinationNotWritable("/tmp/test".to_string());
+        assert!(err.to_string().contains("not writable"));
+        assert!(err.to_string().contains("/tmp/test"));
+
+        let err = RipError::DestinationParentMissing("/tmp/nonexistent".to_string());
+        assert!(err.to_string().contains("does not exist"));
+        assert!(err.to_string().contains("/tmp/nonexistent"));
+
+        let err = RipError::InsufficientSpace("5 GB required".to_string());
+        assert!(err.to_string().contains("disk space"));
+        assert!(err.to_string().contains("5 GB required"));
+
+        let err = RipError::LicenseNotAccepted;
+        assert!(err.to_string().contains("license"));
+    }
 }
