@@ -40,18 +40,43 @@ impl MoverService {
         // Determine destination path
         let dest_path = self.calculate_destination(file, movies_dir, tv_dir)?;
 
+        // Check if destination already exists — apply Copy-N suffix
+        let dest_path = {
+            let folder = dest_path.parent().unwrap_or(Path::new("."));
+            let filename = dest_path
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "file".to_string());
+
+            // Check if the folder already existed (before we create it)
+            let folder_existed = folder.exists() && folder.is_dir();
+
+            if folder_existed {
+                // Folder already exists — rename folder with Copy-N
+                let folder_name = folder
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "folder".to_string());
+                let folder_parent = folder.parent().unwrap_or(Path::new("."));
+
+                let mut copy_n = 1;
+                loop {
+                    let new_folder_name = format!("{} (Copy {})", folder_name, copy_n);
+                    let new_folder = folder_parent.join(&new_folder_name);
+                    if !new_folder.exists() {
+                        // Create the new folder and place file inside
+                        break new_folder.join(&filename);
+                    }
+                    copy_n += 1;
+                }
+            } else {
+                dest_path
+            }
+        };
+
         // Create destination directory if it doesn't exist
         if let Some(parent) = dest_path.parent() {
             fs::create_dir_all(parent)?;
-        }
-
-        // Check if destination already exists
-        if dest_path.exists() {
-            warn!(dest = ?dest_path, "Destination already exists");
-            return Err(anyhow::anyhow!(
-                "Destination already exists: {:?}",
-                dest_path
-            ));
         }
 
         // Move the file (with cross-device fallback)
@@ -410,5 +435,73 @@ mod tests {
             dest,
             movies_dir.join("Inception").join("Inception")
         );
+    }
+
+    #[tokio::test]
+    async fn test_move_file_copy_n_suffix() {
+        let dir = tempdir().unwrap();
+        let movies_dir = dir.path().join("movies");
+        let tv_dir = dir.path().join("tv");
+
+        // Create destination directory that already exists
+        let existing = movies_dir.join("Speed (1994)");
+        fs::create_dir_all(&existing).unwrap();
+
+        // Create source file
+        let source_path = dir.path().join("speed_1994.mkv");
+        fs::write(&source_path, "test content").unwrap();
+
+        let mut file = riply_core::FileRecord::new(
+            "test".to_string(),
+            source_path.clone(),
+            "speed_1994.mkv".to_string(),
+            "hash".to_string(),
+        );
+        *file.canonical_title_mut() =Some("Speed".to_string());
+        *file.canonical_year_mut() =Some(1994);
+        *file.status_mut() =PipelineStatus::Confirmed;
+
+        let mover = MoverService::new();
+        let result = mover.move_file(&file, &movies_dir, &tv_dir).await.unwrap();
+
+        // Should use Copy-N suffix since Speed (1994) already exists
+        let expected = movies_dir.join("Speed (1994) (Copy 1)").join("Speed.mkv");
+        assert!(expected.exists());
+        assert!(!source_path.exists());
+        assert_eq!(*result.status(), PipelineStatus::Moved);
+    }
+
+    #[tokio::test]
+    async fn test_move_file_copy_n_suffix_chain() {
+        let dir = tempdir().unwrap();
+        let movies_dir = dir.path().join("movies");
+        let tv_dir = dir.path().join("tv");
+
+        // Create existing directories with Copy-N chain
+        fs::create_dir_all(movies_dir.join("Speed (1994)")).unwrap();
+        fs::create_dir_all(movies_dir.join("Speed (1994) (Copy 1)")).unwrap();
+        fs::create_dir_all(movies_dir.join("Speed (1994) (Copy 2)")).unwrap();
+
+        // Create source file
+        let source_path = dir.path().join("speed_2.mkv");
+        fs::write(&source_path, "test content").unwrap();
+
+        let mut file = riply_core::FileRecord::new(
+            "test".to_string(),
+            source_path.clone(),
+            "speed_2.mkv".to_string(),
+            "hash".to_string(),
+        );
+        *file.canonical_title_mut() =Some("Speed".to_string());
+        *file.canonical_year_mut() =Some(1994);
+        *file.status_mut() =PipelineStatus::Confirmed;
+
+        let mover = MoverService::new();
+        let result = mover.move_file(&file, &movies_dir, &tv_dir).await.unwrap();
+
+        // Should skip to Copy 3
+        let expected = movies_dir.join("Speed (1994) (Copy 3)").join("Speed.mkv");
+        assert!(expected.exists());
+        assert_eq!(*result.status(), PipelineStatus::Moved);
     }
 }
