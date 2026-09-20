@@ -60,15 +60,17 @@ pub struct RenameDriveBody {
 
 /// Router for the ripper domain
 pub fn router(state: Arc<AppState>) -> Router {
+    // Specific routes MUST come before generic :index routes to avoid
+    // Axum matching `/v1/ripper/drives/0/rename` against `/v1/ripper/:index/cancel`.
     Router::new()
         .route("/v1/ripper/drives", get(list_drives))
         .route("/v1/ripper/drives/:index/rename", post(rename_disc))
         .route("/v1/ripper/status", get(ripper_status))
+        .route("/v1/ripper/autorip", get(autorip_status))
+        .route("/v1/ripper/autorip/:index/toggle", post(autorip_toggle))
         .route("/v1/ripper/:index/start", post(start_rip))
         .route("/v1/ripper/:index/cancel", post(cancel_rip))
         .route("/v1/ripper/:index/eject", post(eject_disc))
-        .route("/v1/ripper/autorip", get(autorip_status))
-        .route("/v1/ripper/autorip/:index/toggle", post(autorip_toggle))
         .with_state(state)
 }
 
@@ -467,15 +469,25 @@ async fn resolve_rip_title_with_duration(
     let search_title = riply_core::NameCleaner::clean_name_for_search(&title);
     let search_year = year.map(u32::from);
 
-    // Search for the TV show
-    let metadata = if let Ok(results) = searcher
-        .search(&search_title, search_year, &riply_core::MediaType::Tv)
+    // Search movies first, then TV if no movie match
+    let mut metadata = if let Ok(results) = searcher
+        .search(&search_title, search_year, &riply_core::MediaType::Movie)
         .await
     {
         results.into_iter().next()
     } else {
         None
     };
+
+    // If no movie match, try TV
+    if metadata.is_none() {
+        if let Ok(results) = searcher
+            .search(&search_title, search_year, &riply_core::MediaType::Tv)
+            .await
+        {
+            metadata = results.into_iter().next();
+        }
+    }
 
     // Check if this is a TV episode and verify duration
     if let Some(m) = &metadata {
@@ -582,20 +594,21 @@ pub async fn start_rip(
         // now handle the result
         if let Ok(()) = rip_result {
             // Successful rip — attempt auto-naming and duration verification
-            if let Some(ref disc) = disc_name {
-                let auto_name = resolve_rip_title_with_duration(disc, &temp_folder, searcher.as_deref()).await;
-                if !auto_name.0.is_empty() {
-                    let year = auto_name.1.map(|y| y as u32);
-                    sse.send_json(json!({"kind":"rip","action":"named","index":index,"data":{"title":auto_name.0,"year":year,"type":"movie"}}));
-                } else {
-                    sse.send_json(json!({"kind":"rip","action":"naming_failed","index":index,"data":{}}));
-                }
+            let resolved_name = if let Some(ref disc) = disc_name {
+                resolve_rip_title_with_duration(disc, &temp_folder, searcher.as_deref()).await
+            } else {
+                (String::new(), None)
+            };
+
+            if !resolved_name.0.is_empty() {
+                let year = resolved_name.1.map(|y| y as u32);
+                sse.send_json(json!({"kind":"rip","action":"named","index":index,"data":{"title":resolved_name.0,"year":year,"type":"movie"}}));
             } else {
                 sse.send_json(json!({"kind":"rip","action":"naming_failed","index":index,"data":{}}));
             }
 
             // Move to Organizer scan directory for processing
-            // The Organizer window will handle the final rename/move
+            // Use resolved name if available, otherwise fall back to raw disc name
             let organizer_dir = {
                 let config = state_clone.config.read().await;
                 config
@@ -604,7 +617,15 @@ pub async fn start_rip(
                     .unwrap_or_else(|| ".".to_string())
             };
 
-            let folder_name = disc_name.clone().unwrap_or_else(|| format!("Disc_{}", index));
+            let folder_name = if !resolved_name.0.is_empty() {
+                let title = &resolved_name.0;
+                match resolved_name.1 {
+                    Some(y) => format!("{} ({})", title, y),
+                    None => title.clone(),
+                }
+            } else {
+                disc_name.clone().unwrap_or_else(|| format!("Disc_{}", index))
+            };
             let final_dest = std::path::Path::new(&organizer_dir).join(&folder_name);
             let final_dest_str = apply_copy_n(&final_dest).to_string_lossy().to_string();
 
@@ -893,19 +914,21 @@ async fn execute_rip(
     match result {
         Ok(()) => {
             // Successful rip — attempt auto-naming and duration verification
-            if let Some(ref disc) = disc_name {
-                let auto_name = resolve_rip_title_with_duration(disc, &temp_folder, searcher.as_deref()).await;
-                if !auto_name.0.is_empty() {
-                    let year = auto_name.1.map(|y| y as u32);
-                    sse.send_json(json!({"kind":"rip","action":"named","index":index,"data":{"title":auto_name.0,"year":year,"type":"movie"}}));
-                } else {
-                    sse.send_json(json!({"kind":"rip","action":"naming_failed","index":index,"data":{}}));
-                }
+            let resolved_name = if let Some(ref disc) = disc_name {
+                resolve_rip_title_with_duration(disc, &temp_folder, searcher.as_deref()).await
+            } else {
+                (String::new(), None)
+            };
+
+            if !resolved_name.0.is_empty() {
+                let year = resolved_name.1.map(|y| y as u32);
+                sse.send_json(json!({"kind":"rip","action":"named","index":index,"data":{"title":resolved_name.0,"year":year,"type":"movie"}}));
             } else {
                 sse.send_json(json!({"kind":"rip","action":"naming_failed","index":index,"data":{}}));
             }
 
             // Move to Organizer scan directory for processing
+            // Use resolved name if available, otherwise fall back to raw disc name
             let organizer_dir = {
                 let config = state_clone.config.read().await;
                 config
@@ -914,7 +937,15 @@ async fn execute_rip(
                     .unwrap_or_else(|| ".".to_string())
             };
 
-            let folder_name = disc_name.clone().unwrap_or_else(|| format!("Disc_{}", index));
+            let folder_name = if !resolved_name.0.is_empty() {
+                let title = &resolved_name.0;
+                match resolved_name.1 {
+                    Some(y) => format!("{} ({})", title, y),
+                    None => title.clone(),
+                }
+            } else {
+                disc_name.clone().unwrap_or_else(|| format!("Disc_{}", index))
+            };
             let final_dest = std::path::Path::new(&organizer_dir).join(&folder_name);
             let final_dest_str = apply_copy_n(&final_dest).to_string_lossy().to_string();
 
