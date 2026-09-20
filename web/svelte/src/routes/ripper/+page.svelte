@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { ripperApi } from '$lib/api';
+  import { ripperApi, organizerApi } from '$lib/api';
   import { connectSSE } from '$lib/api/sse';
   import Tooltip from '$lib/components/Tooltip.svelte';
 
@@ -8,6 +8,11 @@
   let drives = $state([]);
   let drivesLoading = $state(true);
   let installStatus = $state(null);
+
+  // ── Unfinished Titles ──────────────────────────────────────
+  /** @type {import('$lib/types').FolderRecord[]} */
+  let unfinishedFolders = $state([]);
+  let unfinishedLoading = $state(false);
 
   // ── Rip progress ───────────────────────────────────────────
   /** @type {Record<number, { pct: number, eta: number | null, stage: string }>} */
@@ -30,7 +35,7 @@
   // ── Lifecycle ──────────────────────────────────────────────
 
   onMount(async () => {
-    await Promise.all([fetchDrives(), fetchAutoripStatus(), fetchInstallStatus()]);
+    await Promise.all([fetchDrives(), fetchAutoripStatus(), fetchInstallStatus(), fetchUnfinishedFolders()]);
     sseDisconnect = connectSSE(handleSSEEvent);
   });
 
@@ -64,6 +69,20 @@
       installStatus = { installed: status.installed, method: formatMethod(status.method) };
     } catch (e) {
       console.error('Failed to load install status:', e);
+    }
+  }
+
+  async function fetchUnfinishedFolders() {
+    unfinishedLoading = true;
+    try {
+      const allFolders = await organizerApi.list();
+      unfinishedFolders = allFolders.filter(
+        (f) => f.status === 'Scanned' || f.status === 'Uncertain'
+      );
+    } catch (e) {
+      console.error('Failed to load unfinished folders:', e);
+    } finally {
+      unfinishedLoading = false;
     }
   }
 
@@ -506,6 +525,31 @@
       <div class="ripper__empty">No drives detected</div>
     {/if}
   </div>
+
+  <!-- Unfinished Titles -->
+  {#if unfinishedFolders.length > 0}
+    <div class="ripper__unfinished">
+      <h3 class="ripper__unfinished-title">
+        <span class="ripper__unfinished-icon">⏳</span>
+        Unfinished Titles ({unfinishedFolders.length})
+      </h3>
+      <div class="ripper__unfinished-list">
+        {#each unfinishedFolders as folder (folder.id)}
+          <a
+            href="/organizer"
+            class="unfinished-item"
+            title="View in Organizer"
+          >
+            <span class="unfinished-item__name">{folder.name}</span>
+            {#if folder.suggested_name}
+              <span class="unfinished-item__suggested">→ {folder.suggested_name}</span>
+            {/if}
+            <span class="unfinished-item__status">{folder.status}</span>
+          </a>
+        {/each}
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -788,5 +832,72 @@
     font-size: var(--text-xs);
     color: var(--color-text-muted);
     user-select: none;
+  }
+
+  /* ── Unfinished Titles ──────────────────────────────────── */
+  .ripper__unfinished {
+    padding: var(--space-4);
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-xl);
+  }
+
+  .ripper__unfinished-title {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    margin: 0 0 var(--space-3) 0;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .ripper__unfinished-icon {
+    font-size: var(--text-base);
+  }
+
+  .ripper__unfinished-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .unfinished-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    background: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    text-decoration: none;
+    color: var(--color-text-primary);
+    transition: all var(--transition-fast);
+  }
+
+  .unfinished-item:hover {
+    background: var(--color-bg-secondary);
+    border-color: var(--color-primary);
+  }
+
+  .unfinished-item__name {
+    font-size: var(--text-sm);
+    font-weight: 500;
+    flex: 1;
+  }
+
+  .unfinished-item__suggested {
+    font-size: var(--text-xs);
+    color: var(--color-primary);
+  }
+
+  .unfinished-item__status {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    padding: var(--space-0.5) var(--space-2);
+    background: var(--color-bg-secondary);
+    border-radius: var(--radius-full);
   }
 </style>
