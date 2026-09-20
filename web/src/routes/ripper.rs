@@ -608,7 +608,7 @@ pub async fn start_rip(
             }
 
             // Move to Organizer scan directory for processing
-            // Use resolved name if available, otherwise fall back to raw disc name
+            // Priority: user-set name > auto-detected name > raw disc name
             let organizer_dir = {
                 let config = state_clone.config.read().await;
                 config
@@ -617,14 +617,23 @@ pub async fn start_rip(
                     .unwrap_or_else(|| ".".to_string())
             };
 
-            let folder_name = if !resolved_name.0.is_empty() {
-                let title = &resolved_name.0;
-                match resolved_name.1 {
-                    Some(y) => format!("{} ({})", title, y),
-                    None => title.clone(),
+            let folder_name = {
+                // Check for user-set name first
+                let user_name = {
+                    let guard = state_clone.disc_names.read().await;
+                    guard.get(&index).map(|info| info.final_name.clone())
+                };
+                if let Some(name) = user_name {
+                    name
+                } else if !resolved_name.0.is_empty() {
+                    let title = &resolved_name.0;
+                    match resolved_name.1 {
+                        Some(y) => format!("{} ({})", title, y),
+                        None => title.clone(),
+                    }
+                } else {
+                    disc_name.clone().unwrap_or_else(|| format!("Disc_{}", index))
                 }
-            } else {
-                disc_name.clone().unwrap_or_else(|| format!("Disc_{}", index))
             };
             let final_dest = std::path::Path::new(&organizer_dir).join(&folder_name);
             let final_dest_str = apply_copy_n(&final_dest).to_string_lossy().to_string();
@@ -928,7 +937,7 @@ async fn execute_rip(
             }
 
             // Move to Organizer scan directory for processing
-            // Use resolved name if available, otherwise fall back to raw disc name
+            // Priority: user-set name > auto-detected name > raw disc name
             let organizer_dir = {
                 let config = state_clone.config.read().await;
                 config
@@ -937,14 +946,23 @@ async fn execute_rip(
                     .unwrap_or_else(|| ".".to_string())
             };
 
-            let folder_name = if !resolved_name.0.is_empty() {
-                let title = &resolved_name.0;
-                match resolved_name.1 {
-                    Some(y) => format!("{} ({})", title, y),
-                    None => title.clone(),
+            let folder_name = {
+                // Check for user-set name first
+                let user_name = {
+                    let guard = state.disc_names.read().await;
+                    guard.get(&index).map(|info| info.final_name.clone())
+                };
+                if let Some(name) = user_name {
+                    name
+                } else if !resolved_name.0.is_empty() {
+                    let title = &resolved_name.0;
+                    match resolved_name.1 {
+                        Some(y) => format!("{} ({})", title, y),
+                        None => title.clone(),
+                    }
+                } else {
+                    disc_name.clone().unwrap_or_else(|| format!("Disc_{}", index))
                 }
-            } else {
-                disc_name.clone().unwrap_or_else(|| format!("Disc_{}", index))
             };
             let final_dest = std::path::Path::new(&organizer_dir).join(&folder_name);
             let final_dest_str = apply_copy_n(&final_dest).to_string_lossy().to_string();
