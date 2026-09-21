@@ -236,9 +236,27 @@
     const cacheKey = `${title}::${year ?? ''}`;
     if (Object.values(ripPosters).some(p => `${p.title}::${p.year ?? ''}` === cacheKey)) return;
 
+    // Spec: search movies first, then TV if no movie match
+    const searchParams = `${encodeURIComponent(title)}${year ? `&year=${year}` : ''}`;
+    const searchUrl = `/v1/search/tmdb?query=${searchParams}&media_type=`;
+
     try {
-      const searchUrl = `/v1/search/tmdb?query=${encodeURIComponent(title)}${year ? `&year=${year}` : ''}&media_type=movie`;
-      const res = await fetch(searchUrl);
+      // Try movies first
+      let res = await fetch(`${searchUrl}movie`);
+      if (res.ok) {
+        const result = await res.json();
+        const matches = result.data?.results || [];
+        if (matches.length) {
+          const posterPath = matches[0].poster_path;
+          if (posterPath) {
+            ripPosters = { ...ripPosters, [idx]: { title, year, posterUrl: `https://image.tmdb.org/t/p/w300${posterPath}` } };
+          }
+          return;
+        }
+      }
+
+      // Fallback to TV
+      res = await fetch(`${searchUrl}tv`);
       if (!res.ok) return;
 
       const result = await res.json();
