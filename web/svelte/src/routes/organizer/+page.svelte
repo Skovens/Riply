@@ -3,6 +3,7 @@
   import { organizerApi } from '$lib/api';
   import Tooltip from '$lib/components/Tooltip.svelte';
   import PreviewModal from '$lib/components/PreviewModal.svelte';
+  import ConfirmModal from '$lib/components/ConfirmModal.svelte';
 
   /** @type {import('$lib/types').FolderRecord[]} */
   let folders = $state([]);
@@ -11,6 +12,10 @@
   // ── Preview Modal ──────────────────────────────────────────
   /** @type {import('$lib/types').FolderRecord | null} */
   let previewFolder = $state(null);
+
+  // ── Confirm Modal ──────────────────────────────────────────
+  let confirmModal = $state(null);
+  // { title, message, confirmText, cancelText, variant, onConfirm }
 
   // ── Filter ─────────────────────────────────────────────────
   let filterStatus = $state('All');
@@ -145,25 +150,47 @@
   }
 
   async function handleAcceptAll() {
-    if (!confirm('Accept all confident folders?')) return;
-    try {
-      await organizerApi.acceptAll();
-      await fetchFolders();
-      await fetchStats();
-    } catch (e) {
-      console.error('Accept all failed:', e);
-    }
+    confirmModal = {
+      title: 'Accept All',
+      message: 'Accept all confident folders?',
+      confirmText: 'Accept All',
+      cancelText: 'Cancel',
+      variant: 'primary',
+      onConfirm: async () => {
+        try {
+          await organizerApi.acceptAll();
+          await fetchFolders();
+          await fetchStats();
+        } catch (e) {
+          console.error('Accept all failed:', e);
+        } finally {
+          confirmModal = null;
+        }
+      },
+      onCancel: () => { confirmModal = null; },
+    };
   }
 
   async function handleRejectAll() {
-    if (!confirm('Reject all unknown folders?')) return;
-    try {
-      await organizerApi.rejectAll();
-      await fetchFolders();
-      await fetchStats();
-    } catch (e) {
-      console.error('Reject all failed:', e);
-    }
+    confirmModal = {
+      title: 'Reject All',
+      message: 'Reject all unknown folders?',
+      confirmText: 'Reject All',
+      cancelText: 'Cancel',
+      variant: 'danger',
+      onConfirm: async () => {
+        try {
+          await organizerApi.rejectAll();
+          await fetchFolders();
+          await fetchStats();
+        } catch (e) {
+          console.error('Reject all failed:', e);
+        } finally {
+          confirmModal = null;
+        }
+      },
+      onCancel: () => { confirmModal = null; },
+    };
   }
 
   async function handleMove(id) {
@@ -182,14 +209,25 @@
   async function handleDelete(id) {
     const folder = folders.find(f => f.id === id);
     if (!folder) return;
-    if (!confirm(`Delete "${folder.name}"? This cannot be undone.`)) return;
-    try {
-      await organizerApi.delete(id);
-      folders = folders.filter(f => f.id !== id);
-      await fetchStats();
-    } catch (e) {
-      console.error('Delete failed:', e);
-    }
+    confirmModal = {
+      title: 'Delete Folder',
+      message: `Delete "${folder.name}"? This cannot be undone.`,
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      variant: 'danger',
+      onConfirm: async () => {
+        try {
+          await organizerApi.delete(id);
+          folders = folders.filter(f => f.id !== id);
+          await fetchStats();
+        } catch (e) {
+          console.error('Delete failed:', e);
+        } finally {
+          confirmModal = null;
+        }
+      },
+      onCancel: () => { confirmModal = null; },
+    };
   }
 
   // ── Helpers ────────────────────────────────────────────────
@@ -498,6 +536,19 @@
       onClose={closePreview}
       onAccept={handlePreviewAccept}
       onReject={handlePreviewReject}
+    />
+  {/if}
+
+  <!-- Confirm Modal -->
+  {#if confirmModal}
+    <ConfirmModal
+      title={confirmModal.title}
+      message={confirmModal.message}
+      confirmText={confirmModal.confirmText}
+      cancelText={confirmModal.cancelText}
+      variant={confirmModal.variant}
+      onConfirm={confirmModal.onConfirm}
+      onCancel={confirmModal.onCancel}
     />
   {/if}
 </div>
