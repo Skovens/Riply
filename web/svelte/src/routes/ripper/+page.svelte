@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { ripperApi, organizerApi } from '$lib/api';
+  import { ripperApi } from '$lib/api';
   import { connectSSE } from '$lib/api/sse';
   import Tooltip from '$lib/components/Tooltip.svelte';
 
@@ -10,9 +10,18 @@
   let installStatus = $state(null);
 
   // ── Unfinished Titles ──────────────────────────────────────
-  /** @type {import('$lib/types').FolderRecord[]} */
-  let unfinishedFolders = $state([]);
-  let unfinishedLoading = $state(false);
+  // Derived from ripNaming state (per-drive naming failures/completions)
+  // Spec: rips that fail to auto-name stay in the Rip view, not the Organizer
+  let unfinishedTitles = $derived.by(() =>
+    Object.entries(ripNaming)
+      .filter(([, v]) => v.status === 'failed' || v.status === 'complete')
+      .map(([idx, v]) => ({
+        driveIndex: Number(idx),
+        discName: v.discName,
+        foundName: v.foundName,
+        status: v.status,
+      }))
+  );
 
   // ── Rip progress ───────────────────────────────────────────
   /** @type {Record<number, { pct: number, eta: number | null, stage: string }>} */
@@ -35,7 +44,7 @@
   // ── Lifecycle ──────────────────────────────────────────────
 
   onMount(async () => {
-    await Promise.all([fetchDrives(), fetchAutoripStatus(), fetchInstallStatus(), fetchUnfinishedFolders()]);
+    await Promise.all([fetchDrives(), fetchAutoripStatus(), fetchInstallStatus()]);
     sseDisconnect = connectSSE(handleSSEEvent);
   });
 
@@ -69,20 +78,6 @@
       installStatus = { installed: status.installed, method: formatMethod(status.method) };
     } catch (e) {
       console.error('Failed to load install status:', e);
-    }
-  }
-
-  async function fetchUnfinishedFolders() {
-    unfinishedLoading = true;
-    try {
-      const allFolders = await organizerApi.list();
-      unfinishedFolders = allFolders.filter(
-        (f) => f.status === 'Scanned' || f.status === 'Uncertain'
-      );
-    } catch (e) {
-      console.error('Failed to load unfinished folders:', e);
-    } finally {
-      unfinishedLoading = false;
     }
   }
 
@@ -526,25 +521,27 @@
     {/if}
   </div>
 
-  <!-- Unfinished Titles -->
-  {#if unfinishedFolders.length > 0}
+  <!-- Unfinished Titles — derived from ripNaming state (per-drive naming failures/completions) -->
+  {#if unfinishedTitles.length > 0}
     <div class="ripper__unfinished">
       <h3 class="ripper__unfinished-title">
         <span class="ripper__unfinished-icon">⏳</span>
-        Unfinished Titles ({unfinishedFolders.length})
+        Unfinished Titles ({unfinishedTitles.length})
       </h3>
       <div class="ripper__unfinished-list">
-        {#each unfinishedFolders as folder (folder.id)}
+        {#each unfinishedTitles as title (title.driveIndex)}
           <a
             href="/organizer"
             class="unfinished-item"
             title="View in Organizer"
           >
-            <span class="unfinished-item__name">{folder.name}</span>
-            {#if folder.suggested_name}
-              <span class="unfinished-item__suggested">→ {folder.suggested_name}</span>
+            <span class="unfinished-item__name">{title.discName}</span>
+            {#if title.foundName}
+              <span class="unfinished-item__suggested">→ {title.foundName}</span>
+            {:else}
+              <span class="unfinished-item__suggested">→ Media naming failed</span>
             {/if}
-            <span class="unfinished-item__status">{folder.status}</span>
+            <span class="unfinished-item__status">{title.status}</span>
           </a>
         {/each}
       </div>
