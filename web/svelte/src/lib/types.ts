@@ -22,6 +22,18 @@ export type FolderStatus =
 
 export type MediaType = 'Movie' | 'Tv';
 
+// ── Session State (per-drive rip history) ────────────────────
+
+export interface SessionState {
+  drive_index: number;
+  last_title: string;
+  last_year: number | null;
+  last_season: number | null;
+  last_episode: number | null;
+  last_media_type: string;
+  last_tmdb_id: number | null;
+}
+
 // ── Folder Record (Organizer) ────────────────────────────────
 
 export interface FolderRecord {

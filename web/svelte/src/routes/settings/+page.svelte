@@ -1,11 +1,43 @@
 <script>
   import { onMount } from 'svelte';
-  import { configApi } from '$lib/api';
+  import { configApi, sessionStateApi } from '$lib/api';
 
   let currentConfig = $state(null);
   let saving = $state(false);
   let resetting = $state(false);
   let saveStatus = $state({ message: '', type: '' });
+
+  // ── Session State ──────────────────────────────────────────
+  /** @type {import('$lib/types').SessionState[]} */
+  let sessionStates = $state([]);
+  let clearingSession = $state(false);
+  let sessionStatus = $state({ message: '', type: '' });
+
+  async function loadSessionStates() {
+    try {
+      sessionStates = await sessionStateApi.list();
+    } catch (e) {
+      console.error('Failed to load session state:', e);
+    }
+  }
+
+  async function handleClearSessionState() {
+    if (!window.confirm('Clear all session state? This will remove per-drive rip history used for auto-suggestions.')) {
+      return;
+    }
+    clearingSession = true;
+    sessionStatus = { message: '', type: '' };
+    try {
+      await sessionStateApi.clear();
+      sessionStates = [];
+      sessionStatus = { message: 'Session state cleared', type: 'success' };
+    } catch (e) {
+      console.error('Failed to clear session state:', e);
+      sessionStatus = { message: 'Failed to clear: ' + e.message, type: 'error' };
+    } finally {
+      clearingSession = false;
+    }
+  }
 
   let scan_directory = $state('');
   let movies_directory = $state('');
@@ -52,6 +84,7 @@
     } catch (e) {
       console.error('Failed to load config:', e);
     }
+    await loadSessionStates();
   });
 
   async function handleSubmit(e) {
@@ -278,6 +311,56 @@
           </div>
         </div>
 
+        <!-- Session State -->
+        <div class="settings__section">
+          <h3 class="settings__section-title">Session State</h3>
+          <div class="settings__field">
+            <div class="settings__input-wrap" style="flex-direction: column; align-items: flex-start; gap: var(--space-2);">
+              {#if sessionStates.length === 0}
+                <span style="color: var(--color-text-muted); font-size: var(--text-sm);">No session state recorded</span>
+              {:else}
+                <div style="width: 100%; overflow-x: auto;">
+                  <table class="settings__session-table">
+                    <thead>
+                      <tr>
+                        <th>Drive</th>
+                        <th>Title</th>
+                        <th>Year</th>
+                        <th>Type</th>
+                        {#if sessionStates.some(s => s.last_season !== null)}
+                          <th>Season</th>
+                          <th>Episode</th>
+                        {/if}
+                        <th>TMDB ID</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {#each sessionStates as state}
+                        <tr>
+                          <td>{state.drive_index}</td>
+                          <td>{state.last_title}</td>
+                          <td>{state.last_year ?? '—'}</td>
+                          <td>{state.last_media_type}</td>
+                          {#if state.last_season !== null}
+                            <td>{state.last_season}</td>
+                            <td>{state.last_episode ?? '—'}</td>
+                          {/if}
+                          <td>{state.last_tmdb_id ?? '—'}</td>
+                        </tr>
+                      {/each}
+                    </tbody>
+                  </table>
+                </div>
+              {/if}
+              <button type="button" class="btn btn--danger" onclick={handleClearSessionState} disabled={clearingSession || sessionStates.length === 0}>
+                {#if clearingSession}Clearing...{:else}Clear Session State{/if}
+              </button>
+              <span class="settings__status settings__status--{sessionStatus.type}">{sessionStatus.message}</span>
+            </div>
+            <div class="settings__hint">Per-drive rip history used for auto-suggestions. Persists across server restarts.</div>
+          </div>
+        </div>
+
         <div class="settings__actions">
           <button type="submit" class="btn btn--primary" disabled={saving}>Save Settings</button>
           <button type="button" class="btn btn--danger" onclick={handleResetDefaults} disabled={resetting}>
@@ -289,3 +372,31 @@
     </div>
   </div>
 {/if}
+
+<style>
+  .settings__session-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--text-sm);
+    margin-bottom: var(--space-3);
+  }
+
+  .settings__session-table th,
+  .settings__session-table td {
+    padding: var(--space-1) var(--space-2);
+    text-align: left;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .settings__session-table th {
+    color: var(--color-text-muted);
+    font-weight: 600;
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .settings__session-table td {
+    color: var(--color-text-primary);
+  }
+</style>

@@ -34,6 +34,7 @@ use crate::routes::review;
 use crate::routes::ripper;
 use crate::routes::scan;
 use crate::routes::search;
+use crate::routes::session_state;
 use crate::routes::sse_handler;
 
 /// Stored disc name info (derived or user-set).
@@ -182,6 +183,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .merge(cfg::router(Arc::clone(&state)))
         .merge(search::router(Arc::clone(&state)))
         .merge(organizer::router(Arc::clone(&state)))
+        .merge(session_state::router(Arc::clone(&state)))
         .layer(TimeoutLayer::new(std::time::Duration::from_secs(30)));
 
     Router::new()

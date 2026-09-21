@@ -8,4 +8,5 @@ pub mod review;
 pub mod ripper;
 pub mod scan;
 pub mod search;
+pub mod session_state;
 pub mod sse_handler;

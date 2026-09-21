@@ -919,6 +919,34 @@ impl Database {
     pub fn get_db_path(&self) -> &str {
         &self.db_path
     }
+
+    // ── Session State ──────────────────────────────────────────
+
+    pub async fn list_session_states(&self) -> Result<Vec<SessionState>, anyhow::Error> {
+        let rows = sqlx::query(
+            "SELECT drive_index, last_title, last_year, last_season, last_episode, last_media_type, last_tmdb_id FROM session_state ORDER BY drive_index",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| SessionState {
+                drive_index: row.get::<i64, &str>("drive_index") as usize,
+                last_title: row.get("last_title"),
+                last_year: row.get("last_year"),
+                last_season: row.get("last_season"),
+                last_episode: row.get("last_episode"),
+                last_media_type: row.get("last_media_type"),
+                last_tmdb_id: row.get("last_tmdb_id"),
+            })
+            .collect())
+    }
+
+    pub async fn clear_session_states(&self) -> Result<(), anyhow::Error> {
+        sqlx::query("DELETE FROM session_state").execute(&self.pool).await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1277,6 +1305,24 @@ pub async fn delete_session_state(pool: &sqlx::SqlitePool, drive_index: usize) -
 pub async fn clear_session_state(pool: &sqlx::SqlitePool) -> Result<(), anyhow::Error> {
     sqlx::query("DELETE FROM session_state").execute(pool).await?;
     Ok(())
+}
+
+pub async fn list_session_states(pool: &sqlx::SqlitePool) -> Result<Vec<SessionState>, anyhow::Error> {
+    let rows = sqlx::query(
+        "SELECT drive_index, last_title, last_year, last_season, last_episode, last_media_type, last_tmdb_id FROM session_state ORDER BY drive_index",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows.into_iter().map(|row| SessionState {
+        drive_index: row.get::<i64, &str>("drive_index") as usize,
+        last_title: row.get("last_title"),
+        last_year: row.get("last_year"),
+        last_season: row.get("last_season"),
+        last_episode: row.get("last_episode"),
+        last_media_type: row.get("last_media_type"),
+        last_tmdb_id: row.get("last_tmdb_id"),
+    }).collect())
 }
 
 /// Convert a database row to a FolderRecord.
