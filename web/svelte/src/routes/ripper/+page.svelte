@@ -3,6 +3,7 @@
   import { ripperApi } from '$lib/api';
   import { connectSSE } from '$lib/api/sse';
   import Tooltip from '$lib/components/Tooltip.svelte';
+  import MediaNamingModal from '$lib/components/MediaNamingModal.svelte';
 
   /** @type {import('$lib/types').DriveInfo[]} */
   let drives = $state([]);
@@ -37,6 +38,10 @@
 
   // ── Autorip ────────────────────────────────────────────────
   let autoripDrives = $state([]);
+
+  // ── Naming Modal ───────────────────────────────────────────
+  /** @type {{ driveIndex: number, discName: string } | null} */
+  let namingTarget = $state(null);
 
   // ── SSE ────────────────────────────────────────────────────
   let sseDisconnect = null;
@@ -87,6 +92,34 @@
       return keys.length > 0 ? keys[0] : 'Unknown';
     }
     return String(method);
+  }
+
+  // ── Naming Modal Handlers ──────────────────────────────────
+
+  function openNamingModal(title) {
+    namingTarget = { driveIndex: title.driveIndex, discName: title.discName };
+  }
+
+  function closeNamingModal() {
+    namingTarget = null;
+  }
+
+  async function handleNamingConfirm(choice) {
+    if (!namingTarget) return;
+    try {
+      await ripperApi.rename(namingTarget.driveIndex, choice);
+      // Update local state to reflect the applied name
+      const title = namingTarget.discName;
+      const foundName = choice.year ? `${choice.title} (${choice.year})` : choice.title;
+      ripNaming = {
+        ...ripNaming,
+        [namingTarget.driveIndex]: { discName: title, foundName, status: 'complete' },
+      };
+    } catch (e) {
+      console.error('Failed to apply name:', e);
+    } finally {
+      namingTarget = null;
+    }
   }
 
   // ── SSE ────────────────────────────────────────────────────
@@ -530,10 +563,10 @@
       </h3>
       <div class="ripper__unfinished-list">
         {#each unfinishedTitles as title (title.driveIndex)}
-          <a
-            href="/organizer"
+          <button
+            type="button"
             class="unfinished-item"
-            title="View in Organizer"
+            onclick={() => openNamingModal(title)}
           >
             <span class="unfinished-item__name">{title.discName}</span>
             {#if title.foundName}
@@ -542,10 +575,20 @@
               <span class="unfinished-item__suggested">→ Media naming failed</span>
             {/if}
             <span class="unfinished-item__status">{title.status}</span>
-          </a>
+          </button>
         {/each}
       </div>
     </div>
+  {/if}
+
+  <!-- Naming Modal for unfinished titles -->
+  {#if namingTarget}
+    <MediaNamingModal
+      initialTitle={namingTarget.discName}
+      mediaType="movie"
+      onConfirm={handleNamingConfirm}
+      onClose={closeNamingModal}
+    />
   {/if}
 </div>
 
