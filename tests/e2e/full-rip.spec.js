@@ -33,19 +33,20 @@ test.describe('Rip — Drive Detection (Real Hardware)', () => {
   });
 
   test('drive 0 is detected with disc loaded', async ({ page }) => {
-    await expect(page.locator('.drive-card')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.drive-card').first()).toBeVisible({ timeout: 10000 });
     const driveCards = page.locator('.drive-card');
     await expect(driveCards).toHaveCount({ min: 1 });
 
-    const discName = page.locator('.drive-card__disc-name');
+    const discName = page.locator('.drive-card__disc-name').first();
     await expect(discName).toBeVisible();
     const text = (await discName.textContent()).trim();
     expect(text.length).toBeGreaterThan(0);
     console.log(`[drive-detect] Drive 0 disc name: ${text}`);
   });
 
-  test('drive 0 state is Ready', async ({ page }) => {
-    await expect(page.locator('.drive-card__state:has-text("Ready")')).toBeVisible({ timeout: 10000 });
+  test('drive 0 state is Ready (shows 💿 icon)', async ({ page }) => {
+    // Ready state uses 💿 emoji icon
+    await expect(page.locator('.drive-card__state:has-text("💿")').first()).toBeVisible({ timeout: 10000 });
   });
 
   test('drive 0 has an enabled Rip button', async ({ page }) => {
@@ -73,8 +74,8 @@ test.describe('Full E2E DVD Rip Pipeline — Real Hardware', () => {
     console.log('[step-1] Navigated to ripper page');
 
     // ── Step 2: Verify drive 0 detected with disc ────────────
-    await expect(page.locator('.drive-card')).toBeVisible({ timeout: 10000 });
-    const discNameEl = page.locator('.drive-card__disc-name');
+    await expect(page.locator('.drive-card').first()).toBeVisible({ timeout: 10000 });
+    const discNameEl = page.locator('.drive-card__disc-name').first();
     await expect(discNameEl).toBeVisible();
     const discName = (await discNameEl.textContent()).trim();
     expect(discName.length).toBeGreaterThan(0);
@@ -87,7 +88,8 @@ test.describe('Full E2E DVD Rip Pipeline — Real Hardware', () => {
     console.log('[step-3] Clicked Rip button');
 
     // ── Step 4: Wait for rip to start ────────────────────────
-    await expect(page.locator('.drive-card__state:has-text("Ripping")')).toBeVisible({ timeout: 30000 });
+    // Ripping state uses ⚡ emoji icon
+    await expect(page.locator('.drive-card__state:has-text("⚡")').first()).toBeVisible({ timeout: 30000 });
     await expect(page.locator('.progress-bar')).toBeVisible({ timeout: 30000 });
     console.log('[step-4] Rip started, progress bar visible');
 
@@ -97,7 +99,8 @@ test.describe('Full E2E DVD Rip Pipeline — Real Hardware', () => {
     const ripTimeout = 25 * 60 * 1000; // 25 minutes max for rip
 
     while (Date.now() - startTime < ripTimeout) {
-      const isRipping = await page.locator('.drive-card__state:has-text("Ripping")').isVisible().catch(() => false);
+      // Check if rip is still in progress (⚡ icon)
+      const isRipping = await page.locator('.drive-card__state:has-text("⚡")').isVisible().catch(() => false);
       if (!isRipping) break;
 
       const progressText = await page.locator('.drive-card__progress-pct').textContent().catch(() => null);
@@ -112,11 +115,12 @@ test.describe('Full E2E DVD Rip Pipeline — Real Hardware', () => {
     }
 
     // ── Step 6: Wait for rip complete ────────────────────────
+    // Complete state uses ✅ emoji icon
     const elapsed = ((Date.now() - startTime) / 1000 / 60).toFixed(1);
     console.log(`[step-6] Waiting for rip completion (elapsed: ${elapsed} min)...`);
 
     await expect(
-      page.locator('.drive-card__state:has-text("Complete")'),
+      page.locator('.drive-card__state:has-text("✅")').first(),
       `Rip did not complete within ${ripTimeout / 60000} minutes`
     ).toBeVisible({ timeout: ripTimeout });
 
