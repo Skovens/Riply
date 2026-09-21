@@ -398,7 +398,7 @@
       <div class="organizer__empty">No folders found. Scan a directory to get started.</div>
     {:else}
       {#each folders as folder (folder.id)}
-        <div class="folder-card" class:folder-card--accepted={folder.status === 'Confident'} class:folder-card--rejected={folder.status === 'Unknown'} class:folder-card--moved={folder.status === 'Moved'}>
+        <div class="folder-card" class:folder-card--accepted={folder.status === 'Confident'} class:folder-card--rejected={folder.status === 'Unknown'} class:folder-card--moved={folder.status === 'Moved'} class:folder-card--quarantined={folder.status === 'Quarantined'}>
           <div class="folder-card__info">
             <div class="folder-card__header">
               <span class="folder-card__status" style="color: {statusColor(folder.status)}">
@@ -715,6 +715,11 @@
     border-color: var(--color-accent);
     background: var(--color-accent-muted);
     opacity: 0.75;
+  }
+
+  .folder-card--quarantined {
+    border-color: var(--color-danger);
+    background: var(--color-danger-muted);
   }
 
   .folder-card__info {
