@@ -136,26 +136,22 @@
 
     if (kind !== 'rip') return;
 
-    // Rip starting
     if (action === 'starting') {
       drives = drives.map(d => d.index === idx ? { ...d, state: 'Ripping' } : d);
       ripProgress = { ...ripProgress, [idx]: { pct: 0, eta: null, stage: '' } };
       return;
     }
 
-    // Rip progress
     if (action === 'progress') {
       const { pct, eta, stage } = data;
       ripProgress = { ...ripProgress, [idx]: { pct: pct || 0, eta: eta ?? null, stage: stage || '' } };
       return;
     }
 
-    // Rip complete
     if (action === 'complete') {
       drives = drives.map(d => d.index === idx ? { ...d, state: 'Complete' } : d);
       const dest = data.dest || '';
       if (dest) {
-        // Extract folder name from destination path
         const folderName = dest.split('/').pop() || '';
         if (folderName) {
           // Auto-naming already happened, just show complete
@@ -168,7 +164,6 @@
       return;
     }
 
-    // Rip error
     if (action === 'error') {
       const message = data.message || 'Unknown error';
       drives = drives.map(d => d.index === idx ? { ...d, state: 'Error' } : d);
@@ -180,28 +175,24 @@
       return;
     }
 
-    // Rip cancelled
     if (action === 'cancelled') {
       drives = drives.map(d => d.index === idx ? { ...d, state: 'Ready' } : d);
       ripProgress = Object.fromEntries(Object.entries(ripProgress).filter(([k]) => k !== String(idx)));
       return;
     }
 
-    // Rip message (MakeMKV status text)
     if (action === 'message') {
       const text = data.text || '';
       ripProgress = { ...ripProgress, [idx]: { ...ripProgress[idx], stage: text } };
       return;
     }
 
-    // Auto-naming: searching
     if (action === 'naming') {
       const discName = drives.find(d => d.index === idx)?.disc_name || '';
       ripNaming = { ...ripNaming, [idx]: { discName, foundName: null, status: 'naming' } };
       return;
     }
 
-    // Auto-naming: found
     if (action === 'named') {
       const title = data.title || '';
       const year = data.year || null;
@@ -209,12 +200,10 @@
       const foundName = year ? `${title} (${year})` : title;
       ripNaming = { ...ripNaming, [idx]: { discName, foundName, status: 'complete' } };
 
-      // Fetch poster from TMDb
       fetchPoster(idx, title, year);
       return;
     }
 
-    // Auto-naming: failed
     if (action === 'naming_failed') {
       const discName = drives.find(d => d.index === idx)?.disc_name || '';
       ripNaming = { ...ripNaming, [idx]: { discName, foundName: null, status: 'failed' } };
