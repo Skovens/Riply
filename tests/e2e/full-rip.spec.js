@@ -48,10 +48,9 @@ async function waitForRipProgress(page, timeout = 30000) {
  * Wait for rip to complete using Playwright's built-in expect() with long timeout.
  * This is much more robust than manual polling with waitForTimeout() which causes
  * page crashes during long-duration rips (12-30 min).
- * Logs progress milestones by polling at intervals.
+ * Logs progress milestones via a non-blocking interval.
  */
 async function waitForRipComplete(page, timeout = 25 * 60 * 1000) {
-  const startTime = Date.now();
   let lastPct = 0;
 
   // Check for completion using expect() which handles long waits gracefully
@@ -60,16 +59,14 @@ async function waitForRipComplete(page, timeout = 25 * 60 * 1000) {
     `Rip did not complete within ${timeout / 60000} minutes`
   ).toBeVisible({ timeout });
 
-  // Log progress milestones during the wait (non-blocking)
+  // Progress logging via setInterval (non-blocking after completion)
   const logInterval = setInterval(() => {
-    const isRipping = page.locator('.drive-card__state').filter({ hasText: '⚡' }).isVisible().catch(() => false);
-    if (!isRipping) {
-      clearInterval(logInterval);
-      return;
-    }
-    const progressText = page.locator('.drive-card__progress-pct').textContent().catch(() => null);
-    if (progressText) {
-      progressText.then(text => {
+    page.locator('.drive-card__state').filter({ hasText: '⚡' }).isVisible().then(isRipping => {
+      if (!isRipping) {
+        clearInterval(logInterval);
+        return;
+      }
+      page.locator('.drive-card__progress-pct').textContent().then(text => {
         if (text) {
           const pct = parseInt(text.replace('%', ''), 10);
           if (pct > lastPct && pct % 10 === 0) {
@@ -78,7 +75,7 @@ async function waitForRipComplete(page, timeout = 25 * 60 * 1000) {
           }
         }
       }).catch(() => {});
-    }
+    }).catch(() => {});
   }, 10000);
 
   // Clean up interval after completion
@@ -86,28 +83,22 @@ async function waitForRipComplete(page, timeout = 25 * 60 * 1000) {
 }
 
 /**
- * Wait for auto-naming to complete or fail.
+ * Wait for auto-naming to complete or fail using expect().
+ * Avoids waitForTimeout() polling loops that crash pages.
  */
 async function waitForAutoNaming(page, timeout = 5 * 60 * 1000) {
-  const namingStart = Date.now();
-  let namingSucceeded = false;
-  let namingFailed = false;
-
-  while (Date.now() - namingStart < timeout) {
-    const hasPoster = await page.locator('.drive-card__poster-img').isVisible().catch(() => false);
-    if (hasPoster) {
-      namingSucceeded = true;
-      break;
-    }
+  try {
+    // Wait for poster to appear (success)
+    await expect(
+      page.locator('.drive-card__poster-img').first(),
+      'Auto-naming timed out — no poster or unfinished section visible'
+    ).toBeVisible({ timeout });
+    return { namingSucceeded: true, namingFailed: false };
+  } catch (e) {
+    // Check if unfinished section appeared (failure)
     const hasUnfinished = await page.locator('.ripper__unfinished').isVisible().catch(() => false);
-    if (hasUnfinished) {
-      namingFailed = true;
-      break;
-    }
-    await page.waitForTimeout(10000);
+    return { namingSucceeded: false, namingFailed: hasUnfinished };
   }
-
-  return { namingSucceeded, namingFailed };
 }
 
 /**
