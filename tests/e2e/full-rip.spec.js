@@ -24,6 +24,90 @@ const { test, expect } = require('@playwright/test');
  * After running, the disc is ejected and the rip output is cleaned up.
  */
 
+// ── Helpers ─────────────────────────────────────────────────
+
+/**
+ * Wait for a drive to reach a specific state.
+ * Polls using small intervals to avoid page crashes from long waitForTimeout.
+ */
+async function waitForDriveState(page, stateEmoji, timeout = 30000) {
+  await expect(
+    page.locator('.drive-card__state').filter({ hasText: stateEmoji }).first(),
+    `Drive did not reach state: ${stateEmoji}`
+  ).toBeVisible({ timeout });
+}
+
+/**
+ * Wait for rip progress to appear (indicates rip has started).
+ */
+async function waitForRipProgress(page, timeout = 30000) {
+  await expect(page.locator('.progress-bar')).toBeVisible({ timeout });
+}
+
+/**
+ * Monitor rip progress until complete or timeout.
+ * Uses small intervals (5s) to avoid Chromium tab crashes.
+ */
+async function monitorRipProgress(page, startTime, timeout = 25 * 60 * 1000) {
+  let lastPct = 0;
+  const pollInterval = 5000; // 5 seconds to avoid page crashes
+
+  while (Date.now() - startTime < timeout) {
+    // Check if rip is still in progress (⚡ icon)
+    const isRipping = await page.locator('.drive-card__state').filter({ hasText: '⚡' }).isVisible().catch(() => false);
+    if (!isRipping) break;
+
+    const progressText = await page.locator('.drive-card__progress-pct').textContent().catch(() => null);
+    if (progressText) {
+      const pct = parseInt(progressText.replace('%', ''), 10);
+      if (pct > lastPct && pct % 10 === 0) {
+        console.log(`[progress] ${pct}%`);
+        lastPct = pct;
+      }
+    }
+    await page.waitForTimeout(pollInterval);
+  }
+}
+
+/**
+ * Wait for auto-naming to complete or fail.
+ */
+async function waitForAutoNaming(page, timeout = 5 * 60 * 1000) {
+  const namingStart = Date.now();
+  let namingSucceeded = false;
+  let namingFailed = false;
+
+  while (Date.now() - namingStart < timeout) {
+    const hasPoster = await page.locator('.drive-card__poster-img').isVisible().catch(() => false);
+    if (hasPoster) {
+      namingSucceeded = true;
+      break;
+    }
+    const hasUnfinished = await page.locator('.ripper__unfinished').isVisible().catch(() => false);
+    if (hasUnfinished) {
+      namingFailed = true;
+      break;
+    }
+    await page.waitForTimeout(10000);
+  }
+
+  return { namingSucceeded, namingFailed };
+}
+
+/**
+ * Disable AutoRip on all drives to prevent auto-starting rips.
+ */
+async function disableAutorip(page) {
+  const autoripToggles = page.locator('.autorip-toggle input[type="checkbox"]');
+  const count = await autoripToggles.count();
+  for (let i = 0; i < count; i++) {
+    if (await autoripToggles.nth(i).isChecked()) {
+      await autoripToggles.nth(i).uncheck();
+      console.log(`[autorip] Disabled AutoRip on drive ${i}`);
+    }
+  }
+}
+
 // ── Targeted helper tests (fast, no rip required) ───────────
 
 test.describe('Rip — Drive Detection (Real Hardware)', () => {
@@ -35,7 +119,7 @@ test.describe('Rip — Drive Detection (Real Hardware)', () => {
   test('drive 0 is detected with disc loaded', async ({ page }) => {
     await expect(page.locator('.drive-card').first()).toBeVisible({ timeout: 10000 });
     const driveCards = page.locator('.drive-card');
-    await expect(driveCards).toHaveCount({ min: 1 });
+    await expect(driveCards).toHaveCount(1);
 
     const discName = page.locator('.drive-card__disc-name').first();
     await expect(discName).toBeVisible();
@@ -46,7 +130,7 @@ test.describe('Rip — Drive Detection (Real Hardware)', () => {
 
   test('drive 0 state is Ready (shows 💿 icon)', async ({ page }) => {
     // Ready state uses 💿 emoji icon
-    await expect(page.locator('.drive-card__state:has-text("💿")').first()).toBeVisible({ timeout: 10000 });
+    await waitForDriveState(page, '💿', 10000);
   });
 
   test('drive 0 has an enabled Rip button', async ({ page }) => {
@@ -73,113 +157,88 @@ test.describe('Full E2E DVD Rip Pipeline — Real Hardware', () => {
     await page.waitForLoadState('networkidle');
     console.log('[step-1] Navigated to ripper page');
 
-    // ── Step 2: Verify drive 0 detected with disc ────────────
+    // ── Step 2: Disable AutoRip to prevent auto-start ────────
+    await disableAutorip(page);
+
+    // ── Step 3: Wait for drive 0 to be in Ready state ────────
+    console.log('[step-3] Waiting for drive 0 to be Ready...');
+    await waitForDriveState(page, '💿', 15000);
+    console.log('[step-3] Drive 0 is Ready');
+
+    // ── Step 4: Verify drive 0 detected with disc ────────────
     await expect(page.locator('.drive-card').first()).toBeVisible({ timeout: 10000 });
     const discNameEl = page.locator('.drive-card__disc-name').first();
     await expect(discNameEl).toBeVisible();
     const discName = (await discNameEl.textContent()).trim();
     expect(discName.length).toBeGreaterThan(0);
-    console.log(`[step-2] Drive 0 detected: "${discName}"`);
+    console.log(`[step-4] Drive 0 detected: "${discName}"`);
 
-    // ── Step 3: Click Rip button ─────────────────────────────
+    // ── Step 5: Click Rip button ─────────────────────────────
     const ripBtn = page.locator('.drive-card__action-row .btn:has-text("Rip")').first();
     await expect(ripBtn).toBeEnabled();
     await ripBtn.click();
-    console.log('[step-3] Clicked Rip button');
+    console.log('[step-5] Clicked Rip button');
 
-    // ── Step 4: Wait for rip to start ────────────────────────
+    // ── Step 6: Wait for rip to start ────────────────────────
     // Ripping state uses ⚡ emoji icon
-    await expect(page.locator('.drive-card__state:has-text("⚡")').first()).toBeVisible({ timeout: 30000 });
-    await expect(page.locator('.progress-bar')).toBeVisible({ timeout: 30000 });
-    console.log('[step-4] Rip started, progress bar visible');
+    await waitForDriveState(page, '⚡', 30000);
+    await waitForRipProgress(page, 30000);
+    console.log('[step-6] Rip started, progress bar visible');
 
-    // ── Step 5: Monitor progress until complete ──────────────
+    // ── Step 7: Monitor progress until complete ──────────────
     const startTime = Date.now();
-    let lastPct = 0;
     const ripTimeout = 25 * 60 * 1000; // 25 minutes max for rip
 
-    while (Date.now() - startTime < ripTimeout) {
-      // Check if rip is still in progress (⚡ icon)
-      const isRipping = await page.locator('.drive-card__state:has-text("⚡")').isVisible().catch(() => false);
-      if (!isRipping) break;
+    await monitorRipProgress(page, startTime, ripTimeout);
 
-      const progressText = await page.locator('.drive-card__progress-pct').textContent().catch(() => null);
-      if (progressText) {
-        const pct = parseInt(progressText.replace('%', ''), 10);
-        if (pct > lastPct && pct % 10 === 0) {
-          console.log(`[step-5] Progress: ${pct}%`);
-          lastPct = pct;
-        }
-      }
-      await page.waitForTimeout(15000);
-    }
-
-    // ── Step 6: Wait for rip complete ────────────────────────
+    // ── Step 8: Wait for rip complete ────────────────────────
     // Complete state uses ✅ emoji icon
     const elapsed = ((Date.now() - startTime) / 1000 / 60).toFixed(1);
-    console.log(`[step-6] Waiting for rip completion (elapsed: ${elapsed} min)...`);
+    console.log(`[step-8] Waiting for rip completion (elapsed: ${elapsed} min)...`);
 
-    await expect(
-      page.locator('.drive-card__state:has-text("✅")').first(),
-      `Rip did not complete within ${ripTimeout / 60000} minutes`
-    ).toBeVisible({ timeout: ripTimeout });
+    await waitForDriveState(page, '✅', ripTimeout);
 
     const totalMinutes = ((Date.now() - startTime) / 1000 / 60).toFixed(1);
-    console.log(`[step-6] ✅ Rip completed in ${totalMinutes} minutes`);
+    console.log(`[step-8] ✅ Rip completed in ${totalMinutes} minutes`);
 
-    // ── Step 7: Wait for auto-naming event ───────────────────
-    console.log('[step-7] Waiting for auto-naming event...');
-    const namingTimeout = 5 * 60 * 1000;
-    const namingStart = Date.now();
-    let namingSucceeded = false;
-    let namingFailed = false;
-
-    while (Date.now() - namingStart < namingTimeout) {
-      const hasPoster = await page.locator('.drive-card__poster-img').isVisible().catch(() => false);
-      if (hasPoster) {
-        namingSucceeded = true;
-        break;
-      }
-      const hasUnfinished = await page.locator('.ripper__unfinished').isVisible().catch(() => false);
-      if (hasUnfinished) {
-        namingFailed = true;
-        break;
-      }
-      await page.waitForTimeout(10000);
-    }
+    // ── Step 9: Wait for auto-naming event ───────────────────
+    console.log('[step-9] Waiting for auto-naming event...');
+    const { namingSucceeded, namingFailed } = await waitForAutoNaming(page);
 
     if (namingSucceeded) {
-      console.log('[step-7] ✅ Auto-naming succeeded — poster fetched');
+      console.log('[step-9] ✅ Auto-naming succeeded — poster fetched');
     } else if (namingFailed) {
-      console.log('[step-7] ⚠️ Auto-naming failed — unfinished titles section appeared');
+      console.log('[step-9] ⚠️ Auto-naming failed — unfinished titles section appeared');
     } else {
-      console.log('[step-7] ⚠️ Auto-naming timed out — no poster or unfinished section visible');
+      console.log('[step-9] ⚠️ Auto-naming timed out — no poster or unfinished section visible');
     }
 
-    // ── Step 8: Verify organizer integration ─────────────────
-    console.log('[step-8] Checking organizer integration...');
+    // ── Step 10: Verify organizer integration ────────────────
+    console.log('[step-10] Checking organizer integration...');
     await page.goto('/organizer');
     await page.waitForLoadState('networkidle');
     await expect(page.locator('h2:has-text("Organizer")')).toBeVisible();
 
     const folderCount = await page.locator('.folder-card').count();
-    console.log(`[step-8] Organizer shows ${folderCount} folder(s)`);
+    console.log(`[step-10] Organizer shows ${folderCount} folder(s)`);
 
-    // ── Step 9: Eject disc ───────────────────────────────────
-    console.log('[step-9] Ejecting disc...');
+    // ── Step 11: Eject disc ──────────────────────────────────
+    console.log('[step-11] Ejecting disc...');
     await page.goto('/ripper');
     await page.waitForLoadState('networkidle');
 
-    const ejectBtn = page.locator('.drive-card__action-row .btn:has-text("Eject")').first();
-    if (await ejectBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await ejectBtn.click();
-      await expect(page.locator('.drive-card__state:has-text("Empty")')).toBeVisible({ timeout: 10000 });
-      console.log('[step-9] ✅ Disc ejected');
-    } else {
-      console.log('[step-9] ⚠️ No eject button found');
-    }
+    // Wait for drive to show in a state that has eject button (Ready/Complete/Error)
+    await expect(
+      page.locator('.drive-card__action-row .btn:has-text("Eject")').first(),
+      'Eject button not found'
+    ).toBeVisible({ timeout: 10000 });
 
-    // ── Step 10: Record results ──────────────────────────────
+    const ejectBtn = page.locator('.drive-card__action-row .btn:has-text("Eject")').first();
+    await ejectBtn.click();
+    await expect(page.locator('.drive-card__state').filter({ hasText: '⏹' }).first()).toBeVisible({ timeout: 10000 });
+    console.log('[step-11] ✅ Disc ejected');
+
+    // ── Step 12: Record results ──────────────────────────────
     console.log(`\n[results] Rip pipeline complete in ${totalMinutes} minutes`);
     console.log(`[results] Disc: "${discName}"`);
     console.log(`[results] Auto-naming: ${namingSucceeded ? 'SUCCESS' : namingFailed ? 'FAILED' : 'TIMED OUT'}`);
