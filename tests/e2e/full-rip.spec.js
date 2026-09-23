@@ -45,28 +45,44 @@ async function waitForRipProgress(page, timeout = 30000) {
 }
 
 /**
- * Monitor rip progress until complete or timeout.
- * Uses small intervals (5s) to avoid Chromium tab crashes.
+ * Wait for rip to complete using Playwright's built-in expect() with long timeout.
+ * This is much more robust than manual polling with waitForTimeout() which causes
+ * page crashes during long-duration rips (12-30 min).
+ * Logs progress milestones by polling at intervals.
  */
-async function monitorRipProgress(page, startTime, timeout = 25 * 60 * 1000) {
+async function waitForRipComplete(page, timeout = 25 * 60 * 1000) {
+  const startTime = Date.now();
   let lastPct = 0;
-  const pollInterval = 5000; // 5 seconds to avoid page crashes
 
-  while (Date.now() - startTime < timeout) {
-    // Check if rip is still in progress (⚡ icon)
-    const isRipping = await page.locator('.drive-card__state').filter({ hasText: '⚡' }).isVisible().catch(() => false);
-    if (!isRipping) break;
+  // Check for completion using expect() which handles long waits gracefully
+  await expect(
+    page.locator('.drive-card__state').filter({ hasText: '✅' }).first(),
+    `Rip did not complete within ${timeout / 60000} minutes`
+  ).toBeVisible({ timeout });
 
-    const progressText = await page.locator('.drive-card__progress-pct').textContent().catch(() => null);
-    if (progressText) {
-      const pct = parseInt(progressText.replace('%', ''), 10);
-      if (pct > lastPct && pct % 10 === 0) {
-        console.log(`[progress] ${pct}%`);
-        lastPct = pct;
-      }
+  // Log progress milestones during the wait (non-blocking)
+  const logInterval = setInterval(() => {
+    const isRipping = page.locator('.drive-card__state').filter({ hasText: '⚡' }).isVisible().catch(() => false);
+    if (!isRipping) {
+      clearInterval(logInterval);
+      return;
     }
-    await page.waitForTimeout(pollInterval);
-  }
+    const progressText = page.locator('.drive-card__progress-pct').textContent().catch(() => null);
+    if (progressText) {
+      progressText.then(text => {
+        if (text) {
+          const pct = parseInt(text.replace('%', ''), 10);
+          if (pct > lastPct && pct % 10 === 0) {
+            console.log(`[progress] ${pct}%`);
+            lastPct = pct;
+          }
+        }
+      }).catch(() => {});
+    }
+  }, 10000);
+
+  // Clean up interval after completion
+  setTimeout(() => clearInterval(logInterval), timeout);
 }
 
 /**
@@ -183,21 +199,16 @@ test.describe('Full E2E DVD Rip Pipeline — Real Hardware', () => {
     await waitForRipProgress(page, 30000);
     console.log('[step-6] Rip started, progress bar visible');
 
-    // ── Step 7: Monitor progress until complete ──────────────
+    // ── Step 7: Wait for rip to complete ─────────────────────
+    // Uses Playwright's expect() with long timeout — robust against page crashes
     const startTime = Date.now();
     const ripTimeout = 25 * 60 * 1000; // 25 minutes max for rip
+    console.log(`[step-7] Waiting for rip completion (timeout: ${ripTimeout / 60000} min)...`);
 
-    await monitorRipProgress(page, startTime, ripTimeout);
-
-    // ── Step 8: Wait for rip complete ────────────────────────
-    // Complete state uses ✅ emoji icon
-    const elapsed = ((Date.now() - startTime) / 1000 / 60).toFixed(1);
-    console.log(`[step-8] Waiting for rip completion (elapsed: ${elapsed} min)...`);
-
-    await waitForDriveState(page, '✅', ripTimeout);
+    await waitForRipComplete(page, ripTimeout);
 
     const totalMinutes = ((Date.now() - startTime) / 1000 / 60).toFixed(1);
-    console.log(`[step-8] ✅ Rip completed in ${totalMinutes} minutes`);
+    console.log(`[step-7] ✅ Rip completed in ${totalMinutes} minutes`);
 
     // ── Step 9: Wait for auto-naming event ───────────────────
     console.log('[step-9] Waiting for auto-naming event...');
