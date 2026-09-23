@@ -134,17 +134,22 @@ test.describe('Rip — Drive Detection (Real Hardware)', () => {
   });
 
   test('drive 0 state is Ready (shows 💿 icon)', async ({ page }) => {
-    // Ready state uses 💿 emoji icon
-    await waitForDriveState(page, '💿', 10000);
+    // Wait for drive to reach Ready state (💿) — it may be Ripping (⚡) from a previous test
+    // If it's already Ready, this returns immediately
+    await waitForDriveState(page, '💿', 30000);
   });
 
   test('drive 0 has an enabled Rip button', async ({ page }) => {
+    // Wait for drive to be Ready (so Rip button is visible and enabled)
+    await waitForDriveState(page, '💿', 30000);
     const ripBtn = page.locator('.drive-card__action-row .btn:has-text("Rip")').first();
     await expect(ripBtn).toBeVisible({ timeout: 10000 });
     await expect(ripBtn).toBeEnabled();
   });
 
   test('drive 0 has an enabled Eject button when disc is loaded', async ({ page }) => {
+    // Wait for drive to be Ready (eject is available in Ready/Complete/Error states)
+    await waitForDriveState(page, '💿', 30000);
     const ejectBtn = page.locator('.drive-card__action-row .btn:has-text("Eject")').first();
     await expect(ejectBtn).toBeVisible({ timeout: 10000 });
     await expect(ejectBtn).toBeEnabled();
