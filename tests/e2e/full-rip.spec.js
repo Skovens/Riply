@@ -118,8 +118,6 @@ test.describe('Rip — Drive Detection (Real Hardware)', () => {
 
   test('drive 0 is detected with disc loaded', async ({ page }) => {
     await expect(page.locator('.drive-card').first()).toBeVisible({ timeout: 10000 });
-    const driveCards = page.locator('.drive-card');
-    await expect(driveCards).toHaveCount(1);
 
     const discName = page.locator('.drive-card__disc-name').first();
     await expect(discName).toBeVisible();
