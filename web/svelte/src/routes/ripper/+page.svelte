@@ -150,13 +150,7 @@
 
     if (action === 'complete') {
       drives = drives.map(d => d.index === idx ? { ...d, state: 'Complete' } : d);
-      const dest = data.dest || '';
-      if (dest) {
-        const folderName = dest.split('/').pop() || '';
-        if (folderName) {
-          // Auto-naming already happened, just show complete
-        }
-      }
+      // Rip complete but NOT moved - stays in temp until user accepts naming
       setTimeout(() => {
         ripProgress = Object.fromEntries(Object.entries(ripProgress).filter(([k]) => k !== String(idx)));
       }, 5000);
@@ -292,6 +286,35 @@
       autoripDrives = await ripperApi.toggleAutorip(index);
     } catch (e) {
       console.error(`Failed to toggle autorip on drive ${index}:`, e);
+    }
+  }
+
+  // ── Accept/Reject Naming ───────────────────────────────────
+
+  async function acceptNaming(index) {
+    try {
+      const result = await ripperApi.acceptNaming(index);
+      console.log(`Rip ${index} moved to:`, result.data);
+      // Remove from unfinished titles
+      ripNaming = Object.fromEntries(
+        Object.entries(ripNaming).filter(([k]) => k !== String(index))
+      );
+      fetchDrives();
+    } catch (e) {
+      console.error(`Failed to accept naming for drive ${index}:`, e);
+    }
+  }
+
+  async function rejectNaming(index) {
+    try {
+      await ripperApi.rejectNaming(index);
+      // Remove from unfinished titles
+      ripNaming = Object.fromEntries(
+        Object.entries(ripNaming).filter(([k]) => k !== String(index))
+      );
+      fetchDrives();
+    } catch (e) {
+      console.error(`Failed to reject naming for drive ${index}:`, e);
     }
   }
 
@@ -507,6 +530,25 @@
                     Cancel
                   </button>
                 </Tooltip>
+              {/if}
+
+              <!-- Accept button (for completed rips with naming) -->
+              {#if drive.state === 'Complete' && ripNaming[drive.index] && !drive.derived_name}
+                <button
+                  class="btn btn--success btn--sm"
+                  onclick={() => acceptNaming(drive.index)}
+                  title="Accept naming and move to library"
+                >
+                  Accept
+                </button>
+              {:else}
+                <button
+                  class="btn btn--success btn--sm btn--disabled"
+                  disabled
+                  title="Accept naming"
+                >
+                  Accept
+                </button>
               {/if}
 
               <!-- Eject button -->

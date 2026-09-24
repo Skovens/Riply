@@ -46,4 +46,16 @@ export const ripperApi = {
       method: 'POST',
     });
   },
+
+  acceptNaming(index: number) {
+    return request<string>(`/v1/ripper/drives/${index}/accept`, {
+      method: 'POST',
+    });
+  },
+
+  rejectNaming(index: number) {
+    return request<void>(`/v1/ripper/drives/${index}/reject`, {
+      method: 'POST',
+    });
+  },
 };
