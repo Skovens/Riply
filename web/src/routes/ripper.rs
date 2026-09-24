@@ -612,25 +612,30 @@ pub async fn start_rip(
         // Remove from active rips (whether success or error)
         state_clone.active_rips.write().await.remove(&index);
 
-        // Post-rip: concurrent autodetection during rip is done above;
-        // now handle the result
-        if let Ok(()) = rip_result {
-            // Successful rip — attempt auto-naming and duration verification
-            let resolved_name = if let Some(ref disc) = disc_name {
-                resolve_rip_title_with_duration(disc, &temp_folder, searcher.as_deref()).await
-            } else {
-                (String::new(), None)
-            };
+        // Post-rip: move to Organizer (non-blocking — must complete regardless of naming)
+        let move_handle = if let Ok(()) = rip_result {
+            // Successful rip — attempt auto-naming and duration verification (non-blocking)
+            if let Some(ref disc) = disc_name {
+                let searcher_clone = searcher.clone();
+                let sse_clone = sse.clone();
+                let temp_folder_clone = temp_folder.clone();
+                let index_clone = index;
+                let disc_name_clone = disc.clone();
 
-            if !resolved_name.0.is_empty() {
-                let year = resolved_name.1.map(|y| y as u32);
-                sse.send_json(json!({"kind":"rip","action":"named","index":index,"data":{"title":resolved_name.0,"year":year,"type":"movie"}}));
-            } else {
-                sse.send_json(json!({"kind":"rip","action":"naming_failed","index":index,"data":{}}));
+                // Spawn auto-naming as a separate task so it doesn't block the move
+                tokio::spawn(async move {
+                    let resolved = resolve_rip_title_with_duration(&disc_name_clone, &temp_folder_clone, searcher_clone.as_deref()).await;
+                    if !resolved.0.is_empty() {
+                        let year = resolved.1.map(|y| y as u32);
+                        sse_clone.send_json(json!({"kind":"rip","action":"named","index":index_clone,"data":{"title":resolved.0,"year":year,"type":"movie"}}));
+                    } else {
+                        sse_clone.send_json(json!({"kind":"rip","action":"naming_failed","index":index_clone,"data":{}}));
+                    }
+                });
             }
 
-            // Move to Organizer scan directory for processing
-            // Priority: user-set name > auto-detected name > raw disc name
+            // Move to Organizer scan directory for processing (blocking — must complete)
+            // Priority: user-set name > auto-detected name (from disc name) > raw disc name
             let organizer_dir = {
                 let config = state_clone.config.read().await;
                 config
@@ -639,29 +644,23 @@ pub async fn start_rip(
                     .unwrap_or_else(|| ".".to_string())
             };
 
-            let folder_name = {
-                // Check for user-set name first
-                let user_name = {
-                    let guard = state_clone.disc_names.read().await;
-                    guard.get(&index).map(|info| info.final_name.clone())
-                };
-                if let Some(name) = user_name {
-                    name
-                } else if !resolved_name.0.is_empty() {
-                    let title = &resolved_name.0;
-                    match resolved_name.1 {
-                        Some(y) => format!("{} ({})", title, y),
-                        None => title.clone(),
-                    }
-                } else {
-                    disc_name.clone().unwrap_or_else(|| format!("Disc_{}", index))
-                }
-            };
+            // Use disc name for folder naming (auto-naming is separate/non-blocking)
+            let folder_name = disc_name.clone().unwrap_or_else(|| format!("Disc_{}", index));
             let final_dest = std::path::Path::new(&organizer_dir).join(&folder_name);
             let final_dest_str = apply_copy_n(&final_dest).to_string_lossy().to_string();
 
-            // Use copy+delete instead of rename to handle cross-device links
-            // (e.g., /tmp/riply/0 -> ./Speed when they're on different filesystems)
+            Some((temp_folder.clone(), final_dest_str))
+        } else {
+            // Rip failed — clean up temp folder
+            info!(rip_folder = %temp_folder, "Cleaning up failed rip");
+            let _ = std::fs::remove_dir_all(&temp_folder);
+            sse.send_json(json!({"kind":"rip","action":"message","index":index,"data":{"text":"Rip failed, cleaned up"}}));
+            sse.send_json(json!({"kind":"drive","action":"updated","index":index,"data":{}}));
+            None
+        };
+
+        // Perform the move (if rip succeeded)
+        if let Some((temp_folder, final_dest_str)) = move_handle {
             let move_result = if std::fs::rename(&temp_folder, &final_dest_str).is_err() {
                 warn!(
                     from = %temp_folder,
@@ -693,13 +692,6 @@ pub async fn start_rip(
                     sse.send_json(json!({"kind":"drive","action":"updated","index":index,"data":{}}));
                 }
             }
-        } else {
-            // Rip failed — clean up temp folder
-            info!(rip_folder = %temp_folder, "Cleaning up failed rip");
-            let _ = std::fs::remove_dir_all(&temp_folder);
-            sse.send_json(json!({"kind":"rip","action":"message","index":index,"data":{"text":"Rip failed, cleaned up"}}));
-            // Tell UI to refresh drive state
-            sse.send_json(json!({"kind":"drive","action":"updated","index":index,"data":{}}));
         }
     });
 
