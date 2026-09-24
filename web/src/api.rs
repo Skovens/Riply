@@ -70,6 +70,9 @@ pub struct AppState {
     /// User-set or derived disc names, keyed by drive index.
     /// Session-only, in-memory.
     pub disc_names: RwLock<HashMap<usize, DiscNameInfo>>,
+    /// Drives that have completed rips (MakeMKV may still report "Ripping" state).
+    /// Used to override drive state to "Ready" for UI purposes.
+    pub completed_rips: RwLock<HashSet<usize>>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -260,6 +263,7 @@ mod tests {
             healthchecks_handle: RwLock::new(None),
             metrics: Metrics::default(),
             disc_names: RwLock::new(HashMap::new()),
+            completed_rips: RwLock::new(HashSet::new()),
         };
         Arc::new(state)
     }

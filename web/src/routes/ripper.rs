@@ -119,9 +119,16 @@ pub async fn list_drives(
         Ok(mut drives) => {
             let rips = state.active_rips.read().await;
             let disc_names = state.disc_names.read().await;
+            let completed = state.completed_rips.read().await;
             for drive in &mut drives {
                 if rips.contains_key(&drive.index) {
                     drive.state = DriveState::Ripping;
+                } else if completed.contains(&drive.index) {
+                    // Override MakeMKV's "Ripping" state to "Ready" for drives
+                    // that have completed rips (MakeMKV may not update immediately)
+                    if drive.state == DriveState::Ripping {
+                        drive.state = DriveState::Ready;
+                    }
                 }
                 // Apply user-set name if it exists
                 if let Some(info) = disc_names.get(&drive.index) {
@@ -733,6 +740,9 @@ pub async fn start_rip(
             // Rip completed successfully — files are in temp folder
             info!(rip_folder = %temp_folder, "Rip completed successfully, files in temp");
             
+            // Track this drive as having a completed rip (to override MakeMKV state)
+            state_clone.completed_rips.write().await.insert(index);
+            
             // Send auto-naming result (if available)
             if let Some(ref disc) = disc_name {
                 let searcher_clone = searcher.clone();
@@ -825,6 +835,11 @@ pub async fn eject_disc(
         .map_err(|e| WebError::Internal(e.to_string()))?;
 
     info!(drive = index, device = %device_path_log, "Ejected disc");
+    
+    // Clean up completed rips tracking when disc is ejected
+    state.completed_rips.write().await.remove(&index);
+    state.disc_names.write().await.remove(&index);
+    
     Ok(Json(ApiResponse::ok(format!(
         "Ejected disc from drive {}",
         index

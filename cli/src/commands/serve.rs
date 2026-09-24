@@ -49,6 +49,7 @@ pub async fn serve(
         healthchecks_handle: RwLock::new(None),
         metrics: web::metrics::Metrics::default(),
         disc_names: RwLock::new(HashMap::new()),
+        completed_rips: RwLock::new(HashSet::new()),
     });
 
     // Start the auto-rip monitor. It watches drives that have auto-rip enabled
