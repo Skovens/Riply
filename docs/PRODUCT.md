@@ -23,15 +23,21 @@ Insert disc → auto-detect name → TMDb lookup → show thumbnail + name
     ↓
 Click Rip (or autorip triggers) → rip to temp folder
     ↓
-During rip: TMDb lookup runs in background
+During rip: TMDb lookup runs in background (independent of rip)
     ↓
 On completion:
-  If named → move to library with Jellyfin naming
-  If not named → keep in temp, show in unfinished list below drives
+  If named → show in naming list below drives with suggested name
+  If not named → show in naming list with "naming failed" message
+    ↓
+User clicks to accept/reject name (can do this anytime — during rip via thumbnail,
+or after rip via the naming list)
+    ↓
+User accepts name → rip folder moved from temp to final destination
 ```
 
 **What the user sees:** Drive cards with thumbnails, progress bars, auto-detected names.
-Click rip, walk away, come back to organized folders.
+Click rip, walk away, come back to a naming list below the drives. Accept a name
+to move the rip to its final destination.
 
 ### Flow 2: Organize (batch, folder-by-folder)
 
@@ -78,17 +84,20 @@ That's the end state. The program gets you there.
 ## Data Flow
 
 ```
-disc → MakeMKV → temp/{index}/ → TMDb lookup → library/{jellyfin}/
-                              ↘ unfinished list (if not named) ↗
+disc → MakeMKV → temp/{index}/ → TMDb lookup → naming list (if not accepted)
+                              ↘ user accepts → library/{jellyfin}/
 ```
 
-Three staging areas:
+Two staging areas:
 
 | Area | Path | Lifespan | Purpose |
 |------|------|----------|---------|
-| **Temp** | `/tmp/riply/0/` | Short-lived | Raw rip output, cleaned up by age |
-| **Staging** (organizer_dir) | configurable | Until reviewed | Post-rip, pre-review, name may be raw or auto-detected |
+| **Temp** | `/tmp/riply/0/` | Until moved or age-cleanup | Raw rip output, stays here until user accepts a name |
 | **Library** | `movies_dir` / `tv_dir` | Permanent | Final Jellyfin-compliant structure |
+
+No staging/organizer directory for post-rip content — rips remain in temp until the user
+explicitly accepts a name and triggers the move. The Organizer pane is a separate batch tool
+for existing folders, not part of the rip pipeline.
 
 Network paths are supported for all three (any path with read/write permissions).
 
@@ -127,15 +136,25 @@ Per-drive toggle. When enabled:
 - If a rip is already in progress when autorip triggers, the current rip finishes,
   then ejects, then auto-starts the next disc
 
-### Unfinished Titles
+### Naming List (Global, Always Visible)
 
-Rips that fail to auto-name stay in the Rip view, not the Organizer. Below the drive cards,
-an "Unfinished" list shows:
+Below all drive cards, a global naming list shows completed rips that need user attention.
+The list is always visible — empty when no rips have been completed, populated as rips finish.
 
-- **Named successfully:** `Original Disc Title → Auto-Detected Title (Year)`
+Each entry shows:
+
+- **Named successfully:** `Original Disc Title → Auto-Detected Title (Year)` with thumbnail
 - **Naming failed:** `Original Disc Title → Media naming failed, please select title`
 
-The user can click to open a search popup and manually name the disc.
+The user can:
+- Click the entry to open a search popup and manually name the disc
+- Click "Accept" to move the rip folder from temp to the final library destination
+- Click "Reject" to leave the rip in temp (or mark for quarantine)
+
+**During rip:** The naming list is empty, but the user can still interact with naming by
+clicking on the rip progress thumbnail/button on the drive card.
+
+**After rip:** The naming result (success or failure) appears in the global list.
 
 ---
 
@@ -149,6 +168,7 @@ The user can click to open a search popup and manually name the disc.
    "Klovn" suggests "Klovn S01E02" (inferred from the previous rip on the same drive)
 4. **User confirmation** — always required. The UI shows the suggested name with a
    thumbnail. The user can accept, search for a different match, or reject.
+   Auto-naming starts at disc insertion (not rip start), giving instant visual feedback.
 
 ### Search popup interaction
 
@@ -167,6 +187,20 @@ When the user clicks a thumbnail or gray placeholder:
 | TMDb not found | Gray placeholder + "media title not found" |
 | Session hint available | Suggested name pre-filled, user can accept or change |
 | No TMDb/OMDb configured | Manual name entry mode — user types title, year, season, episode |
+
+### Destination Folder Naming (User-Confirmed)
+
+Destination folder naming uses the **user-confirmed name** (not auto-detected).
+
+**Movies:**
+- Parent folder: `{User-Confirmed Title} ({Year})/`
+- Main file (biggest file on disc): `{Title}.{ext}` (largest file's title)
+- Everything else: `{User-Confirmed Title} ({Year})/Extras/`
+
+**TV Shows:**
+- Parent folder: `{Show} ({Year})/Season {NN}/`
+- Episodes (similarly-sized files): `{Show} - S{NN}E{NN}.{ext}`
+- Odd-sized files: `Season {NN}/Extras/`
 
 ### What "correctly named" means
 
@@ -262,7 +296,7 @@ folders individually, then click "Accept All" to move all accepted folders at on
 When TMDb fails to find a disc (obscure movie, wrong title, API down):
 
 - The rip stays in the temp folder with the raw disc name
-- It appears in the **unfinished list** in the Rip view (not the Organizer)
+- It appears in the **naming list** in the Rip view
 - It can be cleaned up by age (configurable, default 7 days)
 - The user can click to open a search popup and manually name the disc
 - If no TMDb/OMDb API key is configured, the user enters the name manually

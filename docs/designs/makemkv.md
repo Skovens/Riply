@@ -336,46 +336,65 @@ Per ADR-025 (Three-Window Architecture), the Rip window handles disc ripping wit
 ### Flow
 
 ```
-User clicks "Rip" → MakemkvBackend.start_rip()
+Disc inserted → Auto-naming starts (TMDb lookup on disc name)
+                    ↓
+              Drive card shows: thumbnail + name (if found) or placeholder (if not)
+                    ↓
+              User clicks "Rip" → MakemkvBackend.start_rip()
                     ↓
               Files rip to tmp folder (configurable, default /tmp/riply)
                     ↓
               Concurrent: TMDb lookup runs on disc name
-              (independent of rip, no overlap)
+              (independent of rip — naming starts at disc insertion, not rip start)
                     ↓
               SSE: rip:named or rip:naming_failed (live feedback)
                     ↓
               Rip completes → SSE: rip:complete
                     ↓
-              Post-rip move (files moved to final destination):
+              Naming result appears in global naming list below drives:
+              - Named: "Original Title → Auto-Detected Title (Year)" with thumbnail
+              - Failed: "Original Title → Media naming failed, please select title"
+                    ↓
+              User accepts name → SSE: rip:accept_requested
+                    ↓
+              Files moved from temp to final destination:
               - Movie: biggest file → {Title} ({Year})/
                 rest → {Title} ({Year})/Extras/
               - TV: user confirms show/season → {Show} ({Year})/Season {NN}/
                 files → {Show} - S{NN}E{NN}.{ext}
                 extras → Season {NN}/Extras/
-              - Unidentified: files stay in tmp with disc name
+              - Unidentified: files stay in temp until user names them
                     ↓
               SSE: rip:renamed (if moved)
               Drive card: Complete / Error / Ready
 ```
 
-### Auto-Naming (Concurrent with Rip)
+### Auto-Naming (Starts at Disc Insertion, Not Rip Start)
 
-TMDb lookup begins at rip start (uses disc name from drive info):
+TMDb lookup begins as soon as a disc is detected in the drive (uses disc name from drive info):
 1. Parse disc name for title + year (e.g., `INCEPTION_2010` → `Inception`, 2010)
 2. Search TMDb with parsed title
 3. If match found → send `rip:named:{index}:{type}:{title} ({year})` via SSE (`type` = movie or tv)
 4. If no match → send `rip:naming_failed:{index}` via SSE
 5. Drive card shows live: `"Disc: Inception → Found: Inception (2010)"` or `"Disc: Inception → Not found"`
+6. User can click the rip thumbnail/button during rip to interact with naming
 
-### Post-Rip Move
+### Naming List (Global, Always Visible)
 
-At rip completion (after `rip:complete`):
+Below all drive cards, a global naming list shows completed rips:
+- Always visible — empty when no rips completed, populated as rips finish
+- Each entry: original name → auto-detected name (or "naming failed" message)
+- User can accept (triggers move) or reject (leaves in temp)
+- User can click to open search popup for manual naming
+
+### Post-Rip Move (User-Triggered, Not Automatic)
+
+When user accepts a name (via naming list or during rip):
 1. Detect biggest file = main title
-2. Move files based on media type (movie or TV show):
+2. Move files from temp to final destination based on media type:
    - **Movie:** `{Title} ({Year})/` with main file `{Title}.{ext}`, extras in `Extras/`
    - **TV Show:** `{Show} ({Year})/Season {NN}/` with files `{Show} - S{NN}E{NN}.{ext}`, extras in `Season {NN}/Extras/`
-   - **Unidentified:** files stay in tmp with disc name
+   - **Unidentified:** files stay in temp until user provides a name
 3. Apply "(Copy N)" if destination already exists
 4. Send `rip:renamed:{index}:{new_name}` via SSE
 5. Drive card ends in terminal state: `Complete`, `Error`, or `Ready` (if unidentified)
