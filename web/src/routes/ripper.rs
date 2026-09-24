@@ -119,8 +119,12 @@ pub async fn list_drives(
         Ok(mut drives) => {
             let rips = state.active_rips.read().await;
             let disc_names = state.disc_names.read().await;
+            let naming_completed = state.naming_completed.read().await;
             let config = state.config.read().await;
             let temp_dir = config.temp_directory.clone();
+            let searcher = state.searcher.clone();
+            let sse = &state.sse;
+            
             for drive in &mut drives {
                 // Priority: temp folder > active rips > MakeMKV state
                 // Temp folder existence is the most reliable indicator of completed rip
@@ -140,6 +144,44 @@ pub async fn list_drives(
                 // Apply user-set name if it exists
                 if let Some(info) = disc_names.get(&drive.index) {
                     drive.derived_name = Some(info.final_name.clone());
+                }
+                
+                // Trigger auto-naming if drive has a disc but no naming info yet
+                // This handles the case where disc was inserted before server/page load
+                // Only trigger once per drive (tracked in naming_completed)
+                if drive.disc_name.is_some() 
+                    && drive.state != DriveState::Ripping 
+                    && drive.state != DriveState::Empty
+                    && !naming_completed.contains(&drive.index)
+                {
+                    let has_naming_info = disc_names.contains_key(&drive.index);
+                    let temp_folder_exists = std::path::Path::new(&temp_folder).exists();
+                    
+                    if !has_naming_info && temp_folder_exists {
+                        // Drive has completed rip but no naming info — trigger auto-naming
+                        let sse_clone = sse.clone();
+                        let index_clone = drive.index;
+                        let disc_name = drive.disc_name.clone();
+                        let temp_dir = temp_dir.clone();
+                        let searcher = searcher.clone();
+                        let state_clone = Arc::clone(&state);
+                        
+                        tokio::spawn(async move {
+                            // Mark as completed first to prevent duplicate triggers
+                            state_clone.naming_completed.write().await.insert(index_clone);
+                            
+                            if let (Some(disc_name), Some(searcher)) = (disc_name, searcher) {
+                                let temp_folder = format!("{}/{}", temp_dir, index_clone);
+                                let resolved = resolve_rip_title_with_duration(&disc_name, &temp_folder, Some(&*searcher)).await;
+                                if !resolved.0.is_empty() {
+                                    let year = resolved.1.map(|y| y as u32);
+                                    sse_clone.send_json(json!({"kind":"rip","action":"named","index":index_clone,"data":{"title":resolved.0,"year":year,"type":"movie"}}));
+                                } else {
+                                    sse_clone.send_json(json!({"kind":"rip","action":"naming_failed","index":index_clone,"data":{}}));
+                                }
+                            }
+                        });
+                    }
                 }
             }
             Ok(Json(ApiResponse::ok(drives)))

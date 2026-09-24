@@ -73,6 +73,9 @@ pub struct AppState {
     /// Drives that have completed rips (MakeMKV may still report "Ripping" state).
     /// Used to override drive state to "Ready" for UI purposes.
     pub completed_rips: RwLock<HashSet<usize>>,
+    /// Drives that have already had auto-naming triggered.
+    /// Prevents duplicate naming tasks when list_drives() is called repeatedly.
+    pub naming_completed: RwLock<HashSet<usize>>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -264,6 +267,7 @@ mod tests {
             metrics: Metrics::default(),
             disc_names: RwLock::new(HashMap::new()),
             completed_rips: RwLock::new(HashSet::new()),
+            naming_completed: RwLock::new(HashSet::new()),
         };
         Arc::new(state)
     }
