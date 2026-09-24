@@ -129,7 +129,7 @@
     const { kind, action, index: idx, data } = event;
 
     // Drive events
-    if (kind === 'drive' && (action === 'inserted' || action === 'ejected' || action === 'removed')) {
+    if (kind === 'drive' && (action === 'inserted' || action === 'ejected' || action === 'removed' || action === 'updated')) {
       fetchDrives();
       return;
     }

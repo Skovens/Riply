@@ -683,10 +683,14 @@ pub async fn start_rip(
                         "Post-rip move to Organizer completed"
                     );
                     sse.send_json(json!({"kind":"rip","action":"complete","index":index,"data":{"dest":final_dest_str}}));
+                    // Tell UI to refresh drive state (reverts from ⚡ Ripping to 💿 Ready)
+                    sse.send_json(json!({"kind":"drive","action":"updated","index":index,"data":{}}));
                 }
                 Err(e) => {
                     warn!(error = %e, from = %temp_folder, to = %final_dest_str, "Post-rip move failed");
                     sse.send_json(json!({"kind":"rip","action":"message","index":index,"data":{"text":format!("Move failed: {}", e)}}));
+                    // Tell UI to refresh drive state
+                    sse.send_json(json!({"kind":"drive","action":"updated","index":index,"data":{}}));
                 }
             }
         } else {
@@ -694,6 +698,8 @@ pub async fn start_rip(
             info!(rip_folder = %temp_folder, "Cleaning up failed rip");
             let _ = std::fs::remove_dir_all(&temp_folder);
             sse.send_json(json!({"kind":"rip","action":"message","index":index,"data":{"text":"Rip failed, cleaned up"}}));
+            // Tell UI to refresh drive state
+            sse.send_json(json!({"kind":"drive","action":"updated","index":index,"data":{}}));
         }
     });
 

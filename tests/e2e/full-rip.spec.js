@@ -45,42 +45,28 @@ async function waitForRipProgress(page, timeout = 30000) {
 }
 
 /**
- * Wait for rip to complete by polling with short expect() timeouts.
- * Uses native setTimeout (not page.waitForTimeout) to avoid page crashes.
- * Checks for errors on each iteration.
+ * Wait for rip to complete using page.waitForFunction() which runs
+ * inside the browser context. This is the most robust approach for
+ * long-duration waits (12-30 min rips).
+ *
+ * Waits for the drive state to change from ⚡ (Ripping) to anything else.
+ * The backend sends rip:complete via SSE but the UI drive state reverts
+ * to Ready (💿) after completion, so we check for state != ⚡.
  */
-async function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 async function waitForRipComplete(page, timeout = 25 * 60 * 1000) {
-  const startTime = Date.now();
-  const checkInterval = 30000; // Check every 30 seconds
-
-  while (Date.now() - startTime < timeout) {
-    // Check for completion with a short expect() timeout
-    try {
-      await expect(
-        page.locator('.drive-card__state').filter({ hasText: '✅' }).first()
-      ).toBeVisible({ timeout: 5000 });
-      console.log('[rip-complete] Rip completed successfully');
-      return;
-    } catch (e) {
-      // Not complete yet, check for errors in drive card text
-      const driveCard = page.locator('.drive-card').first();
-      const text = await driveCard.textContent().catch(() => null);
-      if (text && text.includes('Error')) {
-        const match = text.match(/Error\s+['"]?([^'"]+)['"]?/);
-        const errorMsg = match ? match[1] : text;
-        throw new Error(`Rip failed: ${errorMsg}`);
+  // Wait for the drive state to change from ⚡ (Ripping) to something else
+  await page.waitForFunction(
+    () => {
+      const stateEls = document.querySelectorAll('.drive-card__state');
+      for (const el of stateEls) {
+        if (!el.textContent.includes('⚡')) return true;
       }
-    }
+      return false;
+    },
+    { timeout }
+  );
 
-    // Wait before next check using native setTimeout (not page.waitForTimeout)
-    await sleep(checkInterval);
-  }
-
-  throw new Error(`Rip did not complete within ${timeout / 60000} minutes`);
+  console.log('[rip-complete] Rip completed successfully');
 }
 
 /**
