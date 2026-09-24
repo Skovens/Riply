@@ -157,6 +157,8 @@ pub async fn list_drives(
                     let has_naming_info = disc_names.contains_key(&drive.index);
                     let temp_folder_exists = std::path::Path::new(&temp_folder).exists();
                     
+                    info!(drive = drive.index, has_naming_info, temp_folder_exists, "Auto-naming check");
+                    
                     if !has_naming_info && temp_folder_exists {
                         // Drive has completed rip but no naming info — trigger auto-naming
                         let sse_clone = sse.clone();
@@ -166,19 +168,26 @@ pub async fn list_drives(
                         let searcher = searcher.clone();
                         let state_clone = Arc::clone(&state);
                         
+                        info!(drive = drive.index, "Spawning auto-naming task");
+                        
                         tokio::spawn(async move {
                             // Mark as completed first to prevent duplicate triggers
                             state_clone.naming_completed.write().await.insert(index_clone);
                             
                             if let (Some(disc_name), Some(searcher)) = (disc_name, searcher) {
                                 let temp_folder = format!("{}/{}", temp_dir, index_clone);
+                                info!(drive = index_clone, disc_name = %disc_name, "Starting TMDb lookup");
                                 let resolved = resolve_rip_title_with_duration(&disc_name, &temp_folder, Some(&*searcher)).await;
                                 if !resolved.0.is_empty() {
                                     let year = resolved.1.map(|y| y as u32);
+                                    info!(drive = index_clone, title = %resolved.0, year, "Auto-naming succeeded");
                                     sse_clone.send_json(json!({"kind":"rip","action":"named","index":index_clone,"data":{"title":resolved.0,"year":year,"type":"movie"}}));
                                 } else {
+                                    info!(drive = index_clone, "Auto-naming failed - no title resolved");
                                     sse_clone.send_json(json!({"kind":"rip","action":"naming_failed","index":index_clone,"data":{}}));
                                 }
+                            } else {
+                                info!(drive = index_clone, "Auto-naming skipped - no searcher configured");
                             }
                         });
                     }
@@ -792,24 +801,41 @@ pub async fn start_rip(
             // Track this drive as having a completed rip (to override MakeMKV state)
             state_clone.completed_rips.write().await.insert(index);
             
-            // Send auto-naming result (if available)
+            // Run auto-naming synchronously (with timeout) so the `rip:named` event
+            // fires before `rip:complete`. This ensures the frontend receives both
+            // events in the correct order and the UI can show the naming info.
             if let Some(ref disc) = disc_name {
                 let searcher_clone = searcher.clone();
                 let sse_clone = sse.clone();
                 let temp_folder_clone = temp_folder.clone();
                 let index_clone = index;
-                let disc_name_clone = disc.clone();
-
-                // Spawn auto-naming as a separate task (non-blocking)
-                tokio::spawn(async move {
-                    let resolved = resolve_rip_title_with_duration(&disc_name_clone, &temp_folder_clone, searcher_clone.as_deref()).await;
-                    if !resolved.0.is_empty() {
-                        let year = resolved.1.map(|y| y as u32);
-                        sse_clone.send_json(json!({"kind":"rip","action":"named","index":index_clone,"data":{"title":resolved.0,"year":year,"type":"movie"}}));
-                    } else {
-                        sse_clone.send_json(json!({"kind":"rip","action":"naming_failed","index":index_clone,"data":{}}));
+                
+                // Use tokio::time::timeout to avoid blocking forever
+                let naming_result = tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    async move {
+                        if let Some(ref searcher) = searcher_clone {
+                            resolve_rip_title_with_duration(disc, &temp_folder_clone, Some(&**searcher)).await
+                        } else {
+                            (String::new(), None)
+                        }
                     }
-                });
+                ).await;
+                
+                match naming_result {
+                    Ok((title, year)) => {
+                        if !title.is_empty() {
+                            let year_u32 = year.map(|y| y as u32);
+                            sse_clone.send_json(json!({"kind":"rip","action":"named","index":index_clone,"data":{"title":title,"year":year_u32,"type":"movie"}}));
+                        } else {
+                            sse_clone.send_json(json!({"kind":"rip","action":"naming_failed","index":index_clone,"data":{}}));
+                        }
+                    }
+                    Err(_) => {
+                        // Timeout — don't block the UI
+                        info!(drive = index, "Auto-naming timed out after 30s");
+                    }
+                }
             }
             
             // Tell UI to refresh drive state (reverts from ⚡ Ripping to 💿 Ready)
