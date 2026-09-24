@@ -538,6 +538,28 @@ fn apply_copy_n(path: &std::path::Path) -> std::path::PathBuf {
     path.to_path_buf()
 }
 
+/// Recursively copy a directory from src to dst.
+/// Used as a fallback when std::fs::rename fails due to cross-device links.
+fn copy_dir_all(src: impl AsRef<std::path::Path>, dst: impl AsRef<std::path::Path>) -> Result<(), String> {
+    std::fs::create_dir_all(&dst).map_err(|e| format!("Failed to create destination directory: {}", e))?;
+    
+    for entry in std::fs::read_dir(src).map_err(|e| format!("Failed to read source directory: {}", e))? {
+        let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+        let file_type = entry.file_type().map_err(|e| format!("Failed to get file type: {}", e))?;
+        let src_path = entry.path();
+        let dst_path = dst.as_ref().join(entry.file_name());
+        
+        if file_type.is_dir() {
+            copy_dir_all(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)
+                .map_err(|e| format!("Failed to copy file: {}", e))?;
+        }
+    }
+    
+    Ok(())
+}
+
 pub async fn start_rip(
     State(state): State<Arc<AppState>>,
     Path(index): Path<usize>,
@@ -638,7 +660,22 @@ pub async fn start_rip(
             let final_dest = std::path::Path::new(&organizer_dir).join(&folder_name);
             let final_dest_str = apply_copy_n(&final_dest).to_string_lossy().to_string();
 
-            match std::fs::rename(&temp_folder, &final_dest_str) {
+            // Use copy+delete instead of rename to handle cross-device links
+            // (e.g., /tmp/riply/0 -> ./Speed when they're on different filesystems)
+            let move_result = if std::fs::rename(&temp_folder, &final_dest_str).is_err() {
+                warn!(
+                    from = %temp_folder,
+                    to = %final_dest_str,
+                    "std::fs::rename failed (cross-device?), falling back to copy+delete"
+                );
+                copy_dir_all(&temp_folder, &final_dest_str).and_then(|_| {
+                    std::fs::remove_dir_all(&temp_folder).map_err(|e| e.to_string())
+                })
+            } else {
+                Ok(())
+            };
+
+            match move_result {
                 Ok(()) => {
                     info!(
                         from = %temp_folder,
