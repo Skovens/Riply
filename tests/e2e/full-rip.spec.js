@@ -45,18 +45,42 @@ async function waitForRipProgress(page, timeout = 30000) {
 }
 
 /**
- * Wait for rip to complete using Playwright's expect() with long timeout.
- * This is the ONLY reliable way to wait 12-30 minutes without crashing the page.
- * Uses expect().toBeVisible() which handles long waits internally via robust polling.
+ * Wait for rip to complete by polling with short expect() timeouts.
+ * Uses native setTimeout (not page.waitForTimeout) to avoid page crashes.
+ * Checks for errors on each iteration.
  */
-async function waitForRipComplete(page, timeout = 25 * 60 * 1000) {
-  // Wait for completion (✅) state using expect() which handles long waits gracefully
-  await expect(
-    page.locator('.drive-card__state').filter({ hasText: '✅' }).first(),
-    `Rip did not complete within ${timeout / 60000} minutes. If this times out, check the drive card for error messages.`
-  ).toBeVisible({ timeout });
+async function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
-  console.log('[rip-complete] Rip completed successfully');
+async function waitForRipComplete(page, timeout = 25 * 60 * 1000) {
+  const startTime = Date.now();
+  const checkInterval = 30000; // Check every 30 seconds
+
+  while (Date.now() - startTime < timeout) {
+    // Check for completion with a short expect() timeout
+    try {
+      await expect(
+        page.locator('.drive-card__state').filter({ hasText: '✅' }).first()
+      ).toBeVisible({ timeout: 5000 });
+      console.log('[rip-complete] Rip completed successfully');
+      return;
+    } catch (e) {
+      // Not complete yet, check for errors in drive card text
+      const driveCard = page.locator('.drive-card').first();
+      const text = await driveCard.textContent().catch(() => null);
+      if (text && text.includes('Error')) {
+        const match = text.match(/Error\s+['"]?([^'"]+)['"]?/);
+        const errorMsg = match ? match[1] : text;
+        throw new Error(`Rip failed: ${errorMsg}`);
+      }
+    }
+
+    // Wait before next check using native setTimeout (not page.waitForTimeout)
+    await sleep(checkInterval);
+  }
+
+  throw new Error(`Rip did not complete within ${timeout / 60000} minutes`);
 }
 
 /**
