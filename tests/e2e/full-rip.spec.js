@@ -45,41 +45,36 @@ async function waitForRipProgress(page, timeout = 30000) {
 }
 
 /**
- * Wait for rip to complete using Playwright's built-in expect() with long timeout.
- * This is much more robust than manual polling with waitForTimeout() which causes
- * page crashes during long-duration rips (12-30 min).
- * Logs progress milestones via a non-blocking interval.
+ * Wait for rip to complete or detect failure using Playwright's built-in expect() with long timeout.
+ * Checks for completion (✅) and also polls for error messages in the drive card.
  */
 async function waitForRipComplete(page, timeout = 25 * 60 * 1000) {
-  let lastPct = 0;
+  const startTime = Date.now();
+  const pollInterval = 10000; // Check for errors every 10 seconds
 
-  // Check for completion using expect() which handles long waits gracefully
-  await expect(
-    page.locator('.drive-card__state').filter({ hasText: '✅' }).first(),
-    `Rip did not complete within ${timeout / 60000} minutes`
-  ).toBeVisible({ timeout });
+  // Poll for completion or error
+  while (Date.now() - startTime < timeout) {
+    // Check for completion first
+    const isComplete = await page.locator('.drive-card__state').filter({ hasText: '✅' }).isVisible().catch(() => false);
+    if (isComplete) {
+      console.log('[rip-complete] Rip completed successfully');
+      return;
+    }
 
-  // Progress logging via setInterval (non-blocking after completion)
-  const logInterval = setInterval(() => {
-    page.locator('.drive-card__state').filter({ hasText: '⚡' }).isVisible().then(isRipping => {
-      if (!isRipping) {
-        clearInterval(logInterval);
-        return;
-      }
-      page.locator('.drive-card__progress-pct').textContent().then(text => {
-        if (text) {
-          const pct = parseInt(text.replace('%', ''), 10);
-          if (pct > lastPct && pct % 10 === 0) {
-            console.log(`[progress] ${pct}%`);
-            lastPct = pct;
-          }
-        }
-      }).catch(() => {});
-    }).catch(() => {});
-  }, 10000);
+    // Check for error in drive card text
+    const driveCard = page.locator('.drive-card').first();
+    const text = await driveCard.textContent().catch(() => null);
+    if (text && text.includes('Error')) {
+      const match = text.match(/Error\s+['"]?([^'"]+)['"]?/);
+      const errorMsg = match ? match[1] : text;
+      console.log(`[rip-error] ${errorMsg}`);
+      throw new Error(`Rip failed: ${errorMsg}`);
+    }
 
-  // Clean up interval after completion
-  setTimeout(() => clearInterval(logInterval), timeout);
+    await page.waitForTimeout(pollInterval);
+  }
+
+  throw new Error(`Rip did not complete within ${timeout / 60000} minutes`);
 }
 
 /**
