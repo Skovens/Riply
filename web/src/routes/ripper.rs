@@ -65,6 +65,8 @@ pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/v1/ripper/drives", get(list_drives))
         .route("/v1/ripper/drives/:index/rename", post(rename_disc))
+        .route("/v1/ripper/drives/:index/accept", post(accept_rip_naming))
+        .route("/v1/ripper/drives/:index/reject", post(reject_rip_naming))
         .route("/v1/ripper/status", get(ripper_status))
         .route("/v1/ripper/autorip", get(autorip_status))
         .route("/v1/ripper/autorip/:index/toggle", post(autorip_toggle))
@@ -187,6 +189,121 @@ pub async fn rename_disc(
         },
     );
 
+    Ok(Json(ApiResponse::ok(())))
+}
+
+/// Accept a rip's naming and move from temp to final destination
+pub async fn accept_rip_naming(
+    State(state): State<Arc<AppState>>,
+    Path(index): Path<usize>,
+) -> Result<Json<ApiResponse<String>>, WebError> {
+    let backend = state
+        .backend
+        .as_ref()
+        .ok_or(WebError::NotFound("No ripping backend".to_string()))?;
+
+    // Verify the drive exists and has a disc
+    let backend_clone = Arc::clone(backend);
+    let drives = tokio::task::spawn_blocking(move || backend_clone.detect_drives())
+        .await
+        .map_err(|e| WebError::Internal(format!("Task failed: {}", e)))?
+        .map_err(|e| WebError::Internal(e.to_string()))?;
+
+    let drive = drives
+        .iter()
+        .find(|d| d.index == index)
+        .ok_or_else(|| WebError::NotFound(format!("Drive {} not found", index)))?;
+
+    let disc_name = drive
+        .disc_name
+        .clone()
+        .ok_or_else(|| WebError::NotFound(format!("No disc in drive {}", index)))?;
+
+    // Get the user-set name or fall back to disc name
+    let final_name = {
+        let guard = state.disc_names.read().await;
+        guard.get(&index).map(|info| info.final_name.clone())
+    }.unwrap_or_else(|| disc_name.clone());
+
+    // Get temp folder
+    let temp_dir = {
+        let config = state.config.read().await;
+        config.temp_directory.clone()
+    };
+    let temp_folder = format!("{}/{}", temp_dir, index);
+
+    // Get library destination
+    let movies_dir = {
+        let config = state.config.read().await;
+        config.movies_directory.clone()
+    };
+
+    // Determine destination based on user-confirmed name
+    let year = if let Some(ref searcher) = state.searcher {
+        let resolved = resolve_rip_title_with_duration(&disc_name, &temp_folder, Some(&**searcher)).await;
+        resolved.1.map(|y| y as u32)
+    } else {
+        // Try to extract year from final_name
+        final_name
+            .split_whitespace()
+            .last()
+            .and_then(|s| s.trim_matches(|c| c == '(' || c == ')').parse::<u32>().ok())
+    };
+
+    let final_dest_str = if let Some(year) = year {
+        let title = final_name
+            .trim_end_matches(&format!(" ({})", year));
+        format!("{}/{} ({})/{}", movies_dir, title, year, title)
+    } else {
+        format!("{}/{}", movies_dir, final_name)
+    };
+
+    let final_dest = std::path::Path::new(&final_dest_str);
+    let final_dest_str = apply_copy_n(final_dest).to_string_lossy().to_string();
+
+    // Move files from temp to final destination
+    let move_result = if std::fs::rename(&temp_folder, &final_dest_str).is_err() {
+        warn!(
+            from = %temp_folder,
+            to = %final_dest_str,
+            "std::fs::rename failed (cross-device?), falling back to copy+delete"
+        );
+        copy_dir_all(&temp_folder, &final_dest_str).and_then(|_| {
+            std::fs::remove_dir_all(&temp_folder).map_err(|e| e.to_string())
+        })
+    } else {
+        Ok(())
+    };
+
+    match move_result {
+        Ok(()) => {
+            info!(
+                from = %temp_folder,
+                to = %final_dest_str,
+                "Rip moved to final destination"
+            );
+            // Remove from disc_names tracking
+            state.disc_names.write().await.remove(&index);
+            // Tell UI to refresh drive state
+            state.sse.send_json(json!({"kind":"rip","action":"renamed","index":index,"data":{"dest":final_dest_str}}));
+            state.sse.send_json(json!({"kind":"drive","action":"updated","index":index,"data":{}}));
+            Ok(Json(ApiResponse::ok(final_dest_str)))
+        }
+        Err(e) => {
+            warn!(error = %e, from = %temp_folder, to = %final_dest_str, "Move to final destination failed");
+            Err(WebError::Internal(format!("Move failed: {}", e)))
+        }
+    }
+}
+
+/// Reject a rip's naming (leave in temp folder)
+pub async fn reject_rip_naming(
+    State(state): State<Arc<AppState>>,
+    Path(index): Path<usize>,
+) -> Result<Json<ApiResponse<()>>, WebError> {
+    // Simply remove from disc_names tracking, leave rip in temp
+    state.disc_names.write().await.remove(&index);
+    state.sse.send_json(json!({"kind":"drive","action":"updated","index":index,"data":{}}));
     Ok(Json(ApiResponse::ok(())))
 }
 
@@ -612,9 +729,11 @@ pub async fn start_rip(
         // Remove from active rips (whether success or error)
         state_clone.active_rips.write().await.remove(&index);
 
-        // Post-rip: move to Organizer (non-blocking — must complete regardless of naming)
-        let move_handle = if let Ok(()) = rip_result {
-            // Successful rip — attempt auto-naming and duration verification (non-blocking)
+        if let Ok(()) = rip_result {
+            // Rip completed successfully — files are in temp folder
+            info!(rip_folder = %temp_folder, "Rip completed successfully, files in temp");
+            
+            // Send auto-naming result (if available)
             if let Some(ref disc) = disc_name {
                 let searcher_clone = searcher.clone();
                 let sse_clone = sse.clone();
@@ -622,7 +741,7 @@ pub async fn start_rip(
                 let index_clone = index;
                 let disc_name_clone = disc.clone();
 
-                // Spawn auto-naming as a separate task so it doesn't block the move
+                // Spawn auto-naming as a separate task (non-blocking)
                 tokio::spawn(async move {
                     let resolved = resolve_rip_title_with_duration(&disc_name_clone, &temp_folder_clone, searcher_clone.as_deref()).await;
                     if !resolved.0.is_empty() {
@@ -633,65 +752,16 @@ pub async fn start_rip(
                     }
                 });
             }
-
-            // Move to Organizer scan directory for processing (blocking — must complete)
-            // Priority: user-set name > auto-detected name (from disc name) > raw disc name
-            let organizer_dir = {
-                let config = state_clone.config.read().await;
-                config
-                    .rip_output_directory
-                    .clone()
-                    .unwrap_or_else(|| ".".to_string())
-            };
-
-            // Use disc name for folder naming (auto-naming is separate/non-blocking)
-            let folder_name = disc_name.clone().unwrap_or_else(|| format!("Disc_{}", index));
-            let final_dest = std::path::Path::new(&organizer_dir).join(&folder_name);
-            let final_dest_str = apply_copy_n(&final_dest).to_string_lossy().to_string();
-
-            Some((temp_folder.clone(), final_dest_str))
+            
+            // Tell UI to refresh drive state (reverts from ⚡ Ripping to 💿 Ready)
+            sse.send_json(json!({"kind":"rip","action":"complete","index":index,"data":{}}));
+            sse.send_json(json!({"kind":"drive","action":"updated","index":index,"data":{}}));
         } else {
             // Rip failed — clean up temp folder
             info!(rip_folder = %temp_folder, "Cleaning up failed rip");
             let _ = std::fs::remove_dir_all(&temp_folder);
             sse.send_json(json!({"kind":"rip","action":"message","index":index,"data":{"text":"Rip failed, cleaned up"}}));
             sse.send_json(json!({"kind":"drive","action":"updated","index":index,"data":{}}));
-            None
-        };
-
-        // Perform the move (if rip succeeded)
-        if let Some((temp_folder, final_dest_str)) = move_handle {
-            let move_result = if std::fs::rename(&temp_folder, &final_dest_str).is_err() {
-                warn!(
-                    from = %temp_folder,
-                    to = %final_dest_str,
-                    "std::fs::rename failed (cross-device?), falling back to copy+delete"
-                );
-                copy_dir_all(&temp_folder, &final_dest_str).and_then(|_| {
-                    std::fs::remove_dir_all(&temp_folder).map_err(|e| e.to_string())
-                })
-            } else {
-                Ok(())
-            };
-
-            match move_result {
-                Ok(()) => {
-                    info!(
-                        from = %temp_folder,
-                        to = %final_dest_str,
-                        "Post-rip move to Organizer completed"
-                    );
-                    sse.send_json(json!({"kind":"rip","action":"complete","index":index,"data":{"dest":final_dest_str}}));
-                    // Tell UI to refresh drive state (reverts from ⚡ Ripping to 💿 Ready)
-                    sse.send_json(json!({"kind":"drive","action":"updated","index":index,"data":{}}));
-                }
-                Err(e) => {
-                    warn!(error = %e, from = %temp_folder, to = %final_dest_str, "Post-rip move failed");
-                    sse.send_json(json!({"kind":"rip","action":"message","index":index,"data":{"text":format!("Move failed: {}", e)}}));
-                    // Tell UI to refresh drive state
-                    sse.send_json(json!({"kind":"drive","action":"updated","index":index,"data":{}}));
-                }
-            }
         }
     });
 
@@ -822,6 +892,29 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
             match (prev, &drive.state) {
                 (Some(DriveState::Empty) | None, &DriveState::Ready) => {
                     sse.send_json(json!({"kind":"drive","action":"inserted","index":drive.index,"data":{}}));
+                    
+                    // Start auto-naming at disc insertion (not rip start)
+                    if let Some(ref disc_name) = drive.disc_name {
+                        let sse_clone = sse.clone();
+                        let index_clone = drive.index;
+                        let disc_clone = disc_name.clone();
+                        let searcher = state.searcher.clone();
+                        let temp_dir = {
+                            let config = state.config.read().await;
+                            config.temp_directory.clone()
+                        };
+                        
+                        tokio::spawn(async move {
+                            let temp_folder = format!("{}/{}", temp_dir, index_clone);
+                            let resolved = resolve_rip_title_with_duration(&disc_clone, &temp_folder, searcher.as_deref()).await;
+                            if !resolved.0.is_empty() {
+                                let year = resolved.1.map(|y| y as u32);
+                                sse_clone.send_json(json!({"kind":"rip","action":"named","index":index_clone,"data":{"title":resolved.0,"year":year,"type":"movie"}}));
+                            } else {
+                                sse_clone.send_json(json!({"kind":"rip","action":"naming_failed","index":index_clone,"data":{}}));
+                            }
+                        });
+                    }
                 }
                 (Some(DriveState::Ready), &DriveState::Empty) => {
                     sse.send_json(json!({"kind":"drive","action":"ejected","index":drive.index,"data":{}}));
