@@ -45,36 +45,18 @@ async function waitForRipProgress(page, timeout = 30000) {
 }
 
 /**
- * Wait for rip to complete or detect failure using Playwright's built-in expect() with long timeout.
- * Checks for completion (✅) and also polls for error messages in the drive card.
+ * Wait for rip to complete using Playwright's expect() with long timeout.
+ * This is the ONLY reliable way to wait 12-30 minutes without crashing the page.
+ * Uses expect().toBeVisible() which handles long waits internally via robust polling.
  */
 async function waitForRipComplete(page, timeout = 25 * 60 * 1000) {
-  const startTime = Date.now();
-  const pollInterval = 10000; // Check for errors every 10 seconds
+  // Wait for completion (✅) state using expect() which handles long waits gracefully
+  await expect(
+    page.locator('.drive-card__state').filter({ hasText: '✅' }).first(),
+    `Rip did not complete within ${timeout / 60000} minutes. If this times out, check the drive card for error messages.`
+  ).toBeVisible({ timeout });
 
-  // Poll for completion or error
-  while (Date.now() - startTime < timeout) {
-    // Check for completion first
-    const isComplete = await page.locator('.drive-card__state').filter({ hasText: '✅' }).isVisible().catch(() => false);
-    if (isComplete) {
-      console.log('[rip-complete] Rip completed successfully');
-      return;
-    }
-
-    // Check for error in drive card text
-    const driveCard = page.locator('.drive-card').first();
-    const text = await driveCard.textContent().catch(() => null);
-    if (text && text.includes('Error')) {
-      const match = text.match(/Error\s+['"]?([^'"]+)['"]?/);
-      const errorMsg = match ? match[1] : text;
-      console.log(`[rip-error] ${errorMsg}`);
-      throw new Error(`Rip failed: ${errorMsg}`);
-    }
-
-    await page.waitForTimeout(pollInterval);
-  }
-
-  throw new Error(`Rip did not complete within ${timeout / 60000} minutes`);
+  console.log('[rip-complete] Rip completed successfully');
 }
 
 /**
@@ -116,6 +98,8 @@ test.describe('Rip — Drive Detection (Real Hardware)', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/ripper');
     await page.waitForLoadState('networkidle');
+    // Disable AutoRip to prevent it from auto-starting rips between tests
+    await disableAutorip(page);
   });
 
   test('drive 0 is detected with disc loaded', async ({ page }) => {
