@@ -119,15 +119,20 @@ pub async fn list_drives(
         Ok(mut drives) => {
             let rips = state.active_rips.read().await;
             let disc_names = state.disc_names.read().await;
-            let completed = state.completed_rips.read().await;
+            let config = state.config.read().await;
+            let temp_dir = config.temp_directory.clone();
             for drive in &mut drives {
                 if rips.contains_key(&drive.index) {
                     drive.state = DriveState::Ripping;
-                } else if completed.contains(&drive.index) {
-                    // Override MakeMKV's "Ripping" state to "Ready" for drives
-                    // that have completed rips (MakeMKV may not update immediately)
-                    if drive.state == DriveState::Ripping {
-                        drive.state = DriveState::Ready;
+                } else {
+                    // Check if temp folder exists for this drive (indicates completed rip)
+                    // MakeMKV may not immediately update state after rip completes,
+                    // so we use the temp folder as a more reliable indicator
+                    let temp_folder = format!("{}/{}", temp_dir, drive.index);
+                    if std::path::Path::new(&temp_folder).exists() {
+                        if drive.state == DriveState::Ripping {
+                            drive.state = DriveState::Ready;
+                        }
                     }
                 }
                 // Apply user-set name if it exists
