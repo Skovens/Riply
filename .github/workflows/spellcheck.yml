@@ -21,4 +21,4 @@ jobs:
         run: pip install codespell
 
       - name: Run codespell
-        run: codespell --skip=node_modules,*.lock,*.db,*.db-shm,*.db-wal,target,web/svelte/node_modules
+        run: codespell --skip=node_modules,*.lock,*.db,*.db-shm,*.db-wal,target,web/svelte/node_modules,web/svelte/build
