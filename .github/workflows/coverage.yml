@@ -1,0 +1,31 @@
+name: Coverage
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SQLite dev dependencies
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin --version 0.28
+
+      - name: Generate coverage
+        run: cargo tarpaulin --out Xml --engine llvm --all-targets --all-features
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: cobertura.xml
+          fail_ci_if_error: false

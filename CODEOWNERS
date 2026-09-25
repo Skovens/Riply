@@ -1,0 +1,26 @@
+# Code Owners for Riply
+# See https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Core domain logic
+/core/ @Skovens
+
+# Application services
+/app/ @Skovens
+
+# Infrastructure adapters
+/infra/ @Skovens
+
+# Web layer (Axum API + SvelteKit frontend)
+/web/ @Skovens
+
+# CLI entrypoint
+/cli/ @Skovens
+
+# Documentation
+/docs/ @Skovens
+
+# CI/CD workflows
+/.github/ @Skovens
+
+# Frontend-specific
+/web/svelte/ @Skovens

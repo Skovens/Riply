@@ -1,0 +1,19 @@
+name: Spell Check
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+jobs:
+  spellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install codespell
+        run: pip install codespell
+
+      - name: Run codespell
+        run: codespell --skip=node_modules,*.lock,*.db,*.db-shm,*.db-wal,target,web/svelte/node_modules

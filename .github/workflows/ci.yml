@@ -10,6 +10,11 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# 3. CONCURRENCY: Cancel stale runs on the same PR/branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # 2. JOB: The actual work to be done
 jobs:
   build-and-test:

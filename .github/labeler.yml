@@ -1,0 +1,38 @@
+# Labeler configuration
+# Labels are applied based on file paths changed
+
+core:
+  - changed-files:
+      - any-glob-to-any-file: core/**/*
+
+app:
+  - changed-files:
+      - any-glob-to-any-file: app/**/*
+
+infra:
+  - changed-files:
+      - any-glob-to-any-file: infra/**/*
+
+web:
+  - changed-files:
+      - any-glob-to-any-file: web/**/*
+
+cli:
+  - changed-files:
+      - any-glob-to-any-file: cli/**/*
+
+frontend:
+  - changed-files:
+      - any-glob-to-any-file: web/svelte/**/*
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file: docs/**/*
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - Cargo.toml
+          - Cargo.lock
+          - web/svelte/package.json
+          - web/svelte/package-lock.json
