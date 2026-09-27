@@ -1,7 +1,7 @@
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 
-.PHONY: install build frontend
+.PHONY: install build frontend codespell
 
 # Default: rebuild everything and make the fresh binary live at $(BINDIR)/riply
 # via a symlink to target/release/riply.
@@ -14,3 +14,6 @@ build:
 
 frontend:
 	cd web/svelte && npm run build --silent
+
+codespell:
+	uv run codespell -c setup.cfg

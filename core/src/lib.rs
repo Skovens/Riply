@@ -12,7 +12,9 @@ pub mod pipeline;
 pub mod ripping;
 pub mod title_group;
 
-pub use file_record::{content_type_to_str, ContentType, EnrichmentRecord, FileRecord, MetadataRecord, ScanRecord};
+pub use file_record::{
+    content_type_to_str, ContentType, EnrichmentRecord, FileRecord, MetadataRecord, ScanRecord,
+};
 pub use folder_record::{FolderRecord, FolderStatus};
 pub use folder_store::{FolderStore, FolderStoreError};
 pub use media_type::MediaType;

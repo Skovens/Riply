@@ -121,7 +121,11 @@ impl MoverService {
             .or_else(|| file.suggested_title().clone())
             .ok_or_else(|| anyhow::anyhow!("No title available for file: {}", file.filename()))?;
 
-        let year = file.canonical_year().as_ref().copied().or(file.suggested_year().as_ref().copied());
+        let year = file
+            .canonical_year()
+            .as_ref()
+            .copied()
+            .or(file.suggested_year().as_ref().copied());
 
         // Build base path with year if available
         let base_path = if file.media_type().is_tv() {
@@ -226,9 +230,9 @@ mod tests {
             "inception_2010.1080p.bluray.mkv".to_string(),
             "hash".to_string(),
         );
-        *file.canonical_title_mut() =Some("Inception".to_string());
-        *file.canonical_year_mut() =Some(2010);
-        *file.status_mut() =PipelineStatus::Confirmed;
+        *file.canonical_title_mut() = Some("Inception".to_string());
+        *file.canonical_year_mut() = Some(2010);
+        *file.status_mut() = PipelineStatus::Confirmed;
 
         let mover = MoverService::new();
         let dest = mover
@@ -254,12 +258,12 @@ mod tests {
             "breaking.bad.s01e01.720p.hdtv.mkv".to_string(),
             "hash".to_string(),
         );
-        *file.media_type_mut() =MediaType::Tv;
-        *file.canonical_title_mut() =Some("Breaking Bad".to_string());
-        *file.series_name_mut() =Some("Breaking Bad".to_string());
-        *file.season_number_mut() =Some(1);
-        *file.episode_number_mut() =Some(1);
-        *file.status_mut() =PipelineStatus::Confirmed;
+        *file.media_type_mut() = MediaType::Tv;
+        *file.canonical_title_mut() = Some("Breaking Bad".to_string());
+        *file.series_name_mut() = Some("Breaking Bad".to_string());
+        *file.season_number_mut() = Some(1);
+        *file.episode_number_mut() = Some(1);
+        *file.status_mut() = PipelineStatus::Confirmed;
 
         let mover = MoverService::new();
         let dest = mover
@@ -292,9 +296,9 @@ mod tests {
             "matrix.1999.1080p.bluray.mkv".to_string(),
             "hash".to_string(),
         );
-        *file.canonical_title_mut() =Some("The Matrix".to_string());
-        *file.canonical_year_mut() =Some(1999);
-        *file.status_mut() =PipelineStatus::Confirmed;
+        *file.canonical_title_mut() = Some("The Matrix".to_string());
+        *file.canonical_year_mut() = Some(1999);
+        *file.status_mut() = PipelineStatus::Confirmed;
 
         let mover = MoverService::new();
         let result = mover.move_file(&file, &movies_dir, &tv_dir).await.unwrap();
@@ -320,10 +324,10 @@ mod tests {
             "behind_scenes.mkv".to_string(),
             "hash".to_string(),
         );
-        *file.canonical_title_mut() =Some("Test Movie".to_string());
-        *file.canonical_year_mut() =Some(2023);
-        *file.content_type_mut() =riply_core::ContentType::Extra;
-        *file.status_mut() =PipelineStatus::Confirmed;
+        *file.canonical_title_mut() = Some("Test Movie".to_string());
+        *file.canonical_year_mut() = Some(2023);
+        *file.content_type_mut() = riply_core::ContentType::Extra;
+        *file.status_mut() = PipelineStatus::Confirmed;
 
         let mover = MoverService::new();
         let dest = mover
@@ -352,12 +356,12 @@ mod tests {
             "commentary.mkv".to_string(),
             "hash".to_string(),
         );
-        *file.media_type_mut() =MediaType::Tv;
-        *file.canonical_title_mut() =Some("Test Show".to_string());
-        *file.series_name_mut() =Some("Test Show".to_string());
-        *file.season_number_mut() =Some(1);
-        *file.content_type_mut() =riply_core::ContentType::Extra;
-        *file.status_mut() =PipelineStatus::Confirmed;
+        *file.media_type_mut() = MediaType::Tv;
+        *file.canonical_title_mut() = Some("Test Show".to_string());
+        *file.series_name_mut() = Some("Test Show".to_string());
+        *file.season_number_mut() = Some(1);
+        *file.content_type_mut() = riply_core::ContentType::Extra;
+        *file.status_mut() = PipelineStatus::Confirmed;
 
         let mover = MoverService::new();
         let dest = mover
@@ -387,13 +391,13 @@ mod tests {
             "show.s01e01.mkv".to_string(),
             "hash".to_string(),
         );
-        *file.media_type_mut() =MediaType::Tv;
-        *file.canonical_title_mut() =Some("Test Show".to_string());
-        *file.series_name_mut() =Some("Test Show".to_string());
-        *file.season_number_mut() =Some(1);
-        *file.episode_number_mut() =Some(1);
-        *file.content_type_mut() =riply_core::ContentType::Main;
-        *file.status_mut() =PipelineStatus::Confirmed;
+        *file.media_type_mut() = MediaType::Tv;
+        *file.canonical_title_mut() = Some("Test Show".to_string());
+        *file.series_name_mut() = Some("Test Show".to_string());
+        *file.season_number_mut() = Some(1);
+        *file.episode_number_mut() = Some(1);
+        *file.content_type_mut() = riply_core::ContentType::Main;
+        *file.status_mut() = PipelineStatus::Confirmed;
 
         let mover = MoverService::new();
         let dest = mover
@@ -422,8 +426,8 @@ mod tests {
             "inception".to_string(),
             "hash".to_string(),
         );
-        *file.canonical_title_mut() =Some("Inception".to_string());
-        *file.status_mut() =PipelineStatus::Confirmed;
+        *file.canonical_title_mut() = Some("Inception".to_string());
+        *file.status_mut() = PipelineStatus::Confirmed;
 
         let mover = MoverService::new();
         let dest = mover
@@ -431,10 +435,7 @@ mod tests {
             .unwrap();
 
         // File with no extension gets title-only name (no trailing dot)
-        assert_eq!(
-            dest,
-            movies_dir.join("Inception").join("Inception")
-        );
+        assert_eq!(dest, movies_dir.join("Inception").join("Inception"));
     }
 
     #[tokio::test]
@@ -457,9 +458,9 @@ mod tests {
             "speed_1994.mkv".to_string(),
             "hash".to_string(),
         );
-        *file.canonical_title_mut() =Some("Speed".to_string());
-        *file.canonical_year_mut() =Some(1994);
-        *file.status_mut() =PipelineStatus::Confirmed;
+        *file.canonical_title_mut() = Some("Speed".to_string());
+        *file.canonical_year_mut() = Some(1994);
+        *file.status_mut() = PipelineStatus::Confirmed;
 
         let mover = MoverService::new();
         let result = mover.move_file(&file, &movies_dir, &tv_dir).await.unwrap();
@@ -492,9 +493,9 @@ mod tests {
             "speed_2.mkv".to_string(),
             "hash".to_string(),
         );
-        *file.canonical_title_mut() =Some("Speed".to_string());
-        *file.canonical_year_mut() =Some(1994);
-        *file.status_mut() =PipelineStatus::Confirmed;
+        *file.canonical_title_mut() = Some("Speed".to_string());
+        *file.canonical_year_mut() = Some(1994);
+        *file.status_mut() = PipelineStatus::Confirmed;
 
         let mover = MoverService::new();
         let result = mover.move_file(&file, &movies_dir, &tv_dir).await.unwrap();

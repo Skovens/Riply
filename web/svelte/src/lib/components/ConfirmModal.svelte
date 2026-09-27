@@ -1,8 +1,6 @@
 <script>
   /** @type {string} */
-  let { title, message, confirmText = 'Confirm', cancelText = 'Cancel', variant = 'default' } = $props();
-  /** @type {() => void} */
-  let { onConfirm, onCancel } = $props();
+  let { title, message, confirmText = 'Confirm', cancelText = 'Cancel', variant = 'default', onConfirm = () => {}, onCancel = () => {} } = $props();
 
   function handleCancel() {
     onCancel();

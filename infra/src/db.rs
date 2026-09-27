@@ -325,7 +325,9 @@ impl Database {
                 duration: row.try_get("duration")?,
                 hash: row.try_get("hash")?,
                 status: self.parse_status(row.try_get::<String, _>("status")?),
-                content_type: riply_core::ContentType::parse(&row.try_get::<String, _>("content_type")?),
+                content_type: riply_core::ContentType::parse(
+                    &row.try_get::<String, _>("content_type")?,
+                ),
                 media_type: self.parse_media_type(row.try_get::<String, _>("media_type")?),
                 title_group_id: row.try_get::<Option<String>, _>("title_group_id")?,
                 duplicate_path: row
@@ -758,7 +760,10 @@ impl Database {
             std::collections::HashMap::new();
         for row in &rows {
             let file = self.row_to_file_record(row)?;
-            hash_groups.entry(file.hash().to_string()).or_default().push(file);
+            hash_groups
+                .entry(file.hash().to_string())
+                .or_default()
+                .push(file);
         }
 
         // Only keep groups with more than one file (actual duplicates)
@@ -944,7 +949,9 @@ impl Database {
     }
 
     pub async fn clear_session_states(&self) -> Result<(), anyhow::Error> {
-        sqlx::query("DELETE FROM session_state").execute(&self.pool).await?;
+        sqlx::query("DELETE FROM session_state")
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 }
@@ -1052,11 +1059,11 @@ mod tests {
             "enriched.mkv".to_string(),
             "hash-enriched".to_string(),
         );
-        *file.genres_mut() =Some(vec!["Drama".to_string(), "Crime".to_string()]);
-        *file.runtime_mut() =Some(139);
-        *file.content_rating_mut() =Some("R".to_string());
-        *file.overview_mut() =Some("An insomniac office worker.".to_string());
-        *file.cast_list_mut() =Some(vec!["Brad Pitt".to_string(), "Edward Norton".to_string()]);
+        *file.genres_mut() = Some(vec!["Drama".to_string(), "Crime".to_string()]);
+        *file.runtime_mut() = Some(139);
+        *file.content_rating_mut() = Some("R".to_string());
+        *file.overview_mut() = Some("An insomniac office worker.".to_string());
+        *file.cast_list_mut() = Some(vec!["Brad Pitt".to_string(), "Edward Norton".to_string()]);
         db.save_file(&file).await.unwrap();
 
         let files = db.get_all_files().await.unwrap();
@@ -1082,7 +1089,10 @@ mod tests {
 
 /// Save a folder record.
 /// If a folder with the same ID already exists, updates all fields.
-pub async fn save_folder(pool: &sqlx::SqlitePool, folder: &riply_core::FolderRecord) -> Result<(), anyhow::Error> {
+pub async fn save_folder(
+    pool: &sqlx::SqlitePool,
+    folder: &riply_core::FolderRecord,
+) -> Result<(), anyhow::Error> {
     info!(folder = %folder.name, "Saving folder record");
 
     let extra_files_json = json_encode_list(&Some(folder.extra_files.clone()));
@@ -1129,7 +1139,9 @@ pub async fn save_folder(pool: &sqlx::SqlitePool, folder: &riply_core::FolderRec
 }
 
 /// Get all folder records.
-pub async fn get_all_folders(pool: &sqlx::SqlitePool) -> Result<Vec<riply_core::FolderRecord>, anyhow::Error> {
+pub async fn get_all_folders(
+    pool: &sqlx::SqlitePool,
+) -> Result<Vec<riply_core::FolderRecord>, anyhow::Error> {
     let rows = sqlx::query(
         r#"SELECT id, path, name, suggested_name, suggested_year, confidence,
                   tmdb_id, media_type, file_count, main_file, extra_files,
@@ -1145,7 +1157,10 @@ pub async fn get_all_folders(pool: &sqlx::SqlitePool) -> Result<Vec<riply_core::
 }
 
 /// Get a single folder by ID.
-pub async fn get_folder_by_id(pool: &sqlx::SqlitePool, id: &str) -> Result<Option<riply_core::FolderRecord>, anyhow::Error> {
+pub async fn get_folder_by_id(
+    pool: &sqlx::SqlitePool,
+    id: &str,
+) -> Result<Option<riply_core::FolderRecord>, anyhow::Error> {
     let row = sqlx::query(
         r#"SELECT id, path, name, suggested_name, suggested_year, confidence,
                   tmdb_id, media_type, file_count, main_file, extra_files,
@@ -1163,7 +1178,10 @@ pub async fn get_folder_by_id(pool: &sqlx::SqlitePool, id: &str) -> Result<Optio
 }
 
 /// Get folders by status.
-pub async fn get_folders_by_status(pool: &sqlx::SqlitePool, status: &str) -> Result<Vec<riply_core::FolderRecord>, anyhow::Error> {
+pub async fn get_folders_by_status(
+    pool: &sqlx::SqlitePool,
+    status: &str,
+) -> Result<Vec<riply_core::FolderRecord>, anyhow::Error> {
     let rows = sqlx::query(
         r#"SELECT id, path, name, suggested_name, suggested_year, confidence,
                   tmdb_id, media_type, file_count, main_file, extra_files,
@@ -1180,12 +1198,12 @@ pub async fn get_folders_by_status(pool: &sqlx::SqlitePool, status: &str) -> Res
 }
 
 /// Count folders by status.
-pub async fn count_folders_by_status(pool: &sqlx::SqlitePool) -> Result<Vec<(String, i64)>, anyhow::Error> {
-    let rows = sqlx::query(
-        r#"SELECT status, COUNT(*) FROM folders GROUP BY status"#,
-    )
-    .fetch_all(pool)
-    .await?;
+pub async fn count_folders_by_status(
+    pool: &sqlx::SqlitePool,
+) -> Result<Vec<(String, i64)>, anyhow::Error> {
+    let rows = sqlx::query(r#"SELECT status, COUNT(*) FROM folders GROUP BY status"#)
+        .fetch_all(pool)
+        .await?;
     Ok(rows
         .into_iter()
         .map(|row| {
@@ -1197,18 +1215,20 @@ pub async fn count_folders_by_status(pool: &sqlx::SqlitePool) -> Result<Vec<(Str
 }
 
 /// Update a folder's status.
-pub async fn update_folder_status(pool: &sqlx::SqlitePool, id: &str, status: &str) -> Result<(), anyhow::Error> {
+pub async fn update_folder_status(
+    pool: &sqlx::SqlitePool,
+    id: &str,
+    status: &str,
+) -> Result<(), anyhow::Error> {
     use chrono::Utc;
     let now = Utc::now().to_rfc3339();
 
-    sqlx::query(
-        "UPDATE folders SET status = ?, updated_at = ? WHERE id = ?",
-    )
-    .bind(status)
-    .bind(&now)
-    .bind(id)
-    .execute(pool)
-    .await?;
+    sqlx::query("UPDATE folders SET status = ?, updated_at = ? WHERE id = ?")
+        .bind(status)
+        .bind(&now)
+        .bind(id)
+        .execute(pool)
+        .await?;
 
     Ok(())
 }
@@ -1241,7 +1261,10 @@ pub struct SessionState {
     pub last_tmdb_id: Option<i32>,
 }
 
-pub async fn save_session_state(pool: &sqlx::SqlitePool, state: &SessionState) -> Result<(), anyhow::Error> {
+pub async fn save_session_state(
+    pool: &sqlx::SqlitePool,
+    state: &SessionState,
+) -> Result<(), anyhow::Error> {
     let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
         r#"
@@ -1270,7 +1293,10 @@ pub async fn save_session_state(pool: &sqlx::SqlitePool, state: &SessionState) -
     Ok(())
 }
 
-pub async fn get_session_state(pool: &sqlx::SqlitePool, drive_index: usize) -> Result<Option<SessionState>, anyhow::Error> {
+pub async fn get_session_state(
+    pool: &sqlx::SqlitePool,
+    drive_index: usize,
+) -> Result<Option<SessionState>, anyhow::Error> {
     let row = sqlx::query(
         "SELECT drive_index, last_title, last_year, last_season, last_episode, last_media_type, last_tmdb_id FROM session_state WHERE drive_index = ?",
     )
@@ -1279,22 +1305,23 @@ pub async fn get_session_state(pool: &sqlx::SqlitePool, drive_index: usize) -> R
     .await?;
 
     match row {
-        Some(row) => {
-            Ok(Some(SessionState {
-                drive_index: row.get::<i64, &str>("drive_index") as usize,
-                last_title: row.get("last_title"),
-                last_year: row.get("last_year"),
-                last_season: row.get("last_season"),
-                last_episode: row.get("last_episode"),
-                last_media_type: row.get("last_media_type"),
-                last_tmdb_id: row.get("last_tmdb_id"),
-            }))
-        }
+        Some(row) => Ok(Some(SessionState {
+            drive_index: row.get::<i64, &str>("drive_index") as usize,
+            last_title: row.get("last_title"),
+            last_year: row.get("last_year"),
+            last_season: row.get("last_season"),
+            last_episode: row.get("last_episode"),
+            last_media_type: row.get("last_media_type"),
+            last_tmdb_id: row.get("last_tmdb_id"),
+        })),
         None => Ok(None),
     }
 }
 
-pub async fn delete_session_state(pool: &sqlx::SqlitePool, drive_index: usize) -> Result<(), anyhow::Error> {
+pub async fn delete_session_state(
+    pool: &sqlx::SqlitePool,
+    drive_index: usize,
+) -> Result<(), anyhow::Error> {
     sqlx::query("DELETE FROM session_state WHERE drive_index = ?")
         .bind(drive_index as i64)
         .execute(pool)
@@ -1303,30 +1330,39 @@ pub async fn delete_session_state(pool: &sqlx::SqlitePool, drive_index: usize) -
 }
 
 pub async fn clear_session_state(pool: &sqlx::SqlitePool) -> Result<(), anyhow::Error> {
-    sqlx::query("DELETE FROM session_state").execute(pool).await?;
+    sqlx::query("DELETE FROM session_state")
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
-pub async fn list_session_states(pool: &sqlx::SqlitePool) -> Result<Vec<SessionState>, anyhow::Error> {
+pub async fn list_session_states(
+    pool: &sqlx::SqlitePool,
+) -> Result<Vec<SessionState>, anyhow::Error> {
     let rows = sqlx::query(
         "SELECT drive_index, last_title, last_year, last_season, last_episode, last_media_type, last_tmdb_id FROM session_state ORDER BY drive_index",
     )
     .fetch_all(pool)
     .await?;
 
-    Ok(rows.into_iter().map(|row| SessionState {
-        drive_index: row.get::<i64, &str>("drive_index") as usize,
-        last_title: row.get("last_title"),
-        last_year: row.get("last_year"),
-        last_season: row.get("last_season"),
-        last_episode: row.get("last_episode"),
-        last_media_type: row.get("last_media_type"),
-        last_tmdb_id: row.get("last_tmdb_id"),
-    }).collect())
+    Ok(rows
+        .into_iter()
+        .map(|row| SessionState {
+            drive_index: row.get::<i64, &str>("drive_index") as usize,
+            last_title: row.get("last_title"),
+            last_year: row.get("last_year"),
+            last_season: row.get("last_season"),
+            last_episode: row.get("last_episode"),
+            last_media_type: row.get("last_media_type"),
+            last_tmdb_id: row.get("last_tmdb_id"),
+        })
+        .collect())
 }
 
 /// Convert a database row to a FolderRecord.
-fn folder_row_to_record(row: &sqlx::sqlite::SqliteRow) -> Result<riply_core::FolderRecord, anyhow::Error> {
+fn folder_row_to_record(
+    row: &sqlx::sqlite::SqliteRow,
+) -> Result<riply_core::FolderRecord, anyhow::Error> {
     use std::path::PathBuf;
 
     let id: String = row.get("id");
@@ -1456,7 +1492,9 @@ mod folder_tests {
         );
         save_folder(pool, &folder).await.unwrap();
 
-        update_folder_status(pool, "folder-3", "Confident").await.unwrap();
+        update_folder_status(pool, "folder-3", "Confident")
+            .await
+            .unwrap();
 
         let folders = get_folders_by_status(pool, "Confident").await.unwrap();
         assert_eq!(folders.len(), 1);
@@ -1472,12 +1510,24 @@ mod folder_tests {
         db.migrate().await.unwrap();
         let pool = &db.pool;
 
-        let f1 = FolderRecord::new("fc1".to_string(), PathBuf::from("/test/A"), "A".to_string(), 1);
-        let f2 = FolderRecord::new("fc2".to_string(), PathBuf::from("/test/B"), "B".to_string(), 1);
+        let f1 = FolderRecord::new(
+            "fc1".to_string(),
+            PathBuf::from("/test/A"),
+            "A".to_string(),
+            1,
+        );
+        let f2 = FolderRecord::new(
+            "fc2".to_string(),
+            PathBuf::from("/test/B"),
+            "B".to_string(),
+            1,
+        );
         save_folder(pool, &f1).await.unwrap();
         save_folder(pool, &f2).await.unwrap();
 
-        update_folder_status(pool, "fc1", "Confident").await.unwrap();
+        update_folder_status(pool, "fc1", "Confident")
+            .await
+            .unwrap();
         update_folder_status(pool, "fc2", "Unknown").await.unwrap();
 
         let counts = count_folders_by_status(pool).await.unwrap();
@@ -1533,7 +1583,10 @@ mod folder_tests {
 
         save_folder(pool, &folder).await.unwrap();
 
-        let result = get_folder_by_id(pool, "folder-files").await.unwrap().unwrap();
+        let result = get_folder_by_id(pool, "folder-files")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(result.main_file, Some("main.mkv".to_string()));
         assert_eq!(result.extra_files, vec!["extra.mkv".to_string()]);
     }
@@ -1553,10 +1606,18 @@ mod folder_tests {
             "Disc".to_string(),
             2,
         );
-        folder.apply_tmdb_match("Inception".to_string(), Some(2010), 27205, riply_core::MediaType::Movie);
+        folder.apply_tmdb_match(
+            "Inception".to_string(),
+            Some(2010),
+            27205,
+            riply_core::MediaType::Movie,
+        );
         save_folder(pool, &folder).await.unwrap();
 
-        let result = get_folder_by_id(pool, "folder-tmdb").await.unwrap().unwrap();
+        let result = get_folder_by_id(pool, "folder-tmdb")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(result.suggested_name, Some("Inception".to_string()));
         assert_eq!(result.suggested_year, Some(2010));
         assert_eq!(result.tmdb_id, Some(27205));
@@ -1570,36 +1631,69 @@ mod folder_tests {
 /// Implement FolderStore for Database so app services can use it
 #[async_trait::async_trait]
 impl riply_core::FolderStore for Database {
-    async fn save_folder(&self, folder: &riply_core::FolderRecord) -> Result<(), riply_core::FolderStoreError> {
-        save_folder(&self.pool, folder).await.map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
+    async fn save_folder(
+        &self,
+        folder: &riply_core::FolderRecord,
+    ) -> Result<(), riply_core::FolderStoreError> {
+        save_folder(&self.pool, folder)
+            .await
+            .map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
     }
 
-    async fn get_all_folders(&self) -> Result<Vec<riply_core::FolderRecord>, riply_core::FolderStoreError> {
-        get_all_folders(&self.pool).await.map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
+    async fn get_all_folders(
+        &self,
+    ) -> Result<Vec<riply_core::FolderRecord>, riply_core::FolderStoreError> {
+        get_all_folders(&self.pool)
+            .await
+            .map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
     }
 
-    async fn get_folder_by_id(&self, id: &str) -> Result<Option<riply_core::FolderRecord>, riply_core::FolderStoreError> {
-        get_folder_by_id(&self.pool, id).await.map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
+    async fn get_folder_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<riply_core::FolderRecord>, riply_core::FolderStoreError> {
+        get_folder_by_id(&self.pool, id)
+            .await
+            .map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
     }
 
-    async fn get_folders_by_status(&self, status: &str) -> Result<Vec<riply_core::FolderRecord>, riply_core::FolderStoreError> {
-        get_folders_by_status(&self.pool, status).await.map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
+    async fn get_folders_by_status(
+        &self,
+        status: &str,
+    ) -> Result<Vec<riply_core::FolderRecord>, riply_core::FolderStoreError> {
+        get_folders_by_status(&self.pool, status)
+            .await
+            .map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
     }
 
-    async fn count_folders_by_status(&self) -> Result<Vec<(String, i64)>, riply_core::FolderStoreError> {
-        count_folders_by_status(&self.pool).await.map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
+    async fn count_folders_by_status(
+        &self,
+    ) -> Result<Vec<(String, i64)>, riply_core::FolderStoreError> {
+        count_folders_by_status(&self.pool)
+            .await
+            .map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
     }
 
-    async fn update_folder_status(&self, id: &str, status: &str) -> Result<(), riply_core::FolderStoreError> {
-        update_folder_status(&self.pool, id, status).await.map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
+    async fn update_folder_status(
+        &self,
+        id: &str,
+        status: &str,
+    ) -> Result<(), riply_core::FolderStoreError> {
+        update_folder_status(&self.pool, id, status)
+            .await
+            .map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
     }
 
     async fn delete_folder(&self, id: &str) -> Result<(), riply_core::FolderStoreError> {
-        delete_folder(&self.pool, id).await.map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
+        delete_folder(&self.pool, id)
+            .await
+            .map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
     }
 
     async fn clear_folders(&self) -> Result<(), riply_core::FolderStoreError> {
-        clear_folders(&self.pool).await.map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
+        clear_folders(&self.pool)
+            .await
+            .map_err(|e| riply_core::FolderStoreError::DatabaseError(e.to_string()))
     }
 }
 

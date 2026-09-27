@@ -110,7 +110,10 @@ impl AnalyzerService {
                             // Enrich with genres, runtime, rating, overview, cast.
                             // Failures degrade gracefully — the match is still valid.
                             if let Some(tmdb_id) = best.tmdb_id {
-                                match searcher.fetch_enrichment(tmdb_id, record.media_type()).await {
+                                match searcher
+                                    .fetch_enrichment(tmdb_id, record.media_type())
+                                    .await
+                                {
                                     Ok(enrichment) => {
                                         *record.genres_mut() = enrichment.genres;
                                         *record.runtime_mut() = enrichment.runtime;

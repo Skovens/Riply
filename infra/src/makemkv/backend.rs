@@ -18,15 +18,16 @@ pub struct MakemkvBackend {
 /// (Flatpak namespace, host filesystem, plenty of space).
 /// For native MakeMKV, it is `/tmp/riply`.
 pub const DEFAULT_RIP_TEMP_DIR: &str = "/tmp/riply";
-pub const FLATPAK_RIP_TEMP_DIR: &str =
-    ".var/app/com.makemkv.MakeMKV/riply";
+pub const FLATPAK_RIP_TEMP_DIR: &str = ".var/app/com.makemkv.MakeMKV/riply";
 
 /// Resolve a default destination for a Flatpak MakeMKV rip.
 /// Uses `~/.var/app/com.makemkv.MakeMKV/riply/{disc_name}` — inside the
 /// Flatpak namespace on the host filesystem, avoiding /tmp tmpfs limits.
 pub fn resolve_rip_destination_flatpak(disc_name: &str) -> (PathBuf, Option<String>) {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    let dest = PathBuf::from(home).join(FLATPAK_RIP_TEMP_DIR).join(disc_name);
+    let dest = PathBuf::from(home)
+        .join(FLATPAK_RIP_TEMP_DIR)
+        .join(disc_name);
     (dest, None)
 }
 
@@ -78,7 +79,10 @@ impl MakemkvBackend {
 
     /// Check if this backend uses Flatpak.
     pub fn is_flatpak(&self) -> bool {
-        self.command.first().map(|c| c.contains("flatpak")).unwrap_or(false)
+        self.command
+            .first()
+            .map(|c| c.contains("flatpak"))
+            .unwrap_or(false)
     }
 
     /// Auto-detect makemkvcon installation.
@@ -202,26 +206,56 @@ impl RipBackend for MakemkvBackend {
     fn start_rip(&self, drive: usize, dest: &str) -> Result<RipHandle, RipError> {
         let dest_path = Path::new(dest);
 
-        // Verify the destination is writable before starting.
-        // This catches permission issues, Flatpak namespace problems, and
-        // disk-full conditions upfront, rather than failing mid-rip.
+        info!(drive, dest = %dest, "Starting rip");
+
+        // For Flatpak MakeMKV, always create the directory inside the Flatpak namespace
+        // because MakeMKV cannot see host-created directories in /tmp
+        if self.is_flatpak() {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            let flatpak_dest = PathBuf::from(home)
+                .join(FLATPAK_RIP_TEMP_DIR)
+                .join(dest_path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default().as_ref());
+
+            if !flatpak_dest.exists() {
+                StdCommand::new("flatpak")
+                    .args(["run", "--command=mkdir", "com.makemkv.MakeMKV", "-p", &flatpak_dest.display().to_string()])
+                    .output()
+                    .map_err(|e| RipError::Backend(format!("Failed to create directory: {}", e)))?;
+            }
+
+            let flatpak_dest_str = flatpak_dest.display().to_string();
+            let child = tokio::process::Command::new(&self.command[0])
+                .args(&self.command[1..])
+                .args([
+                    "-r",
+                    "--cache=1024",
+                    "mkv",
+                    &format!("disc:{}", drive),
+                    "all",
+                    &flatpak_dest_str,
+                ])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true)
+                .spawn()?;
+
+            let session = MakemkvSession::new(child);
+            return Ok(RipHandle::new(Box::new(session)));
+        }
+
+        // For native MakeMKV, use the original logic
         if !dest_path.exists() {
-            // Check parent directory writability
             if let Some(parent) = dest_path.parent() {
                 if !parent.exists() {
                     return Err(RipError::DestinationParentMissing(
                         parent.display().to_string(),
                     ));
                 }
-                if !parent.canonicalize()
-                    .map(|p| p.is_dir())
-                    .unwrap_or(false)
-                    || !std::fs::write(
-                        parent.join(".riply_writability_test"),
-                        "test",
-                    )
-                    .or_else(|_| std::fs::remove_file(parent.join(".riply_writability_test")))
-                    .is_ok()
+                if !parent.canonicalize().map(|p| p.is_dir()).unwrap_or(false)
+                    || !std::fs::write(parent.join(".riply_writability_test"), "test")
+                        .or_else(|_| std::fs::remove_file(parent.join(".riply_writability_test")))
+                        .is_ok()
                 {
                     return Err(RipError::DestinationNotWritable(
                         parent.display().to_string(),
@@ -230,34 +264,15 @@ impl RipBackend for MakemkvBackend {
             }
         }
 
-        // Create the destination directory inside the Flatpak namespace if needed.
-        // MakeMKV inside Flatpak can't see host-created directories in /tmp.
         if !dest_path.exists() {
-            if self.is_flatpak() {
-                // Create directory using flatpak run so it exists in the Flatpak namespace.
-                StdCommand::new("flatpak")
-                    .args([
-                        "run",
-                        "--command=mkdir",
-                        "com.makemkv.MakeMKV",
-                        "-p",
-                        dest,
-                    ])
-                    .output()
-                    .map_err(|e| RipError::Backend(format!("Failed to create directory: {}", e)))?;
-            } else {
-                std::fs::create_dir_all(dest_path)?;
-            }
+            std::fs::create_dir_all(dest_path)?;
         }
-
-        info!(drive, dest = %dest, "Starting rip");
 
         let child = tokio::process::Command::new(&self.command[0])
             .args(&self.command[1..])
             .args([
                 "-r",
                 "--cache=1024",
-                "--noscan",
                 "mkv",
                 &format!("disc:{}", drive),
                 "all",
@@ -271,6 +286,10 @@ impl RipBackend for MakemkvBackend {
 
         let session = MakemkvSession::new(child);
         Ok(RipHandle::new(Box::new(session)))
+    }
+
+    fn is_sandboxed(&self) -> bool {
+        self.is_flatpak()
     }
 }
 

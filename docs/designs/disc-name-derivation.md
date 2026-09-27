@@ -101,7 +101,7 @@ The drive card shows the naming state:
 ## Acceptance Criteria
 
 - [ ] AC1: When a disc with a parseable name (e.g., "INCEPTION_2010") is inserted, the drive card shows both the raw disc name and the derived name ("Inception (2007)")
-- [ ] AC2: When a disc with an unparseable name (e.g., "My Home Video") is inserted, only the raw disc name is shown — no derived name
+- [ ] AC2: When a disc with an unparsable name (e.g., "My Home Video") is inserted, only the raw disc name is shown — no derived name
 - [ ] AC3: The disc name area is clickable when a disc is inserted, opening the naming modal with the disc name pre-filled
 - [ ] AC4: When the user picks a search result, the derived name updates on the drive card
 - [ ] AC5: Starting a rip uses the derived/user-set name as the destination folder (if one exists), or the raw disc name (if not)

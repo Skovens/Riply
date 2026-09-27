@@ -1,7 +1,9 @@
 // ADR-026: Folder-Based Pipeline — OrganizerService for the Organizer window
 // ADR-028: Movie vs TV Show Detection — hybrid detection (TMDb → heuristic → user)
 
-use riply_core::{FolderRecord, FolderStatus, MediaType, FolderStore, FolderStoreError, MetadataSearcher};
+use riply_core::{
+    FolderRecord, FolderStatus, FolderStore, FolderStoreError, MediaType, MetadataSearcher,
+};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
@@ -60,10 +62,7 @@ impl OrganizerService {
 
     /// Scan a directory for folders containing media files
     #[tracing::instrument(skip(self), fields(dir = ?path))]
-    pub async fn scan_directory(
-        &self,
-        path: &Path,
-    ) -> Result<ScanFoldersResult, anyhow::Error> {
+    pub async fn scan_directory(&self, path: &Path) -> Result<ScanFoldersResult, anyhow::Error> {
         info!("Scanning directory for folders");
 
         if !path.exists() {
@@ -94,12 +93,12 @@ impl OrganizerService {
                 for file_entry in dir_entries.flatten() {
                     if let Ok(metadata) = file_entry.metadata() {
                         if metadata.is_file() {
-                            if let Some(ext) = file_entry.path().extension().and_then(|e| e.to_str()) {
+                            if let Some(ext) =
+                                file_entry.path().extension().and_then(|e| e.to_str())
+                            {
                                 if is_media_file(ext) {
-                                    let filename = file_entry
-                                        .file_name()
-                                        .to_string_lossy()
-                                        .to_string();
+                                    let filename =
+                                        file_entry.file_name().to_string_lossy().to_string();
                                     files.push((filename, metadata.len()));
                                 }
                             }
@@ -113,11 +112,12 @@ impl OrganizerService {
             hasher.update(folder_path.to_string_lossy().as_bytes());
             let id = format!("{:x}", hasher.finalize())[..16].to_string();
 
-            let folder =
-                FolderRecord::with_files(id, folder_path.clone(), folder_name, files);
+            let folder = FolderRecord::with_files(id, folder_path.clone(), folder_name, files);
 
             // Save to database
-            self.folder_store.save_folder(&folder).await
+            self.folder_store
+                .save_folder(&folder)
+                .await
                 .map_err(|e| anyhow::anyhow!("Failed to save folder: {}", e))?;
 
             folders.push(folder);
@@ -140,7 +140,9 @@ impl OrganizerService {
         // If no files, nothing to analyze
         if record.extra_files.is_empty() && record.main_file.is_none() {
             record.update_status(FolderStatus::Unknown);
-            self.folder_store.save_folder(&record).await
+            self.folder_store
+                .save_folder(&record)
+                .await
                 .map_err(|e| riply_core::MetadataError::ApiError(e.to_string()))?;
             return Ok(record);
         }
@@ -151,16 +153,8 @@ impl OrganizerService {
         // Search TMDb
         if let Some(ref searcher) = self.searcher {
             let results = match detected_type {
-                MediaType::Movie => {
-                    searcher
-                        .search_movies(&record.name, None)
-                        .await
-                }
-                MediaType::Tv => {
-                    searcher
-                        .search_tv(&record.name)
-                        .await
-                }
+                MediaType::Movie => searcher.search_movies(&record.name, None).await,
+                MediaType::Tv => searcher.search_tv(&record.name).await,
             };
 
             match results {
@@ -179,7 +173,9 @@ impl OrganizerService {
                             media_type,
                         );
 
-                        self.folder_store.save_folder(&record).await
+                        self.folder_store
+                            .save_folder(&record)
+                            .await
                             .map_err(|e| riply_core::MetadataError::ApiError(e.to_string()))?;
                         return Ok(record);
                     }
@@ -194,7 +190,9 @@ impl OrganizerService {
         record.media_type = detected_type;
         record.confidence = Some(0.5);
         record.update_status(FolderStatus::Unknown);
-        self.folder_store.save_folder(&record).await
+        self.folder_store
+            .save_folder(&record)
+            .await
             .map_err(|e| riply_core::MetadataError::ApiError(e.to_string()))?;
 
         Ok(record)
@@ -202,10 +200,7 @@ impl OrganizerService {
 
     /// Accept a folder — move to Confident status
     #[tracing::instrument(skip(self), fields(folder_id = %folder_id))]
-    pub async fn accept_folder(
-        &self,
-        folder_id: &str,
-    ) -> Result<FolderRecord, FolderStoreError> {
+    pub async fn accept_folder(&self, folder_id: &str) -> Result<FolderRecord, FolderStoreError> {
         info!("Accepting folder");
 
         let folder = self.folder_store.get_folder_by_id(folder_id).await?;
@@ -219,10 +214,7 @@ impl OrganizerService {
 
     /// Reject a folder — move to Unknown status
     #[tracing::instrument(skip(self), fields(folder_id = %folder_id))]
-    pub async fn reject_folder(
-        &self,
-        folder_id: &str,
-    ) -> Result<FolderRecord, FolderStoreError> {
+    pub async fn reject_folder(&self, folder_id: &str) -> Result<FolderRecord, FolderStoreError> {
         info!("Rejecting folder");
 
         let folder = self.folder_store.get_folder_by_id(folder_id).await?;
@@ -236,9 +228,7 @@ impl OrganizerService {
 
     /// Accept all confident folders
     #[tracing::instrument(skip(self))]
-    pub async fn accept_all_folders(
-        &self,
-    ) -> Result<usize, FolderStoreError> {
+    pub async fn accept_all_folders(&self) -> Result<usize, FolderStoreError> {
         info!("Accepting all confident folders");
 
         let folders = self.folder_store.get_folders_by_status("Confident").await?;
@@ -256,9 +246,7 @@ impl OrganizerService {
 
     /// Reject all unknown folders — move to Quarantined
     #[tracing::instrument(skip(self))]
-    pub async fn reject_all_folders(
-        &self,
-    ) -> Result<usize, FolderStoreError> {
+    pub async fn reject_all_folders(&self) -> Result<usize, FolderStoreError> {
         info!("Rejecting all unknown folders");
 
         let folders = self.folder_store.get_folders_by_status("Unknown").await?;
@@ -276,17 +264,16 @@ impl OrganizerService {
 
     /// Move a single confident folder to its destination
     #[tracing::instrument(skip(self), fields(folder_id = %folder_id))]
-    pub async fn move_folder(
-        &self,
-        folder_id: &str,
-    ) -> Result<(), FolderStoreError> {
+    pub async fn move_folder(&self, folder_id: &str) -> Result<(), FolderStoreError> {
         info!("Moving folder");
 
         let folder = self.folder_store.get_folder_by_id(folder_id).await?;
         let folder = folder.ok_or_else(|| FolderStoreError::NotFound(folder_id.to_string()))?;
 
         if !folder.is_ready_to_move() {
-            return Err(FolderStoreError::DatabaseError("Folder is not ready to move".to_string()));
+            return Err(FolderStoreError::DatabaseError(
+                "Folder is not ready to move".to_string(),
+            ));
         }
 
         // Build destination path
@@ -348,9 +335,19 @@ impl OrganizerService {
         let title = format!("{suggested_name} ({suggested_year})");
 
         if folder.media_type.is_tv() {
-            Some(self.tv_directory.join(format!("{title}/Season 01/")).to_string_lossy().to_string())
+            Some(
+                self.tv_directory
+                    .join(format!("{title}/Season 01/"))
+                    .to_string_lossy()
+                    .to_string(),
+            )
         } else {
-            Some(self.movies_directory.join(format!("{title}/")).to_string_lossy().to_string())
+            Some(
+                self.movies_directory
+                    .join(format!("{title}/"))
+                    .to_string_lossy()
+                    .to_string(),
+            )
         }
     }
 }
@@ -401,11 +398,27 @@ impl FolderStore for MockFolderStore {
     }
 
     async fn get_folder_by_id(&self, id: &str) -> Result<Option<FolderRecord>, FolderStoreError> {
-        Ok(self.folders.lock().unwrap().iter().find(|f| f.id == id).cloned())
+        Ok(self
+            .folders
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|f| f.id == id)
+            .cloned())
     }
 
-    async fn get_folders_by_status(&self, status: &str) -> Result<Vec<FolderRecord>, FolderStoreError> {
-        Ok(self.folders.lock().unwrap().iter().filter(|f| f.status.to_string() == status).cloned().collect())
+    async fn get_folders_by_status(
+        &self,
+        status: &str,
+    ) -> Result<Vec<FolderRecord>, FolderStoreError> {
+        Ok(self
+            .folders
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|f| f.status.to_string() == status)
+            .cloned()
+            .collect())
     }
 
     async fn count_folders_by_status(&self) -> Result<Vec<(String, i64)>, FolderStoreError> {

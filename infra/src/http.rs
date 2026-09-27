@@ -9,7 +9,9 @@ use reqwest::Client;
 use riply_core::{MediaType, MetadataEnrichment, MetadataError, MetadataMatch, MetadataSearcher};
 use tracing::{info, warn};
 
-use crate::rate_limiter::{MonthlyQuota, RateLimit, RateLimitPolicy, RateLimitRegistry, RateLimiter, SlidingWindowLimiter};
+use crate::rate_limiter::{
+    MonthlyQuota, RateLimit, RateLimitPolicy, RateLimitRegistry, RateLimiter, SlidingWindowLimiter,
+};
 
 /// Maximum LRU cache size for metadata search/enrichment results.
 const CACHE_SIZE: NonZeroUsize = NonZeroUsize::new(500).unwrap();
@@ -84,10 +86,7 @@ impl MetadataCache {
         (tmdb_id, is_tv)
     }
 
-    fn get_search(
-        &mut self,
-        key: &(String, Option<u32>, bool),
-    ) -> Option<Vec<MetadataMatch>> {
+    fn get_search(&mut self, key: &(String, Option<u32>, bool)) -> Option<Vec<MetadataMatch>> {
         if let Some(cached) = self.search.pop(key) {
             if cached.is_expired() {
                 return None;
@@ -98,18 +97,11 @@ impl MetadataCache {
         }
     }
 
-    fn put_search(
-        &mut self,
-        key: (String, Option<u32>, bool),
-        value: Vec<MetadataMatch>,
-    ) {
+    fn put_search(&mut self, key: (String, Option<u32>, bool), value: Vec<MetadataMatch>) {
         self.search.put(key, Cached::new(value, CACHE_TTL));
     }
 
-    fn get_enrichment(
-        &mut self,
-        key: &(i32, bool),
-    ) -> Option<MetadataEnrichment> {
+    fn get_enrichment(&mut self, key: &(i32, bool)) -> Option<MetadataEnrichment> {
         if let Some(cached) = self.enrichment.pop(key) {
             if cached.is_expired() {
                 return None;
@@ -120,11 +112,7 @@ impl MetadataCache {
         }
     }
 
-    fn put_enrichment(
-        &mut self,
-        key: (i32, bool),
-        value: MetadataEnrichment,
-    ) {
+    fn put_enrichment(&mut self, key: (i32, bool), value: MetadataEnrichment) {
         self.enrichment.put(key, Cached::new(value, CACHE_TTL));
     }
 }
@@ -247,12 +235,14 @@ pub struct TmdbEpisodeDetail {
 /// Extract the US content rating from TMDb release dates.
 fn find_us_certification(release_dates: &Option<TmdbReleaseDates>) -> Option<String> {
     let rd = release_dates.as_ref()?;
-    let us = rd.results.iter().find(|c| c.iso_3166_1.as_deref() == Some("US"))?;
-    let cert = us.release_dates.iter().find(|d| {
-        d.certification
-            .as_deref()
-            .is_some_and(|s| !s.is_empty())
-    })?;
+    let us = rd
+        .results
+        .iter()
+        .find(|c| c.iso_3166_1.as_deref() == Some("US"))?;
+    let cert = us
+        .release_dates
+        .iter()
+        .find(|d| d.certification.as_deref().is_some_and(|s| !s.is_empty()))?;
     cert.certification.clone()
 }
 
@@ -294,7 +284,9 @@ impl HttpClient {
                 RateLimitPolicy::SlidingWindow(Arc::new(SlidingWindowLimiter::new(10, 60))),
             );
             // OMDb: 1,000 req/month quota
-            registry.register_quota(RateLimitPolicy::MonthlyQuota(Arc::new(MonthlyQuota::new(1_000))));
+            registry.register_quota(RateLimitPolicy::MonthlyQuota(Arc::new(MonthlyQuota::new(
+                1_000,
+            ))));
         }
 
         HttpClient {
@@ -328,7 +320,9 @@ impl HttpClient {
         // Apply quota policies (apply to all APIs)
         for quota in self.registry.quotas() {
             if let RateLimitPolicy::MonthlyQuota(ref q) = quota {
-                q.try_acquire().await.map_err(|e| anyhow::anyhow!("{}", e))?;
+                q.try_acquire()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
             }
         }
 
@@ -390,12 +384,7 @@ impl HttpClient {
         tokio::time::sleep(Duration::from_secs(retry_after)).await;
 
         // One final attempt after backoff
-        let resp = self
-            .client
-            .get(url)
-            .query(params)
-            .send()
-            .await?;
+        let resp = self.client.get(url).query(params).send().await?;
 
         if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
             return Err(anyhow::anyhow!("API rate limited after backoff (429)"));
@@ -446,9 +435,7 @@ impl HttpClient {
         }
 
         let url = format!("{}/search/movie", self.tmdb_base_url);
-        let resp = self
-            .get_json(&url, &params)
-            .await?;
+        let resp = self.get_json(&url, &params).await?;
         let resp = self.handle_http_status(resp, &url, &params).await?;
         let resp: TmdbSearchResponse = self.record_and_deserialize(resp).await?;
 
@@ -484,9 +471,7 @@ impl HttpClient {
         params.insert("query".to_string(), query.to_string());
 
         let url = format!("{}/search/tv", self.tmdb_base_url);
-        let resp = self
-            .get_json(&url, &params)
-            .await?;
+        let resp = self.get_json(&url, &params).await?;
         let resp = self.handle_http_status(resp, &url, &params).await?;
         let resp: TmdbSearchResponse = self.record_and_deserialize(resp).await?;
 
@@ -529,9 +514,7 @@ impl HttpClient {
         }
 
         let url = format!("{}/", self.omdb_base_url);
-        let resp = self
-            .get_json(&url, &params)
-            .await?;
+        let resp = self.get_json(&url, &params).await?;
         let resp = self.handle_http_status(resp, &url, &params).await?;
         let resp: OmdbResponse = self.record_and_deserialize(resp).await?;
 
@@ -572,9 +555,7 @@ impl HttpClient {
         }
 
         let url = format!("{}/", self.omdb_base_url);
-        let resp = self
-            .get_json(&url, &params)
-            .await?;
+        let resp = self.get_json(&url, &params).await?;
         let resp = self.handle_http_status(resp, &url, &params).await?;
         let resp: OmdbResponse = self.record_and_deserialize(resp).await?;
 
@@ -673,9 +654,7 @@ impl HttpClient {
             ),
         ]);
 
-        let resp = self
-            .get_json(&url, &params)
-            .await?;
+        let resp = self.get_json(&url, &params).await?;
         let resp = self.handle_http_status(resp, &url, &params).await?;
         let resp: TmdbDetails = self.record_and_deserialize(resp).await?;
 
@@ -884,9 +863,7 @@ impl MetadataSearcher for HttpClient {
         season: u32,
         episode: u32,
     ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = Result<Option<f64>, MetadataError>> + Send + '_,
-        >,
+        Box<dyn std::future::Future<Output = Result<Option<f64>, MetadataError>> + Send + '_>,
     > {
         let client = self.clone();
         Box::pin(async move {
@@ -1080,12 +1057,18 @@ mod tests {
         let client = HttpClient::for_testing(mock_server.uri(), Some("test_key".to_string()), None);
 
         // First call — cache miss, hits the mock server
-        let results1 = client.search_movies("Fight Club", Some(1999)).await.unwrap();
+        let results1 = client
+            .search_movies("Fight Club", Some(1999))
+            .await
+            .unwrap();
         assert_eq!(results1.len(), 1);
         assert_eq!(results1[0].title, "Fight Club");
 
         // Second call — cache hit, should return same result without hitting server
-        let results2 = client.search_movies("Fight Club", Some(1999)).await.unwrap();
+        let results2 = client
+            .search_movies("Fight Club", Some(1999))
+            .await
+            .unwrap();
         assert_eq!(results2.len(), 1);
         assert_eq!(results2[0].title, "Fight Club");
 
@@ -1116,10 +1099,16 @@ mod tests {
         let client = HttpClient::for_testing(mock_server.uri(), Some("test_key".to_string()), None);
 
         // Different year = different cache key
-        let results1 = client.search_movies("Fight Club", Some(1999)).await.unwrap();
+        let results1 = client
+            .search_movies("Fight Club", Some(1999))
+            .await
+            .unwrap();
         assert_eq!(results1.len(), 1);
 
-        let results2 = client.search_movies("Fight Club", Some(2000)).await.unwrap();
+        let results2 = client
+            .search_movies("Fight Club", Some(2000))
+            .await
+            .unwrap();
         assert_eq!(results2.len(), 1);
 
         let metrics = client.metrics.lock().await;
@@ -1150,11 +1139,17 @@ mod tests {
         let client = HttpClient::for_testing(mock_server.uri(), Some("test_key".to_string()), None);
 
         // Use trait method to exercise cache logic
-        let enrichment1 = riply_core::MetadataSearcher::fetch_enrichment(&client, 550, &MediaType::Movie).await.unwrap();
+        let enrichment1 =
+            riply_core::MetadataSearcher::fetch_enrichment(&client, 550, &MediaType::Movie)
+                .await
+                .unwrap();
         assert_eq!(enrichment1.runtime, Some(139));
 
         // Second call — cache hit
-        let enrichment2 = riply_core::MetadataSearcher::fetch_enrichment(&client, 550, &MediaType::Movie).await.unwrap();
+        let enrichment2 =
+            riply_core::MetadataSearcher::fetch_enrichment(&client, 550, &MediaType::Movie)
+                .await
+                .unwrap();
         assert_eq!(enrichment2.runtime, Some(139));
 
         let metrics = client.metrics.lock().await;
@@ -1214,7 +1209,10 @@ mod tests {
         let client = HttpClient::for_testing(mock_server.uri(), Some("test_key".to_string()), None);
 
         // First call — cache miss
-        let results1 = client.search_movies("Fight Club", Some(1999)).await.unwrap();
+        let results1 = client
+            .search_movies("Fight Club", Some(1999))
+            .await
+            .unwrap();
         assert_eq!(results1.len(), 1);
 
         // Manually expire the cache entry
@@ -1231,7 +1229,10 @@ mod tests {
         }
 
         // Second call — cache expired, should hit server again
-        let results2 = client.search_movies("Fight Club", Some(1999)).await.unwrap();
+        let results2 = client
+            .search_movies("Fight Club", Some(1999))
+            .await
+            .unwrap();
         assert_eq!(results2.len(), 1);
 
         let metrics = client.metrics.lock().await;

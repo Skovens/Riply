@@ -7,6 +7,7 @@ pub mod setup;
 use std::process::Command;
 
 pub use backend::MakemkvBackend;
+pub use backend::FLATPAK_RIP_TEMP_DIR;
 pub use dryrun::DryRunBackend;
 pub use session::MakemkvSession;
 pub use setup::{check_installation, install_makemkv, InstallationStatus};

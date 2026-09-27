@@ -153,7 +153,11 @@ impl FolderRecord {
             let mut sorted = files;
             sorted.sort_by_key(|a| std::cmp::Reverse(a.1)); // Sort by size descending
             let main = sorted.first().map(|(name, _)| name.clone());
-            let extras: Vec<String> = sorted.iter().skip(1).map(|(name, _)| name.clone()).collect();
+            let extras: Vec<String> = sorted
+                .iter()
+                .skip(1)
+                .map(|(name, _)| name.clone())
+                .collect();
             (main, extras)
         };
 
@@ -253,8 +257,8 @@ mod tests {
     fn test_folder_record_with_files() {
         let path = PathBuf::from("/test/Inception (2010)");
         let files = vec![
-            ("Inception.mkv".to_string(), 8000000000), // 8GB
-            ("Commentary.mkv".to_string(), 500000000), // 500MB
+            ("Inception.mkv".to_string(), 8000000000),        // 8GB
+            ("Commentary.mkv".to_string(), 500000000),        // 500MB
             ("Behind the Scenes.mkv".to_string(), 300000000), // 300MB
         ];
         let record = FolderRecord::with_files(
@@ -266,7 +270,13 @@ mod tests {
 
         assert_eq!(record.file_count, 3);
         assert_eq!(record.main_file, Some("Inception.mkv".to_string()));
-        assert_eq!(record.extra_files, vec!["Commentary.mkv".to_string(), "Behind the Scenes.mkv".to_string()]);
+        assert_eq!(
+            record.extra_files,
+            vec![
+                "Commentary.mkv".to_string(),
+                "Behind the Scenes.mkv".to_string()
+            ]
+        );
         assert_eq!(record.status, FolderStatus::Scanned);
     }
 
@@ -279,12 +289,7 @@ mod tests {
             2,
         );
 
-        record.apply_tmdb_match(
-            "Inception".to_string(),
-            Some(2010),
-            27205,
-            MediaType::Movie,
-        );
+        record.apply_tmdb_match("Inception".to_string(), Some(2010), 27205, MediaType::Movie);
 
         assert_eq!(record.suggested_name, Some("Inception".to_string()));
         assert_eq!(record.suggested_year, Some(2010));
@@ -303,12 +308,7 @@ mod tests {
             3,
         );
 
-        record.apply_tmdb_match(
-            "Doctor Who".to_string(),
-            None,
-            57247,
-            MediaType::Tv,
-        );
+        record.apply_tmdb_match("Doctor Who".to_string(), None, 57247, MediaType::Tv);
 
         assert_eq!(record.suggested_name, Some("Doctor Who".to_string()));
         assert_eq!(record.suggested_year, None);

@@ -47,20 +47,18 @@ pub async fn rip_command(command: RipCommand, config: &infra::Config) -> Result<
                 Some(d) => d,
                 None => {
                     // Use Flatpak-aware default destination
-                    let drives = backend.detect_drives()
+                    let drives = backend
+                        .detect_drives()
                         .map_err(|e| anyhow::anyhow!("Failed to detect drives: {}", e))?;
-                    let disc_name = drives.iter()
+                    let disc_name = drives
+                        .iter()
                         .find(|d| d.index == index)
                         .and_then(|d| d.disc_name.clone())
                         .unwrap_or_else(|| format!("Disc_{}", index));
                     let (path, _) = if backend.is_flatpak() {
-                        infra::makemkv::backend::resolve_rip_destination_flatpak(
-                            &disc_name,
-                        )
+                        infra::makemkv::backend::resolve_rip_destination_flatpak(&disc_name)
                     } else {
-                        infra::makemkv::backend::resolve_rip_destination_native(
-                            &disc_name,
-                        )
+                        infra::makemkv::backend::resolve_rip_destination_native(&disc_name)
                     };
                     path.to_string_lossy().to_string()
                 }
@@ -179,7 +177,8 @@ async fn start_rip(
     let drives = backend.detect_drives()?;
 
     // Resolve title asynchronously (separate from the synchronous closure)
-    let subdir_hint: Option<String> = if let Some(drive) = drives.iter().find(|d| d.index == index) {
+    let subdir_hint: Option<String> = if let Some(drive) = drives.iter().find(|d| d.index == index)
+    {
         if let Some(ref disc_name) = drive.disc_name {
             let (title, year) = resolve_rip_title(disc_name, searcher).await;
             if !title.is_empty() {

@@ -360,12 +360,7 @@ fn check_flatpak_dest_writable(dest: &str) -> (bool, Vec<SandboxIssue>) {
     if success {
         // Clean up the test file
         let _ = StdCommand::new("flatpak")
-            .args([
-                "run",
-                "--command=rm",
-                "com.makemkv.MakeMKV",
-                &probe_path,
-            ])
+            .args(["run", "--command=rm", "com.makemkv.MakeMKV", &probe_path])
             .output();
         (true, issues)
     } else {
@@ -532,7 +527,10 @@ mod tests {
         let back: InstallationStatus = serde_json::from_str(&json).unwrap();
         assert_eq!(status.installed, back.installed);
         assert_eq!(status.missing, back.missing);
-        assert_eq!(status.rip_destination_writable, back.rip_destination_writable);
+        assert_eq!(
+            status.rip_destination_writable,
+            back.rip_destination_writable
+        );
     }
 
     #[test]

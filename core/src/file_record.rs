@@ -156,76 +156,200 @@ pub struct FileRecord {
 
 impl FileRecord {
     // ── ScanRecord accessors ──────────────────────────────────────────────
-    pub fn id(&self) -> &str { &self.scan.id }
-    pub fn path(&self) -> &PathBuf { &self.scan.path }
-    pub fn filename(&self) -> &str { &self.scan.filename }
-    pub fn size(&self) -> Option<i64> { self.scan.size }
-    pub fn duration(&self) -> Option<i64> { self.scan.duration }
-    pub fn hash(&self) -> &str { &self.scan.hash }
-    pub fn status(&self) -> &PipelineStatus { &self.scan.status }
-    pub fn content_type(&self) -> &ContentType { &self.scan.content_type }
-    pub fn media_type(&self) -> &MediaType { &self.scan.media_type }
-    pub fn title_group_id(&self) -> &Option<String> { &self.scan.title_group_id }
-    pub fn duplicate_path(&self) -> &Option<PathBuf> { &self.scan.duplicate_path }
-    pub fn reviewed(&self) -> bool { self.scan.reviewed }
-    pub fn created_at(&self) -> &str { &self.scan.created_at }
-    pub fn updated_at(&self) -> &str { &self.scan.updated_at }
+    pub fn id(&self) -> &str {
+        &self.scan.id
+    }
+    pub fn path(&self) -> &PathBuf {
+        &self.scan.path
+    }
+    pub fn filename(&self) -> &str {
+        &self.scan.filename
+    }
+    pub fn size(&self) -> Option<i64> {
+        self.scan.size
+    }
+    pub fn duration(&self) -> Option<i64> {
+        self.scan.duration
+    }
+    pub fn hash(&self) -> &str {
+        &self.scan.hash
+    }
+    pub fn status(&self) -> &PipelineStatus {
+        &self.scan.status
+    }
+    pub fn content_type(&self) -> &ContentType {
+        &self.scan.content_type
+    }
+    pub fn media_type(&self) -> &MediaType {
+        &self.scan.media_type
+    }
+    pub fn title_group_id(&self) -> &Option<String> {
+        &self.scan.title_group_id
+    }
+    pub fn duplicate_path(&self) -> &Option<PathBuf> {
+        &self.scan.duplicate_path
+    }
+    pub fn reviewed(&self) -> bool {
+        self.scan.reviewed
+    }
+    pub fn created_at(&self) -> &str {
+        &self.scan.created_at
+    }
+    pub fn updated_at(&self) -> &str {
+        &self.scan.updated_at
+    }
 
     // ── MetadataRecord accessors ──────────────────────────────────────────
-    pub fn suggested_title(&self) -> &Option<String> { &self.metadata.suggested_title }
-    pub fn suggested_year(&self) -> &Option<u32> { &self.metadata.suggested_year }
-    pub fn confidence(&self) -> &Option<f64> { &self.metadata.confidence }
-    pub fn canonical_title(&self) -> &Option<String> { &self.metadata.canonical_title }
-    pub fn canonical_year(&self) -> &Option<u32> { &self.metadata.canonical_year }
-    pub fn tmdb_id(&self) -> &Option<i32> { &self.metadata.tmdb_id }
-    pub fn series_name(&self) -> &Option<String> { &self.metadata.series_name }
-    pub fn season_number(&self) -> &Option<u32> { &self.metadata.season_number }
-    pub fn episode_number(&self) -> &Option<u32> { &self.metadata.episode_number }
-    pub fn episode_title(&self) -> &Option<String> { &self.metadata.episode_title }
-    pub fn source(&self) -> &Option<String> { &self.metadata.source }
+    pub fn suggested_title(&self) -> &Option<String> {
+        &self.metadata.suggested_title
+    }
+    pub fn suggested_year(&self) -> &Option<u32> {
+        &self.metadata.suggested_year
+    }
+    pub fn confidence(&self) -> &Option<f64> {
+        &self.metadata.confidence
+    }
+    pub fn canonical_title(&self) -> &Option<String> {
+        &self.metadata.canonical_title
+    }
+    pub fn canonical_year(&self) -> &Option<u32> {
+        &self.metadata.canonical_year
+    }
+    pub fn tmdb_id(&self) -> &Option<i32> {
+        &self.metadata.tmdb_id
+    }
+    pub fn series_name(&self) -> &Option<String> {
+        &self.metadata.series_name
+    }
+    pub fn season_number(&self) -> &Option<u32> {
+        &self.metadata.season_number
+    }
+    pub fn episode_number(&self) -> &Option<u32> {
+        &self.metadata.episode_number
+    }
+    pub fn episode_title(&self) -> &Option<String> {
+        &self.metadata.episode_title
+    }
+    pub fn source(&self) -> &Option<String> {
+        &self.metadata.source
+    }
 
     // ── EnrichmentRecord accessors ────────────────────────────────────────
-    pub fn subtitle_text(&self) -> &Option<String> { &self.enrichment.subtitle_text }
-    pub fn genres(&self) -> &Option<Vec<String>> { &self.enrichment.genres }
-    pub fn runtime(&self) -> &Option<i32> { &self.enrichment.runtime }
-    pub fn content_rating(&self) -> &Option<String> { &self.enrichment.content_rating }
-    pub fn overview(&self) -> &Option<String> { &self.enrichment.overview }
-    pub fn cast_list(&self) -> &Option<Vec<String>> { &self.enrichment.cast_list }
+    pub fn subtitle_text(&self) -> &Option<String> {
+        &self.enrichment.subtitle_text
+    }
+    pub fn genres(&self) -> &Option<Vec<String>> {
+        &self.enrichment.genres
+    }
+    pub fn runtime(&self) -> &Option<i32> {
+        &self.enrichment.runtime
+    }
+    pub fn content_rating(&self) -> &Option<String> {
+        &self.enrichment.content_rating
+    }
+    pub fn overview(&self) -> &Option<String> {
+        &self.enrichment.overview
+    }
+    pub fn cast_list(&self) -> &Option<Vec<String>> {
+        &self.enrichment.cast_list
+    }
 
     // ── Mutators ──────────────────────────────────────────────────────────
-    pub fn id_mut(&mut self) -> &mut String { &mut self.scan.id }
-    pub fn path_mut(&mut self) -> &mut PathBuf { &mut self.scan.path }
-    pub fn filename_mut(&mut self) -> &mut String { &mut self.scan.filename }
-    pub fn size_mut(&mut self) -> &mut Option<i64> { &mut self.scan.size }
-    pub fn duration_mut(&mut self) -> &mut Option<i64> { &mut self.scan.duration }
-    pub fn hash_mut(&mut self) -> &mut String { &mut self.scan.hash }
-    pub fn status_mut(&mut self) -> &mut PipelineStatus { &mut self.scan.status }
-    pub fn content_type_mut(&mut self) -> &mut ContentType { &mut self.scan.content_type }
-    pub fn media_type_mut(&mut self) -> &mut MediaType { &mut self.scan.media_type }
-    pub fn title_group_id_mut(&mut self) -> &mut Option<String> { &mut self.scan.title_group_id }
-    pub fn duplicate_path_mut(&mut self) -> &mut Option<PathBuf> { &mut self.scan.duplicate_path }
-    pub fn reviewed_mut(&mut self) -> &mut bool { &mut self.scan.reviewed }
-    pub fn created_at_mut(&mut self) -> &mut String { &mut self.scan.created_at }
-    pub fn updated_at_mut(&mut self) -> &mut String { &mut self.scan.updated_at }
+    pub fn id_mut(&mut self) -> &mut String {
+        &mut self.scan.id
+    }
+    pub fn path_mut(&mut self) -> &mut PathBuf {
+        &mut self.scan.path
+    }
+    pub fn filename_mut(&mut self) -> &mut String {
+        &mut self.scan.filename
+    }
+    pub fn size_mut(&mut self) -> &mut Option<i64> {
+        &mut self.scan.size
+    }
+    pub fn duration_mut(&mut self) -> &mut Option<i64> {
+        &mut self.scan.duration
+    }
+    pub fn hash_mut(&mut self) -> &mut String {
+        &mut self.scan.hash
+    }
+    pub fn status_mut(&mut self) -> &mut PipelineStatus {
+        &mut self.scan.status
+    }
+    pub fn content_type_mut(&mut self) -> &mut ContentType {
+        &mut self.scan.content_type
+    }
+    pub fn media_type_mut(&mut self) -> &mut MediaType {
+        &mut self.scan.media_type
+    }
+    pub fn title_group_id_mut(&mut self) -> &mut Option<String> {
+        &mut self.scan.title_group_id
+    }
+    pub fn duplicate_path_mut(&mut self) -> &mut Option<PathBuf> {
+        &mut self.scan.duplicate_path
+    }
+    pub fn reviewed_mut(&mut self) -> &mut bool {
+        &mut self.scan.reviewed
+    }
+    pub fn created_at_mut(&mut self) -> &mut String {
+        &mut self.scan.created_at
+    }
+    pub fn updated_at_mut(&mut self) -> &mut String {
+        &mut self.scan.updated_at
+    }
 
-    pub fn suggested_title_mut(&mut self) -> &mut Option<String> { &mut self.metadata.suggested_title }
-    pub fn suggested_year_mut(&mut self) -> &mut Option<u32> { &mut self.metadata.suggested_year }
-    pub fn confidence_mut(&mut self) -> &mut Option<f64> { &mut self.metadata.confidence }
-    pub fn canonical_title_mut(&mut self) -> &mut Option<String> { &mut self.metadata.canonical_title }
-    pub fn canonical_year_mut(&mut self) -> &mut Option<u32> { &mut self.metadata.canonical_year }
-    pub fn tmdb_id_mut(&mut self) -> &mut Option<i32> { &mut self.metadata.tmdb_id }
-    pub fn series_name_mut(&mut self) -> &mut Option<String> { &mut self.metadata.series_name }
-    pub fn season_number_mut(&mut self) -> &mut Option<u32> { &mut self.metadata.season_number }
-    pub fn episode_number_mut(&mut self) -> &mut Option<u32> { &mut self.metadata.episode_number }
-    pub fn episode_title_mut(&mut self) -> &mut Option<String> { &mut self.metadata.episode_title }
-    pub fn source_mut(&mut self) -> &mut Option<String> { &mut self.metadata.source }
+    pub fn suggested_title_mut(&mut self) -> &mut Option<String> {
+        &mut self.metadata.suggested_title
+    }
+    pub fn suggested_year_mut(&mut self) -> &mut Option<u32> {
+        &mut self.metadata.suggested_year
+    }
+    pub fn confidence_mut(&mut self) -> &mut Option<f64> {
+        &mut self.metadata.confidence
+    }
+    pub fn canonical_title_mut(&mut self) -> &mut Option<String> {
+        &mut self.metadata.canonical_title
+    }
+    pub fn canonical_year_mut(&mut self) -> &mut Option<u32> {
+        &mut self.metadata.canonical_year
+    }
+    pub fn tmdb_id_mut(&mut self) -> &mut Option<i32> {
+        &mut self.metadata.tmdb_id
+    }
+    pub fn series_name_mut(&mut self) -> &mut Option<String> {
+        &mut self.metadata.series_name
+    }
+    pub fn season_number_mut(&mut self) -> &mut Option<u32> {
+        &mut self.metadata.season_number
+    }
+    pub fn episode_number_mut(&mut self) -> &mut Option<u32> {
+        &mut self.metadata.episode_number
+    }
+    pub fn episode_title_mut(&mut self) -> &mut Option<String> {
+        &mut self.metadata.episode_title
+    }
+    pub fn source_mut(&mut self) -> &mut Option<String> {
+        &mut self.metadata.source
+    }
 
-    pub fn subtitle_text_mut(&mut self) -> &mut Option<String> { &mut self.enrichment.subtitle_text }
-    pub fn genres_mut(&mut self) -> &mut Option<Vec<String>> { &mut self.enrichment.genres }
-    pub fn runtime_mut(&mut self) -> &mut Option<i32> { &mut self.enrichment.runtime }
-    pub fn content_rating_mut(&mut self) -> &mut Option<String> { &mut self.enrichment.content_rating }
-    pub fn overview_mut(&mut self) -> &mut Option<String> { &mut self.enrichment.overview }
-    pub fn cast_list_mut(&mut self) -> &mut Option<Vec<String>> { &mut self.enrichment.cast_list }
+    pub fn subtitle_text_mut(&mut self) -> &mut Option<String> {
+        &mut self.enrichment.subtitle_text
+    }
+    pub fn genres_mut(&mut self) -> &mut Option<Vec<String>> {
+        &mut self.enrichment.genres
+    }
+    pub fn runtime_mut(&mut self) -> &mut Option<i32> {
+        &mut self.enrichment.runtime
+    }
+    pub fn content_rating_mut(&mut self) -> &mut Option<String> {
+        &mut self.enrichment.content_rating
+    }
+    pub fn overview_mut(&mut self) -> &mut Option<String> {
+        &mut self.enrichment.overview
+    }
+    pub fn cast_list_mut(&mut self) -> &mut Option<Vec<String>> {
+        &mut self.enrichment.cast_list
+    }
 
     // ── Factory ───────────────────────────────────────────────────────────
     /// Create a new FileRecord for a scanned file.

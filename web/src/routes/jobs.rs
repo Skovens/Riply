@@ -75,6 +75,8 @@ pub async fn cancel_job(
         .await
         .map_err(|e| WebError::NotFound(e.to_string()))?;
 
-    state.sse.send_json(json!({"kind":"job","action":"cancelled","index":0,"data":{"id":id}}));
+    state
+        .sse
+        .send_json(json!({"kind":"job","action":"cancelled","index":0,"data":{"id":id}}));
     Ok(Json(ApiResponse::ok(id)))
 }

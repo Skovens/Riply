@@ -32,7 +32,10 @@ pub trait FolderStore: Send + Sync {
     async fn get_folder_by_id(&self, id: &str) -> Result<Option<FolderRecord>, FolderStoreError>;
 
     /// Get folders by status.
-    async fn get_folders_by_status(&self, status: &str) -> Result<Vec<FolderRecord>, FolderStoreError>;
+    async fn get_folders_by_status(
+        &self,
+        status: &str,
+    ) -> Result<Vec<FolderRecord>, FolderStoreError>;
 
     /// Count folders grouped by status.
     async fn count_folders_by_status(&self) -> Result<Vec<(String, i64)>, FolderStoreError>;

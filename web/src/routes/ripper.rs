@@ -116,6 +116,7 @@ pub async fn list_drives(
         None => return Ok(Json(ApiResponse::ok(vec![]))),
     };
 
+    let is_sandboxed = backend.is_sandboxed();
     let drives = tokio::task::spawn_blocking(move || backend.detect_drives())
         .await
         .map_err(|e| WebError::Internal(format!("Task failed: {}", e)))?;
@@ -134,7 +135,14 @@ pub async fn list_drives(
                 // Priority: temp folder > active rips > MakeMKV state
                 // Temp folder existence is the most reliable indicator of completed rip
                 let temp_folder = format!("{}/{}", temp_dir, drive.index);
-                let temp_exists = std::path::Path::new(&temp_folder).exists();
+                // For Flatpak MakeMKV, files are written to $HOME/.var/app/com.makemkv.MakeMKV/riply/{index}
+                let actual_temp_folder = if is_sandboxed {
+                    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+                    format!("{}/{}/{}", home, infra::makemkv::FLATPAK_RIP_TEMP_DIR, drive.index)
+                } else {
+                    temp_folder.clone()
+                };
+                let temp_exists = std::path::Path::new(&actual_temp_folder).exists();
 
                 if temp_exists {
                     // Temp folder exists = rip completed (or in progress)
@@ -164,7 +172,7 @@ pub async fn list_drives(
                     && !naming_completed.contains(&drive.index)
                 {
                     let has_naming_info = disc_names.contains_key(&drive.index);
-                    let temp_folder_exists = std::path::Path::new(&temp_folder).exists();
+                    let temp_folder_exists = std::path::Path::new(&actual_temp_folder).exists();
 
                     info!(
                         drive = drive.index,
@@ -179,18 +187,16 @@ pub async fn list_drives(
                         let sse_clone = sse.clone();
                         let index_clone = drive.index;
                         let disc_name = drive.disc_name.clone();
-                        let temp_dir = temp_dir.clone();
+                        let naming_dest = actual_temp_folder.clone();
                         let searcher = searcher.clone();
 
                         info!(drive = drive.index, "Spawning auto-naming task");
 
                         tokio::spawn(async move {
                             if let (Some(disc_name), Some(searcher)) = (disc_name, searcher) {
-                                let temp_folder = format!("{}/{}", temp_dir, index_clone);
-                                info!(drive = index_clone, disc_name = %disc_name, "Starting TMDb lookup");
                                 let resolved = resolve_rip_title_with_duration(
                                     &disc_name,
-                                    &temp_folder,
+                                    &naming_dest,
                                     Some(&*searcher),
                                 )
                                 .await;
@@ -349,6 +355,14 @@ pub async fn accept_rip_naming(
         config.temp_directory.clone()
     };
     let temp_folder = format!("{}/{}", temp_dir, index);
+    // For Flatpak MakeMKV, files are written to $HOME/.var/app/com.makemkv.MakeMKV/riply/{index}
+    let is_sandboxed = state.backend.as_ref().map(|b| b.is_sandboxed()).unwrap_or(false);
+    let actual_temp_folder = if is_sandboxed {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        format!("{}/{}/{}", home, infra::makemkv::FLATPAK_RIP_TEMP_DIR, index)
+    } else {
+        temp_folder.clone()
+    };
 
     // Get library destination
     let movies_dir = {
@@ -359,7 +373,7 @@ pub async fn accept_rip_naming(
     // Determine destination based on user-confirmed name
     let year = if let Some(ref searcher) = state.searcher {
         let resolved =
-            resolve_rip_title_with_duration(&disc_name, &temp_folder, Some(&**searcher)).await;
+            resolve_rip_title_with_duration(&disc_name, &actual_temp_folder, Some(&**searcher)).await;
         resolved.1.map(|y| y as u32)
     } else {
         // Try to extract year from final_name
@@ -380,14 +394,14 @@ pub async fn accept_rip_naming(
     let final_dest_str = apply_copy_n(final_dest).to_string_lossy().to_string();
 
     // Move files from temp to final destination
-    let move_result = if std::fs::rename(&temp_folder, &final_dest_str).is_err() {
+    let move_result = if std::fs::rename(&actual_temp_folder, &final_dest_str).is_err() {
         warn!(
-            from = %temp_folder,
+            from = %actual_temp_folder,
             to = %final_dest_str,
             "std::fs::rename failed (cross-device?), falling back to copy+delete"
         );
-        copy_dir_all(&temp_folder, &final_dest_str)
-            .and_then(|_| std::fs::remove_dir_all(&temp_folder).map_err(|e| e.to_string()))
+        copy_dir_all(&actual_temp_folder, &final_dest_str)
+            .and_then(|_| std::fs::remove_dir_all(&actual_temp_folder).map_err(|e| e.to_string()))
     } else {
         Ok(())
     };
@@ -395,7 +409,7 @@ pub async fn accept_rip_naming(
     match move_result {
         Ok(()) => {
             info!(
-                from = %temp_folder,
+                from = %actual_temp_folder,
                 to = %final_dest_str,
                 "Rip moved to final destination"
             );
@@ -409,7 +423,7 @@ pub async fn accept_rip_naming(
             Ok(Json(ApiResponse::ok(final_dest_str)))
         }
         Err(e) => {
-            warn!(error = %e, from = %temp_folder, to = %final_dest_str, "Move to final destination failed");
+            warn!(error = %e, from = %actual_temp_folder, to = %final_dest_str, "Move to final destination failed");
             Err(WebError::Internal(format!("Move failed: {}", e)))
         }
     }
@@ -617,9 +631,13 @@ async fn process_rip_events(
                         return Ok(());
                     }
                     Err(_) => {
-                        // Timeout — no event in 5s. Check completion condition.
+                        // Timeout — no event in 2s. Check completion condition.
                         let now = Instant::now();
                         let time_since_event = now.duration_since(last_event_time).as_secs();
+
+                        // Only consider completion after a reasonable minimum time
+                        // (prevents false positives from transient stalls)
+                        let min_time_for_completion = if has_dvd { 120 } else { 300 };
 
                         let no_growth = if let (Some(ref dir), Some(prev)) = (&output_dir, last_completion_check_written) {
                             let written = dir_total_bytes(dir);
@@ -628,13 +646,17 @@ async fn process_rip_events(
                             false
                         };
 
-                        if time_since_event >= 5 && no_growth {
+                        if time_since_event >= min_time_for_completion && no_growth {
                             if let Some(ref dir) = output_dir {
                                 let written = dir_total_bytes(dir);
                                 if written > 0 {
                                     info!(drive = index, elapsed_secs = time_since_event, "No events and no growth — assuming rip complete (Flatpak fallback)");
                                     // Don't send rip:complete here; let the task handler send rip:named first, then rip:complete
                                     return Ok(());
+                                } else {
+                                    // No data written at all — this is likely a failure, not completion
+                                    warn!(drive = index, elapsed_secs = time_since_event, "No events and no data written — rip may have failed");
+                                    return Err("Rip produced no output — possible failure".to_string());
                                 }
                             }
                         }
@@ -858,14 +880,15 @@ pub async fn start_rip(
     Path(index): Path<usize>,
     Json(_): Json<StartRipBody>,
 ) -> Result<Json<ApiResponse<String>>, WebError> {
-    let backend = state.backend.as_ref().ok_or_else(|| {
-        WebError::ServiceUnavailable(
+    let backend = match state.backend.clone() {
+        Some(b) => b,
+        None => return Err(WebError::ServiceUnavailable(
             "No ripping backend available. Install makemkvcon or Flatpak package.".to_string(),
-        )
-    })?;
+        )),
+    };
 
     // Resolve disc name for the temp folder
-    let backend_clone = Arc::clone(backend);
+    let backend_clone = Arc::clone(&backend);
     let drives = tokio::task::spawn_blocking(move || backend_clone.detect_drives())
         .await
         .unwrap_or(Ok(vec![]))
@@ -881,8 +904,19 @@ pub async fn start_rip(
     let temp_dir = config.temp_directory.clone();
     drop(config);
     let temp_folder = format!("{}/{}", temp_dir, index);
-    std::fs::create_dir_all(&temp_folder)
-        .map_err(|e| WebError::Internal(format!("Failed to create temp folder: {}", e)))?;
+    // Don't create the directory here — let the backend create it inside the
+    // Flatpak namespace if needed (Flatpak MakeMKV can't see host directories)
+
+    // Compute the actual destination path for progress tracking.
+    // For Flatpak MakeMKV, files are written to $HOME/.var/app/com.makemkv.MakeMKV/riply/{index}
+    // not to /tmp/riply/{index}
+    let is_sandboxed = backend.is_sandboxed();
+    let actual_dest = if is_sandboxed {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        format!("{}/{}/{}", home, infra::makemkv::FLATPAK_RIP_TEMP_DIR, index)
+    } else {
+        temp_folder.clone()
+    };
 
     let mut handle = backend
         .start_rip(index, &temp_folder)
@@ -902,8 +936,9 @@ pub async fn start_rip(
         sse.send_json(json!({"kind":"rip","action":"starting","index":index,"data":{}}));
 
         // Process rip progress events, checking for cancellation
+        // Use actual_dest for progress tracking (the real path where files are written)
         let rip_result = tokio::select! {
-            result = process_rip_events(&mut handle, &sse, index, Some(temp_folder.clone())) => result,
+            result = process_rip_events(&mut handle, &sse, index, Some(actual_dest.clone())) => result,
             _ = cancel_rx.changed() => {
                 // Cancellation requested - cancel the makemkvcon process
                 let _ = handle.cancel().await;
@@ -932,8 +967,8 @@ pub async fn start_rip(
         );
 
         if let Ok(()) = rip_result {
-            // Rip completed successfully — files are in temp folder
-            info!(rip_folder = %temp_folder, "Rip completed successfully, files in temp");
+            // Rip completed successfully — files are in actual_dest (Flatpak namespace)
+            info!(rip_folder = %actual_dest, "Rip completed successfully, files in temp");
 
             // Track this drive as having a completed rip (to override MakeMKV state)
             state_clone.completed_rips.write().await.insert(index);
@@ -942,7 +977,7 @@ pub async fn start_rip(
             // Store result to send rip:named AFTER rip:complete
             let naming_result: Option<(String, Option<u32>)> = if let Some(ref disc) = disc_name {
                 let searcher_clone = searcher.clone();
-                let temp_folder_clone = temp_folder.clone();
+                let naming_dest = actual_dest.clone();
 
                 let debug_msg = format!(
                     "{}\nDEBUG: Starting synchronous auto-naming for drive {} with disc '{}'",
@@ -955,7 +990,7 @@ pub async fn start_rip(
                 // Use tokio::time::timeout to avoid blocking forever
                 let result = tokio::time::timeout(std::time::Duration::from_secs(30), async move {
                     if let Some(ref searcher) = searcher_clone {
-                        resolve_rip_title_with_duration(disc, &temp_folder_clone, Some(&**searcher))
+                        resolve_rip_title_with_duration(disc, &naming_dest, Some(&**searcher))
                             .await
                     } else {
                         (String::new(), None)
@@ -1035,8 +1070,13 @@ pub async fn start_rip(
             }
         } else {
             // Rip failed — clean up temp folder
-            info!(rip_folder = %temp_folder, "Cleaning up failed rip");
-            let _ = std::fs::remove_dir_all(&temp_folder);
+            info!(rip_folder = %actual_dest, "Cleaning up failed rip");
+            // For Flatpak, clean up the Flatpak namespace directory
+            if backend.is_sandboxed() {
+                let _ = std::fs::remove_dir_all(&actual_dest);
+            } else {
+                let _ = std::fs::remove_dir_all(&temp_folder);
+            }
             sse.send_json(json!({"kind":"rip","action":"message","index":index,"data":{"text":"Rip failed, cleaned up"}}));
             sse.send_json(json!({"kind":"drive","action":"updated","index":index,"data":{}}));
         }
@@ -1220,12 +1260,20 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
                             let config = state.config.read().await;
                             config.temp_directory.clone()
                         };
+                        let temp_folder = format!("{}/{}", temp_dir, index_clone);
+                        // For Flatpak MakeMKV, files are written to $HOME/.var/app/com.makemkv.MakeMKV/riply/{index}
+                        let is_sandboxed = state.backend.as_ref().map(|b| b.is_sandboxed()).unwrap_or(false);
+                        let actual_temp_folder = if is_sandboxed {
+                            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+                            format!("{}/{}/{}", home, infra::makemkv::FLATPAK_RIP_TEMP_DIR, index_clone)
+                        } else {
+                            temp_folder.clone()
+                        };
 
                         tokio::spawn(async move {
-                            let temp_folder = format!("{}/{}", temp_dir, index_clone);
                             let resolved = resolve_rip_title_with_duration(
                                 &disc_clone,
-                                &temp_folder,
+                                &actual_temp_folder,
                                 searcher.as_deref(),
                             )
                             .await;
@@ -1303,8 +1351,12 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
                 config.temp_directory.clone()
             };
             let temp_folder = format!("{}/{}", temp_dir, drive.index);
-            if std::fs::create_dir_all(&temp_folder).is_err() {
-                continue;
+            // For Flatpak MakeMKV, don't create directory on host — backend creates it in namespace
+            let is_sandboxed = state.backend.as_ref().map(|b| b.is_sandboxed()).unwrap_or(false);
+            if !is_sandboxed {
+                if std::fs::create_dir_all(&temp_folder).is_err() {
+                    continue;
+                }
             }
 
             // Start the rip in a background task
@@ -1371,16 +1423,25 @@ async fn execute_rip(
     let sse = state.sse.clone();
     sse.send_json(json!({"kind":"rip","action":"starting","index":index,"data":{}}));
 
+    // For Flatpak MakeMKV, files are written to $HOME/.var/app/com.makemkv.MakeMKV/riply/{index}
+    let is_sandboxed = state.backend.as_ref().map(|b| b.is_sandboxed()).unwrap_or(false);
+    let actual_temp_folder = if is_sandboxed {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        format!("{}/{}/{}", home, infra::makemkv::FLATPAK_RIP_TEMP_DIR, index)
+    } else {
+        temp_folder.clone()
+    };
+
     let searcher = state.searcher.clone();
     let state_clone = Arc::clone(&state);
-    let result = process_rip_events(&mut handle, &sse, index, Some(temp_folder.clone())).await;
+    let result = process_rip_events(&mut handle, &sse, index, Some(actual_temp_folder.clone())).await;
 
     // Post-rip: move or cleanup
     match result {
         Ok(()) => {
             // Successful rip — attempt auto-naming and duration verification
             let resolved_name = if let Some(ref disc) = disc_name {
-                resolve_rip_title_with_duration(disc, &temp_folder, searcher.as_deref()).await
+                resolve_rip_title_with_duration(disc, &actual_temp_folder, searcher.as_deref()).await
             } else {
                 (String::new(), None)
             };
@@ -1427,25 +1488,25 @@ async fn execute_rip(
             let final_dest = std::path::Path::new(&organizer_dir).join(&folder_name);
             let final_dest_str = apply_copy_n(&final_dest).to_string_lossy().to_string();
 
-            match std::fs::rename(&temp_folder, &final_dest_str) {
+            match std::fs::rename(&actual_temp_folder, &final_dest_str) {
                 Ok(()) => {
                     info!(
-                        from = %temp_folder,
+                        from = %actual_temp_folder,
                         to = %final_dest_str,
                         "Post-rip move to Organizer completed"
                     );
                     sse.send_json(json!({"kind":"rip","action":"complete","index":index,"data":{"dest":final_dest_str}}));
                 }
                 Err(e) => {
-                    warn!(error = %e, from = %temp_folder, to = %final_dest_str, "Post-rip move failed");
+                    warn!(error = %e, from = %actual_temp_folder, to = %final_dest_str, "Post-rip move failed");
                     sse.send_json(json!({"kind":"rip","action":"message","index":index,"data":{"text":format!("Move failed: {}", e)}}));
                 }
             }
         }
         Err(_) => {
             // Rip failed — clean up temp folder
-            info!(rip_folder = %temp_folder, "Cleaning up failed rip");
-            let _ = std::fs::remove_dir_all(&temp_folder);
+            info!(rip_folder = %actual_temp_folder, "Cleaning up failed rip");
+            let _ = std::fs::remove_dir_all(&actual_temp_folder);
             sse.send_json(json!({"kind":"rip","action":"message","index":index,"data":{"text":"Rip failed, cleaned up"}}));
         }
     }

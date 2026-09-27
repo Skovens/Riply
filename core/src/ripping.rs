@@ -94,6 +94,11 @@ pub trait RipBackend: Send + Sync {
 
     /// Start ripping all titles from a drive.
     fn start_rip(&self, drive: usize, dest: &str) -> Result<RipHandle, RipError>;
+
+    /// Check if this backend runs in a sandboxed environment (e.g., Flatpak).
+    fn is_sandboxed(&self) -> bool {
+        false
+    }
 }
 
 /// Async trait for streaming rip events from a running rip.

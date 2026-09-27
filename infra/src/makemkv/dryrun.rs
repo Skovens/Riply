@@ -292,11 +292,7 @@ mod tests {
         assert_eq!(scan_result.records.len(), 3, "Should find 3 episode files");
 
         // Verify episode files have correct naming
-        let filenames: Vec<&str> = scan_result
-            .records
-            .iter()
-            .map(|r| r.filename())
-            .collect();
+        let filenames: Vec<&str> = scan_result.records.iter().map(|r| r.filename()).collect();
 
         assert!(
             filenames.iter().any(|f| f.contains("S01E01")),

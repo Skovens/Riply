@@ -15,7 +15,7 @@ pub use db::Database;
 pub use http::HttpClient;
 pub use makemkv::eject_disc;
 pub use makemkv::setup::{
-    check_installation, check_installation_with_dest, install_makemkv, DetectionMethod, InstallationStatus,
-    MissingComponent, SandboxIssue,
+    check_installation, check_installation_with_dest, install_makemkv, DetectionMethod,
+    InstallationStatus, MissingComponent, SandboxIssue,
 };
 pub use makemkv::{DryRunBackend, MakemkvBackend, MakemkvSession};

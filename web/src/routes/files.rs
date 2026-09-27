@@ -157,7 +157,9 @@ pub async fn reset_db(
         .await
         .map_err(|e| WebError::Internal(e.to_string()))?;
 
-    state.sse.send_json(json!({"kind":"db","action":"reset","index":0,"data":{"deleted":deleted}}));
+    state
+        .sse
+        .send_json(json!({"kind":"db","action":"reset","index":0,"data":{"deleted":deleted}}));
 
     Ok(Json(ApiResponse::ok(deleted)))
 }

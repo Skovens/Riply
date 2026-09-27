@@ -233,7 +233,9 @@ impl SlidingWindowLimiter {
             // Must wait until the oldest timestamp expires from the window
             let oldest = state.timestamps[0];
             let time_since_oldest = now.duration_since(oldest);
-            let wait = window.checked_sub(time_since_oldest).unwrap_or(Duration::ZERO);
+            let wait = window
+                .checked_sub(time_since_oldest)
+                .unwrap_or(Duration::ZERO);
             drop(state);
             if wait > Duration::ZERO {
                 tokio::time::sleep(wait).await;
@@ -247,7 +249,11 @@ impl SlidingWindowLimiter {
         let state = self.state.lock().await;
         let now = Instant::now();
         let window = Duration::from_secs(self.window_secs);
-        let used = state.timestamps.iter().filter(|t| now.duration_since(**t) < window).count();
+        let used = state
+            .timestamps
+            .iter()
+            .filter(|t| now.duration_since(**t) < window)
+            .count();
         (self.max_requests as usize - used) as u64
     }
 }
@@ -381,10 +387,7 @@ fn next_month_start() -> String {
         (now.year(), now.month() + 1)
     };
     let next = chrono::NaiveDate::from_ymd_opt(year, month, 1).unwrap();
-    next.and_hms_opt(0, 0, 0)
-        .unwrap()
-        .and_utc()
-        .to_rfc3339()
+    next.and_hms_opt(0, 0, 0).unwrap().and_utc().to_rfc3339()
 }
 
 #[cfg(test)]
@@ -439,7 +442,11 @@ mod tests {
         let start = Instant::now();
         limiter.acquire().await;
         let elapsed = start.elapsed();
-        assert!(elapsed >= Duration::from_millis(900), "Should wait ~1s, waited {:?}", elapsed);
+        assert!(
+            elapsed >= Duration::from_millis(900),
+            "Should wait ~1s, waited {:?}",
+            elapsed
+        );
     }
 
     #[tokio::test]

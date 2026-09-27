@@ -53,12 +53,12 @@ impl HealthchecksClient {
 
 fn extract_uuid(input: &str) -> Option<String> {
     static UUID_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
-            .unwrap()
+        regex::Regex::new(
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+        )
+        .unwrap()
     });
-    UUID_RE
-        .find(input)
-        .map(|m| m.as_str().to_string())
+    UUID_RE.find(input).map(|m| m.as_str().to_string())
 }
 
 #[cfg(test)]

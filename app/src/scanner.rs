@@ -210,7 +210,7 @@ impl ScannerService {
                 if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
                     if is_media_file(ext) {
                         if let Ok(mut record) = self.process_file(&file_path) {
-                            *record.title_group_id_mut() =Some(group_id.to_string());
+                            *record.title_group_id_mut() = Some(group_id.to_string());
                             records.push(record);
                         }
                     }
@@ -238,7 +238,7 @@ impl ScannerService {
         let record = riply_core::FileRecord::new(id, path.to_path_buf(), filename, hash);
         // FileRecord::new sets size=None, so patch it in.
         let mut record = record;
-        *record.size_mut() =Some(size);
+        *record.size_mut() = Some(size);
 
         debug!(file = ?path, size, "Scanned file");
         Ok(record)
