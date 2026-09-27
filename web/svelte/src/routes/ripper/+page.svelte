@@ -11,11 +11,12 @@
   let installStatus = $state(null);
 
   // ── Unfinished Titles ──────────────────────────────────────
-  // Derived from ripNaming state (per-drive naming failures/completions)
+  // Derived from ripNaming state (per-drive naming failures only)
   // Spec: rips that fail to auto-name stay in the Rip view, not the Organizer
+  // Only show FAILED auto-names, not successful ones (which show posters)
   let unfinishedTitles = $derived.by(() =>
     Object.entries(ripNaming)
-      .filter(([, v]) => v.status === 'failed' || v.status === 'complete')
+      .filter(([, v]) => v.status === 'failed')
       .map(([idx, v]) => ({
         driveIndex: Number(idx),
         discName: v.discName,
@@ -55,6 +56,10 @@
 
   onDestroy(() => {
     sseDisconnect?.();
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
   });
 
   // ── Data fetching ──────────────────────────────────────────
@@ -67,6 +72,39 @@
     } finally {
       drivesLoading = false;
     }
+    // If drives are empty, start polling (Flatpak MakeMKV may take time to re-detect)
+    if (drives.length === 0) {
+      pollForDrives();
+    }
+  }
+
+  // Poll for drives if the list is empty (Flatpak MakeMKV may take time to re-detect)
+  let pollTimer = null;
+  async function pollForDrives(maxRetries = 10, delayMs = 3000) {
+    if (pollTimer) clearInterval(pollTimer);
+    let retries = 0;
+    pollTimer = setInterval(async () => {
+      if (drives.length > 0) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        return;
+      }
+      retries++;
+      if (retries > maxRetries) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        return;
+      }
+      try {
+        drives = await ripperApi.listDrives();
+        if (drives.length > 0) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+      } catch (e) {
+        console.error('Drive poll failed:', e);
+      }
+    }, delayMs);
   }
 
   async function fetchAutoripStatus() {
@@ -127,6 +165,7 @@
   /** @param {import('$lib/api/sse').SseEvent} event */
   function handleSSEEvent(event) {
     const { kind, action, index: idx, data } = event;
+    console.log('[SSE] Received event:', JSON.stringify(event));
 
     // Drive events
     if (kind === 'drive' && (action === 'inserted' || action === 'ejected' || action === 'removed' || action === 'updated')) {
@@ -193,6 +232,7 @@
       const discName = drives.find(d => d.index === idx)?.disc_name || '';
       const foundName = year ? `${title} (${year})` : title;
       ripNaming = { ...ripNaming, [idx]: { discName, foundName, status: 'complete' } };
+      drives = drives.map(d => d.index === idx ? { ...d, state: 'Complete' } : d);
 
       fetchPoster(idx, title, year);
       return;
@@ -214,44 +254,49 @@
   /** @param {number | null} year - Year */
   async function fetchPoster(idx, title, year) {
     if (!title) return;
+    console.log('[Poster] fetchPoster called for drive', idx, 'title:', title, 'year:', year);
 
     // Deduplicate by (title, year) — not per-drive
     const cacheKey = `${title}::${year ?? ''}`;
-    if (Object.values(ripPosters).some(p => `${p.title}::${p.year ?? ''}` === cacheKey)) return;
-
-    // Spec: search movies first, then TV if no movie match
-    const searchParams = `${encodeURIComponent(title)}${year ? `&year=${year}` : ''}`;
-    const searchUrl = `/v1/search/tmdb?query=${searchParams}&media_type=`;
+    if (Object.values(ripPosters).some(p => `${p.title}::${p.year ?? ''}` === cacheKey)) {
+      console.log('[Poster] Cache hit, skipping');
+      return;
+    }
 
     try {
       // Try movies first
-      let res = await fetch(`${searchUrl}movie`);
+      let res = await fetch(`/v1/search?q=${encodeURIComponent(title)}&type=movie`);
+      console.log('[Poster] Movie search response:', res.status);
       if (res.ok) {
         const result = await res.json();
-        const matches = result.data?.results || [];
+        const matches = result.data || [];
+        console.log('[Poster] Movie matches:', matches.length);
         if (matches.length) {
           const posterPath = matches[0].poster_path;
           if (posterPath) {
             ripPosters = { ...ripPosters, [idx]: { title, year, posterUrl: `https://image.tmdb.org/t/p/w300${posterPath}` } };
+            console.log('[Poster] Poster set for drive', idx);
           }
           return;
         }
       }
 
       // Fallback to TV
-      res = await fetch(`${searchUrl}tv`);
+      res = await fetch(`/v1/search?q=${encodeURIComponent(title)}&type=tv`);
+      console.log('[Poster] TV search response:', res.status);
       if (!res.ok) return;
 
       const result = await res.json();
-      const matches = result.data?.results || [];
+      const matches = result.data || [];
       if (!matches.length) return;
 
       const posterPath = matches[0].poster_path;
       if (!posterPath) return;
 
       ripPosters = { ...ripPosters, [idx]: { title, year, posterUrl: `https://image.tmdb.org/t/p/w300${posterPath}` } };
+      console.log('[Poster] TV Poster set for drive', idx);
     } catch (e) {
-      console.error('Failed to fetch poster:', e);
+      console.error('[Poster] Failed to fetch poster:', e);
     }
   }
 
@@ -552,7 +597,7 @@
               {/if}
 
               <!-- Eject button -->
-              {#if drive.state === 'Ready' || drive.state === 'Complete' || drive.state === 'Error'}
+              {#if drive.state === 'Ready' || drive.state === 'Complete' || drive.state === 'Error' || drive.state === 'Empty'}
                 <button
                   class="btn btn--secondary btn--sm"
                   onclick={() => ejectDisc(drive.index)}

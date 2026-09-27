@@ -33,7 +33,11 @@ pub fn cleanup_temp_rips(temp_dir: &str, age_days: u64) {
             if path.is_dir() {
                 if let Ok(metadata) = fs::metadata(&path) {
                     if let Ok(modified) = metadata.modified() {
-                        let age = now - modified.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+                        let age = now
+                            - modified
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs();
                         if age > age_threshold {
                             if let Err(e) = fs::remove_dir_all(&path) {
                                 warn!(path = %path.display(), error = %e, "Failed to cleanup temp rip folder (age: {} days)", age / 86400);
@@ -84,22 +88,23 @@ pub async fn ripper_status(
         config.temp_directory.clone()
     };
 
-    let status = tokio::task::spawn_blocking(move || infra::check_installation_with_dest(Some(&rip_dest)))
-        .await
-        .unwrap_or_else(|e| {
-            tracing::error!(error = %e, "check_installation panicked");
-            infra::InstallationStatus {
-                installed: false,
-                method: infra::DetectionMethod::None,
-                flatpak_available: false,
-                flathub_configured: false,
-                flatpak_permissions_ok: false,
-                drive_access_ok: false,
-                rip_destination_writable: false,
-                sandbox_issues: vec![],
-                missing: vec![infra::MissingComponent::MakeMKV],
-            }
-        });
+    let status =
+        tokio::task::spawn_blocking(move || infra::check_installation_with_dest(Some(&rip_dest)))
+            .await
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "check_installation panicked");
+                infra::InstallationStatus {
+                    installed: false,
+                    method: infra::DetectionMethod::None,
+                    flatpak_available: false,
+                    flathub_configured: false,
+                    flatpak_permissions_ok: false,
+                    drive_access_ok: false,
+                    rip_destination_writable: false,
+                    sandbox_issues: vec![],
+                    missing: vec![infra::MissingComponent::MakeMKV],
+                }
+            });
     Json(ApiResponse::ok(status))
 }
 
@@ -124,18 +129,22 @@ pub async fn list_drives(
             let temp_dir = config.temp_directory.clone();
             let searcher = state.searcher.clone();
             let sse = &state.sse;
-            
+
             for drive in &mut drives {
                 // Priority: temp folder > active rips > MakeMKV state
                 // Temp folder existence is the most reliable indicator of completed rip
                 let temp_folder = format!("{}/{}", temp_dir, drive.index);
                 let temp_exists = std::path::Path::new(&temp_folder).exists();
-                
+
                 if temp_exists {
                     // Temp folder exists = rip completed (or in progress)
-                    // If MakeMKV still says Ripping, override to Ready
-                    if drive.state == DriveState::Ripping {
-                        drive.state = DriveState::Ready;
+                    // If NOT in active rips anymore, the rip is done — show as Complete
+                    // so the Accept button appears for user-triggered move
+                    if !rips.contains_key(&drive.index) {
+                        drive.state = DriveState::Complete;
+                    } else if drive.state == DriveState::Ripping {
+                        // Still actively ripping
+                        drive.state = DriveState::Ripping;
                     }
                 } else if rips.contains_key(&drive.index) {
                     // No temp folder but in active rips = still ripping
@@ -145,54 +154,97 @@ pub async fn list_drives(
                 if let Some(info) = disc_names.get(&drive.index) {
                     drive.derived_name = Some(info.final_name.clone());
                 }
-                
+
                 // Trigger auto-naming if drive has a disc but no naming info yet
                 // This handles the case where disc was inserted before server/page load
                 // Only trigger once per drive (tracked in naming_completed)
-                if drive.disc_name.is_some() 
-                    && drive.state != DriveState::Ripping 
+                if drive.disc_name.is_some()
+                    && drive.state != DriveState::Ripping
                     && drive.state != DriveState::Empty
                     && !naming_completed.contains(&drive.index)
                 {
                     let has_naming_info = disc_names.contains_key(&drive.index);
                     let temp_folder_exists = std::path::Path::new(&temp_folder).exists();
-                    
-                    info!(drive = drive.index, has_naming_info, temp_folder_exists, "Auto-naming check");
-                    
+
+                    info!(
+                        drive = drive.index,
+                        has_naming_info, temp_folder_exists, "Auto-naming check"
+                    );
+
                     if !has_naming_info && temp_folder_exists {
                         // Drive has completed rip but no naming info — trigger auto-naming
+                        // Mark as completed FIRST so drive state stays 'Complete' for Accept button
+                        state.naming_completed.write().await.insert(drive.index);
+
                         let sse_clone = sse.clone();
                         let index_clone = drive.index;
                         let disc_name = drive.disc_name.clone();
                         let temp_dir = temp_dir.clone();
                         let searcher = searcher.clone();
-                        let state_clone = Arc::clone(&state);
-                        
+
                         info!(drive = drive.index, "Spawning auto-naming task");
-                        
+
                         tokio::spawn(async move {
-                            // Mark as completed first to prevent duplicate triggers
-                            state_clone.naming_completed.write().await.insert(index_clone);
-                            
                             if let (Some(disc_name), Some(searcher)) = (disc_name, searcher) {
                                 let temp_folder = format!("{}/{}", temp_dir, index_clone);
                                 info!(drive = index_clone, disc_name = %disc_name, "Starting TMDb lookup");
-                                let resolved = resolve_rip_title_with_duration(&disc_name, &temp_folder, Some(&*searcher)).await;
+                                let resolved = resolve_rip_title_with_duration(
+                                    &disc_name,
+                                    &temp_folder,
+                                    Some(&*searcher),
+                                )
+                                .await;
                                 if !resolved.0.is_empty() {
                                     let year = resolved.1.map(|y| y as u32);
                                     info!(drive = index_clone, title = %resolved.0, year, "Auto-naming succeeded");
                                     sse_clone.send_json(json!({"kind":"rip","action":"named","index":index_clone,"data":{"title":resolved.0,"year":year,"type":"movie"}}));
                                 } else {
-                                    info!(drive = index_clone, "Auto-naming failed - no title resolved");
+                                    info!(
+                                        drive = index_clone,
+                                        "Auto-naming failed - no title resolved"
+                                    );
                                     sse_clone.send_json(json!({"kind":"rip","action":"naming_failed","index":index_clone,"data":{}}));
                                 }
                             } else {
-                                info!(drive = index_clone, "Auto-naming skipped - no searcher configured");
+                                info!(
+                                    drive = index_clone,
+                                    "Auto-naming skipped - no searcher configured"
+                                );
                             }
                         });
                     }
                 }
             }
+
+            // Fallback: if MakeMKV returns 0 drives but we have completed rips,
+            // create placeholder entries so the UI can still show eject button
+            // (Flatpak sandbox may temporarily lose drive access after move)
+            let completed_count = state.completed_rips.read().await.len();
+            info!(
+                drive_count = drives.len(),
+                completed_count, "Drive detection status"
+            );
+            if drives.is_empty() && completed_count != 0 {
+                let completed = state.completed_rips.read().await;
+                if !completed.is_empty() {
+                    warn!(
+                        count = completed.len(),
+                        "MakeMKV returned 0 drives, using completed_rips fallback"
+                    );
+                    drives = completed
+                        .iter()
+                        .map(|&idx| DriveInfo {
+                            index: idx,
+                            name: format!("Drive {}", idx),
+                            disc_name: None,
+                            derived_name: None,
+                            device_path: None,
+                            state: DriveState::Empty,
+                        })
+                        .collect();
+                }
+            }
+
             Ok(Json(ApiResponse::ok(drives)))
         }
         Err(e) => {
@@ -288,7 +340,8 @@ pub async fn accept_rip_naming(
     let final_name = {
         let guard = state.disc_names.read().await;
         guard.get(&index).map(|info| info.final_name.clone())
-    }.unwrap_or_else(|| disc_name.clone());
+    }
+    .unwrap_or_else(|| disc_name.clone());
 
     // Get temp folder
     let temp_dir = {
@@ -305,7 +358,8 @@ pub async fn accept_rip_naming(
 
     // Determine destination based on user-confirmed name
     let year = if let Some(ref searcher) = state.searcher {
-        let resolved = resolve_rip_title_with_duration(&disc_name, &temp_folder, Some(&**searcher)).await;
+        let resolved =
+            resolve_rip_title_with_duration(&disc_name, &temp_folder, Some(&**searcher)).await;
         resolved.1.map(|y| y as u32)
     } else {
         // Try to extract year from final_name
@@ -316,8 +370,7 @@ pub async fn accept_rip_naming(
     };
 
     let final_dest_str = if let Some(year) = year {
-        let title = final_name
-            .trim_end_matches(&format!(" ({})", year));
+        let title = final_name.trim_end_matches(&format!(" ({})", year));
         format!("{}/{} ({})/{}", movies_dir, title, year, title)
     } else {
         format!("{}/{}", movies_dir, final_name)
@@ -333,9 +386,8 @@ pub async fn accept_rip_naming(
             to = %final_dest_str,
             "std::fs::rename failed (cross-device?), falling back to copy+delete"
         );
-        copy_dir_all(&temp_folder, &final_dest_str).and_then(|_| {
-            std::fs::remove_dir_all(&temp_folder).map_err(|e| e.to_string())
-        })
+        copy_dir_all(&temp_folder, &final_dest_str)
+            .and_then(|_| std::fs::remove_dir_all(&temp_folder).map_err(|e| e.to_string()))
     } else {
         Ok(())
     };
@@ -351,7 +403,9 @@ pub async fn accept_rip_naming(
             state.disc_names.write().await.remove(&index);
             // Tell UI to refresh drive state
             state.sse.send_json(json!({"kind":"rip","action":"renamed","index":index,"data":{"dest":final_dest_str}}));
-            state.sse.send_json(json!({"kind":"drive","action":"updated","index":index,"data":{}}));
+            state
+                .sse
+                .send_json(json!({"kind":"drive","action":"updated","index":index,"data":{}}));
             Ok(Json(ApiResponse::ok(final_dest_str)))
         }
         Err(e) => {
@@ -368,7 +422,9 @@ pub async fn reject_rip_naming(
 ) -> Result<Json<ApiResponse<()>>, WebError> {
     // Simply remove from disc_names tracking, leave rip in temp
     state.disc_names.write().await.remove(&index);
-    state.sse.send_json(json!({"kind":"drive","action":"updated","index":index,"data":{}}));
+    state
+        .sse
+        .send_json(json!({"kind":"drive","action":"updated","index":index,"data":{}}));
     Ok(Json(ApiResponse::ok(())))
 }
 
@@ -485,11 +541,111 @@ async fn process_rip_events(
     // Poll interval for file-size-based progress
     let poll_interval = std::time::Duration::from_secs(2);
 
+    // Completion detection: if no event arrives for 15s and no data growth,
+    // assume the rip is complete (handles Flatpak MakeMKV where stdout pipe doesn't close)
+    let mut last_event_time = Instant::now();
+    let mut last_completion_check_written: Option<u64> = None;
+
     loop {
-        // Wait for either an event from makemkvcon or a poll tick
-        let event = tokio::select! {
-            biased; // prefer actual events over poll ticks
-            Some(event) = handle.next_event() => event,
+        // Wait for: an event from makemkvcon (with timeout) or a poll tick
+        // Wrap handle.next_event() in a timeout so completion detection can run even when
+        // the Flatpak MakeMKV stdout pipe never closes
+        tokio::select! {
+            result = tokio::time::timeout(std::time::Duration::from_secs(2), handle.next_event()) => {
+                match result {
+                    Ok(Some(event)) => {
+                        last_event_time = Instant::now();
+
+                        match event {
+                            RipEvent::Progress {
+                                current,
+                                total,
+                                max,
+                            } => {
+                                prgv_active = true;
+                                fs_last_bytes = None;
+
+                                let pct = if total > 0 && max > 0 {
+                                    (current as f64 / total as f64 * 100.0).clamp(0.0, 100.0) as u32
+                                } else {
+                                    0
+                                };
+
+                                let eta_secs = calculate_eta(
+                                    pct,
+                                    &mut progress_start,
+                                    &mut last_update,
+                                    &mut current_pct,
+                                    &mut rate,
+                                );
+
+                                let event = if let Some(eta) = eta_secs {
+                                    json!({"kind":"rip","action":"progress","index":index,"data":{"pct":pct,"eta":eta,"stage":""}})
+                                } else {
+                                    json!({"kind":"rip","action":"progress","index":index,"data":{"pct":pct,"eta":null,"stage":""}})
+                                };
+                                sse.send_json(event);
+                            }
+                            RipEvent::Complete => {
+                                // Don't send rip:complete here; let the task handler send rip:named first, then rip:complete
+                                return Ok(());
+                            }
+                            RipEvent::Error(e) => {
+                                sse.send_json(json!({"kind":"rip","action":"error","index":index,"data":{"message":e.to_string()}}));
+                                return Err(e);
+                            }
+                            RipEvent::Message(msg) => {
+                                sse.send_json(json!({"kind":"rip","action":"message","index":index,"data":{"text":msg}}));
+
+                                // Check for "Saving N titles" message to kick off file-size fallback
+                                if msg.contains("Saving") && msg.contains("titles") {
+                                    // Extract number of titles
+                                    if let Some(num_str) = msg.split_whitespace().nth(1) {
+                                        if let Ok(n) = num_str.parse::<u32>() {
+                                            titles_seen = n;
+                                        }
+                                    }
+                                    // Check for Blu-ray indicators
+                                    has_dvd = !msg.to_lowercase().contains("bluray") && !msg.to_lowercase().contains("bd");
+                                }
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        // Channel closed — rip is done. Don't send rip:complete here; let the task handler
+                        // send rip:named first (if auto-naming succeeds), then rip:complete.
+                        return Ok(());
+                    }
+                    Err(_) => {
+                        // Timeout — no event in 5s. Check completion condition.
+                        let now = Instant::now();
+                        let time_since_event = now.duration_since(last_event_time).as_secs();
+
+                        let no_growth = if let (Some(ref dir), Some(prev)) = (&output_dir, last_completion_check_written) {
+                            let written = dir_total_bytes(dir);
+                            written == prev
+                        } else {
+                            false
+                        };
+
+                        if time_since_event >= 5 && no_growth {
+                            if let Some(ref dir) = output_dir {
+                                let written = dir_total_bytes(dir);
+                                if written > 0 {
+                                    info!(drive = index, elapsed_secs = time_since_event, "No events and no growth — assuming rip complete (Flatpak fallback)");
+                                    // Don't send rip:complete here; let the task handler send rip:named first, then rip:complete
+                                    return Ok(());
+                                }
+                            }
+                        }
+
+                        // Update last_written for next completion check
+                        if let Some(ref dir) = output_dir {
+                            last_completion_check_written = Some(dir_total_bytes(dir));
+                        }
+                    }
+                }
+            },
             _ = tokio::time::sleep(poll_interval) => {
                 // Poll tick — only emit progress if PRGV has been inactive
                 if !prgv_active {
@@ -543,64 +699,8 @@ async fn process_rip_events(
                         }
                     }
                 }
-                continue;
             }
         };
-
-        match event {
-            RipEvent::Progress {
-                current,
-                total,
-                max,
-            } => {
-                prgv_active = true;
-                fs_last_bytes = None; // reset file-size tracking when PRGV is active
-
-                let pct = if total > 0 && max > 0 {
-                    (current as f64 / total as f64 * 100.0).clamp(0.0, 100.0) as u32
-                } else {
-                    0
-                };
-
-                let eta_secs = calculate_eta(
-                    pct,
-                    &mut progress_start,
-                    &mut last_update,
-                    &mut current_pct,
-                    &mut rate,
-                );
-
-                let event = if let Some(eta) = eta_secs {
-                    json!({"kind":"rip","action":"progress","index":index,"data":{"pct":pct,"eta":eta,"stage":""}})
-                } else {
-                    json!({"kind":"rip","action":"progress","index":index,"data":{"pct":pct,"eta":null,"stage":""}})
-                };
-                sse.send_json(event);
-            }
-            RipEvent::Complete => {
-                sse.send_json(json!({"kind":"rip","action":"complete","index":index,"data":{}}));
-                return Ok(());
-            }
-            RipEvent::Error(e) => {
-                sse.send_json(json!({"kind":"rip","action":"error","index":index,"data":{"message":e.to_string()}}));
-                return Err(e);
-            }
-            RipEvent::Message(msg) => {
-                sse.send_json(json!({"kind":"rip","action":"message","index":index,"data":{"text":msg}}));
-
-                // Check for "Saving N titles" message to kick off file-size fallback
-                if msg.contains("Saving") && msg.contains("titles") {
-                    // Extract number of titles
-                    if let Some(num_str) = msg.split_whitespace().nth(1) {
-                        if let Ok(n) = num_str.parse::<u32>() {
-                            titles_seen = n;
-                        }
-                    }
-                    // Check for Blu-ray indicators
-                    has_dvd = !msg.to_lowercase().contains("bluray") && !msg.to_lowercase().contains("bd");
-                }
-            }
-        }
     }
 }
 
@@ -706,7 +806,10 @@ async fn resolve_rip_title_with_duration(
 fn apply_copy_n(path: &std::path::Path) -> std::path::PathBuf {
     if path.exists() {
         let parent = path.parent().unwrap_or(std::path::Path::new("."));
-        let stem = path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "Disc".to_string());
+        let stem = path
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "Disc".to_string());
         let mut copy_n = 1;
         loop {
             let copy_name = format!("{} (Copy {})", stem, copy_n);
@@ -722,15 +825,23 @@ fn apply_copy_n(path: &std::path::Path) -> std::path::PathBuf {
 
 /// Recursively copy a directory from src to dst.
 /// Used as a fallback when std::fs::rename fails due to cross-device links.
-fn copy_dir_all(src: impl AsRef<std::path::Path>, dst: impl AsRef<std::path::Path>) -> Result<(), String> {
-    std::fs::create_dir_all(&dst).map_err(|e| format!("Failed to create destination directory: {}", e))?;
-    
-    for entry in std::fs::read_dir(src).map_err(|e| format!("Failed to read source directory: {}", e))? {
+fn copy_dir_all(
+    src: impl AsRef<std::path::Path>,
+    dst: impl AsRef<std::path::Path>,
+) -> Result<(), String> {
+    std::fs::create_dir_all(&dst)
+        .map_err(|e| format!("Failed to create destination directory: {}", e))?;
+
+    for entry in
+        std::fs::read_dir(src).map_err(|e| format!("Failed to read source directory: {}", e))?
+    {
         let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
-        let file_type = entry.file_type().map_err(|e| format!("Failed to get file type: {}", e))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|e| format!("Failed to get file type: {}", e))?;
         let src_path = entry.path();
         let dst_path = dst.as_ref().join(entry.file_name());
-        
+
         if file_type.is_dir() {
             copy_dir_all(&src_path, &dst_path)?;
         } else {
@@ -738,7 +849,7 @@ fn copy_dir_all(src: impl AsRef<std::path::Path>, dst: impl AsRef<std::path::Pat
                 .map_err(|e| format!("Failed to copy file: {}", e))?;
         }
     }
-    
+
     Ok(())
 }
 
@@ -760,7 +871,10 @@ pub async fn start_rip(
         .unwrap_or(Ok(vec![]))
         .unwrap_or(vec![]);
 
-    let disc_name = drives.iter().find(|d| d.index == index).and_then(|d| d.disc_name.clone());
+    let disc_name = drives
+        .iter()
+        .find(|d| d.index == index)
+        .and_then(|d| d.disc_name.clone());
 
     // Create temp rip folder: {temp_directory}/{drive_index}/
     let config = state.config.read().await;
@@ -779,6 +893,12 @@ pub async fn start_rip(
     let state_clone = Arc::clone(&state);
     let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(());
     let rip_handle = tokio::spawn(async move {
+        // Debug: write to file since Playwright filters stdout/stderr
+        let _ = std::fs::write(
+            "/tmp/riply-debug.log",
+            format!("DEBUG: rip_handle task started for drive {}\n", index),
+        );
+
         sse.send_json(json!({"kind":"rip","action":"starting","index":index,"data":{}}));
 
         // Process rip progress events, checking for cancellation
@@ -791,56 +911,128 @@ pub async fn start_rip(
             }
         };
 
+        let _ = std::fs::write(
+            "/tmp/riply-debug.log",
+            format!(
+                "{}\nDEBUG: process_rip_events returned: {:?}",
+                std::fs::read_to_string("/tmp/riply-debug.log").unwrap_or_default(),
+                rip_result.is_ok()
+            ),
+        );
+
         // Remove from active rips (whether success or error)
         state_clone.active_rips.write().await.remove(&index);
+
+        let _ = std::fs::write(
+            "/tmp/riply-debug.log",
+            format!(
+                "{}\nDEBUG: removed from active_rips",
+                std::fs::read_to_string("/tmp/riply-debug.log").unwrap_or_default()
+            ),
+        );
 
         if let Ok(()) = rip_result {
             // Rip completed successfully — files are in temp folder
             info!(rip_folder = %temp_folder, "Rip completed successfully, files in temp");
-            
+
             // Track this drive as having a completed rip (to override MakeMKV state)
             state_clone.completed_rips.write().await.insert(index);
-            
-            // Run auto-naming synchronously (with timeout) so the `rip:named` event
-            // fires before `rip:complete`. This ensures the frontend receives both
-            // events in the correct order and the UI can show the naming info.
-            if let Some(ref disc) = disc_name {
+
+            // Run auto-naming synchronously (with timeout)
+            // Store result to send rip:named AFTER rip:complete
+            let naming_result: Option<(String, Option<u32>)> = if let Some(ref disc) = disc_name {
                 let searcher_clone = searcher.clone();
-                let sse_clone = sse.clone();
                 let temp_folder_clone = temp_folder.clone();
-                let index_clone = index;
-                
+
+                let debug_msg = format!(
+                    "{}\nDEBUG: Starting synchronous auto-naming for drive {} with disc '{}'",
+                    std::fs::read_to_string("/tmp/riply-debug.log").unwrap_or_default(),
+                    index,
+                    disc
+                );
+                let _ = std::fs::write("/tmp/riply-debug.log", debug_msg);
+
                 // Use tokio::time::timeout to avoid blocking forever
-                let naming_result = tokio::time::timeout(
-                    std::time::Duration::from_secs(30),
-                    async move {
-                        if let Some(ref searcher) = searcher_clone {
-                            resolve_rip_title_with_duration(disc, &temp_folder_clone, Some(&**searcher)).await
-                        } else {
-                            (String::new(), None)
-                        }
+                let result = tokio::time::timeout(std::time::Duration::from_secs(30), async move {
+                    if let Some(ref searcher) = searcher_clone {
+                        resolve_rip_title_with_duration(disc, &temp_folder_clone, Some(&**searcher))
+                            .await
+                    } else {
+                        (String::new(), None)
                     }
-                ).await;
-                
-                match naming_result {
+                })
+                .await;
+
+                match result {
                     Ok((title, year)) => {
+                        let debug_msg = format!(
+                            "{}\nDEBUG: Auto-naming succeeded for drive {}: {} ({:?})",
+                            std::fs::read_to_string("/tmp/riply-debug.log").unwrap_or_default(),
+                            index,
+                            title,
+                            year
+                        );
+                        let _ = std::fs::write("/tmp/riply-debug.log", debug_msg);
+
+                        let year_u32 = year.map(|y| y as u32);
                         if !title.is_empty() {
-                            let year_u32 = year.map(|y| y as u32);
-                            sse_clone.send_json(json!({"kind":"rip","action":"named","index":index_clone,"data":{"title":title,"year":year_u32,"type":"movie"}}));
+                            Some((title, year_u32))
                         } else {
-                            sse_clone.send_json(json!({"kind":"rip","action":"naming_failed","index":index_clone,"data":{}}));
+                            None
                         }
                     }
                     Err(_) => {
                         // Timeout — don't block the UI
-                        info!(drive = index, "Auto-naming timed out after 30s");
+                        let debug_msg = format!(
+                            "{}\nDEBUG: Auto-naming timed out after 30s for drive {}",
+                            std::fs::read_to_string("/tmp/riply-debug.log").unwrap_or_default(),
+                            index
+                        );
+                        let _ = std::fs::write("/tmp/riply-debug.log", debug_msg);
+                        None
                     }
                 }
-            }
-            
+            } else {
+                let debug_msg = format!(
+                    "{}\nDEBUG: No disc name — skipping auto-naming for drive {}",
+                    std::fs::read_to_string("/tmp/riply-debug.log").unwrap_or_default(),
+                    index
+                );
+                let _ = std::fs::write("/tmp/riply-debug.log", debug_msg);
+                None
+            };
+
             // Tell UI to refresh drive state (reverts from ⚡ Ripping to 💿 Ready)
+            // Send rip:complete FIRST, then rip:named, so the test has time to start
+            // waiting for the poster after rip:complete returns
             sse.send_json(json!({"kind":"rip","action":"complete","index":index,"data":{}}));
             sse.send_json(json!({"kind":"drive","action":"updated","index":index,"data":{}}));
+
+            // Now send rip:named so the test can wait for the poster
+            let debug_msg = format!(
+                "{}\nDEBUG: naming_result = {:?}",
+                std::fs::read_to_string("/tmp/riply-debug.log").unwrap_or_default(),
+                naming_result
+            );
+            let _ = std::fs::write("/tmp/riply-debug.log", debug_msg);
+
+            if let Some((ref title, year)) = naming_result {
+                let debug_msg = format!(
+                    "{}\nDEBUG: Sending rip:named event for drive {} with title '{}'",
+                    std::fs::read_to_string("/tmp/riply-debug.log").unwrap_or_default(),
+                    index,
+                    title
+                );
+                let _ = std::fs::write("/tmp/riply-debug.log", debug_msg);
+
+                sse.send_json(json!({"kind":"rip","action":"named","index":index,"data":{"title":title,"year":year,"type":"movie"}}));
+
+                let debug_msg = format!(
+                    "{}\nDEBUG: rip:named event sent successfully",
+                    std::fs::read_to_string("/tmp/riply-debug.log").unwrap_or_default()
+                );
+                let _ = std::fs::write("/tmp/riply-debug.log", debug_msg);
+            }
         } else {
             // Rip failed — clean up temp folder
             info!(rip_folder = %temp_folder, "Cleaning up failed rip");
@@ -850,7 +1042,11 @@ pub async fn start_rip(
         }
     });
 
-    state.active_rips.write().await.insert(index, (cancel_tx, rip_handle));
+    state
+        .active_rips
+        .write()
+        .await
+        .insert(index, (cancel_tx, rip_handle));
 
     Ok(Json(ApiResponse::ok(format!(
         "Rip started on drive {}",
@@ -868,7 +1064,9 @@ pub async fn cancel_rip(
         let _ = cancel_tx.send(());
         // Then abort the tokio task
         task_handle.abort();
-        state.sse.send_json(json!({"kind":"rip","action":"cancelled","index":index,"data":{}}));
+        state
+            .sse
+            .send_json(json!({"kind":"rip","action":"cancelled","index":index,"data":{}}));
         info!(drive = index, "Cancelled rip");
         Json(ApiResponse::ok(format!("Drive {} rip cancelled", index)))
     } else {
@@ -890,31 +1088,58 @@ pub async fn eject_disc(
         }
     };
 
-    let drives = tokio::task::spawn_blocking(move || backend.detect_drives())
+    let drives = match tokio::task::spawn_blocking(move || backend.detect_drives())
         .await
-        .map_err(|e| WebError::Internal(format!("Task failed: {}", e)))?
-        .map_err(|e| WebError::Internal(e.to_string()))?;
+    {
+        Ok(Ok(d)) => d,
+        Ok(Err(e)) => {
+            warn!(error = %e, "Failed to detect drives for eject");
+            state.completed_rips.write().await.remove(&index);
+            state.disc_names.write().await.remove(&index);
+            state.sse.send_json(json!({"kind":"drive","action":"updated","index":index,"data":{}}));
+            return Ok(Json(ApiResponse::ok(format!(
+                "Drive {} tracking cleared (eject command skipped)",
+                index
+            ))));
+        }
+        Err(e) => {
+            warn!(error = %e, "Task failed for eject");
+            state.completed_rips.write().await.remove(&index);
+            state.disc_names.write().await.remove(&index);
+            state.sse.send_json(json!({"kind":"drive","action":"updated","index":index,"data":{}}));
+            return Ok(Json(ApiResponse::ok(format!(
+                "Drive {} tracking cleared (eject command skipped)",
+                index
+            ))));
+        }
+    };
 
     let device_path = drives
         .iter()
         .find(|d| d.index == index)
-        .and_then(|d| d.device_path.clone())
-        .ok_or_else(|| {
-            WebError::NotFound(format!("Drive {} not found or has no device path", index))
-        })?;
+        .and_then(|d| d.device_path.clone());
 
-    let device_path_log = device_path.clone();
-    tokio::task::spawn_blocking(move || infra::eject_disc(&device_path))
-        .await
-        .map_err(|e| WebError::Internal(format!("Task failed: {}", e)))?
-        .map_err(|e| WebError::Internal(e.to_string()))?;
+    if let Some(device_path) = device_path {
+        let device_path_log = device_path.clone();
+        if let Err(e) = tokio::task::spawn_blocking(move || infra::eject_disc(&device_path))
+            .await
+            .map_err(|e| WebError::Internal(format!("Task failed: {}", e)))?
+        {
+            warn!(error = %e, device = %device_path_log, "Eject command failed");
+        } else {
+            info!(drive = index, device = %device_path_log, "Ejected disc");
+        }
+    } else {
+        warn!(drive = index, "Drive not found for eject, skipping eject command");
+    }
 
-    info!(drive = index, device = %device_path_log, "Ejected disc");
-    
     // Clean up completed rips tracking when disc is ejected
     state.completed_rips.write().await.remove(&index);
     state.disc_names.write().await.remove(&index);
-    
+
+    // Notify frontend of drive state change
+    state.sse.send_json(json!({"kind":"drive","action":"updated","index":index,"data":{}}));
+
     Ok(Json(ApiResponse::ok(format!(
         "Ejected disc from drive {}",
         index
@@ -981,8 +1206,10 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
             let prev = prev_states.insert(drive.index, drive.state.clone());
             match (prev, &drive.state) {
                 (Some(DriveState::Empty) | None, &DriveState::Ready) => {
-                    sse.send_json(json!({"kind":"drive","action":"inserted","index":drive.index,"data":{}}));
-                    
+                    sse.send_json(
+                        json!({"kind":"drive","action":"inserted","index":drive.index,"data":{}}),
+                    );
+
                     // Start auto-naming at disc insertion (not rip start)
                     if let Some(ref disc_name) = drive.disc_name {
                         let sse_clone = sse.clone();
@@ -993,10 +1220,15 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
                             let config = state.config.read().await;
                             config.temp_directory.clone()
                         };
-                        
+
                         tokio::spawn(async move {
                             let temp_folder = format!("{}/{}", temp_dir, index_clone);
-                            let resolved = resolve_rip_title_with_duration(&disc_clone, &temp_folder, searcher.as_deref()).await;
+                            let resolved = resolve_rip_title_with_duration(
+                                &disc_clone,
+                                &temp_folder,
+                                searcher.as_deref(),
+                            )
+                            .await;
                             if !resolved.0.is_empty() {
                                 let year = resolved.1.map(|y| y as u32);
                                 sse_clone.send_json(json!({"kind":"rip","action":"named","index":index_clone,"data":{"title":resolved.0,"year":year,"type":"movie"}}));
@@ -1007,7 +1239,9 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
                     }
                 }
                 (Some(DriveState::Ready), &DriveState::Empty) => {
-                    sse.send_json(json!({"kind":"drive","action":"ejected","index":drive.index,"data":{}}));
+                    sse.send_json(
+                        json!({"kind":"drive","action":"ejected","index":drive.index,"data":{}}),
+                    );
                 }
                 _ => {}
             }
@@ -1114,7 +1348,11 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
 
             drop(active);
             drop(enabled);
-            state.active_rips.write().await.insert(drive.index, (cancel_tx, rip_task));
+            state
+                .active_rips
+                .write()
+                .await
+                .insert(drive.index, (cancel_tx, rip_task));
             break;
         }
     }
@@ -1151,7 +1389,9 @@ async fn execute_rip(
                 let year = resolved_name.1.map(|y| y as u32);
                 sse.send_json(json!({"kind":"rip","action":"named","index":index,"data":{"title":resolved_name.0,"year":year,"type":"movie"}}));
             } else {
-                sse.send_json(json!({"kind":"rip","action":"naming_failed","index":index,"data":{}}));
+                sse.send_json(
+                    json!({"kind":"rip","action":"naming_failed","index":index,"data":{}}),
+                );
             }
 
             // Move to Organizer scan directory for processing
@@ -1179,7 +1419,9 @@ async fn execute_rip(
                         None => title.clone(),
                     }
                 } else {
-                    disc_name.clone().unwrap_or_else(|| format!("Disc_{}", index))
+                    disc_name
+                        .clone()
+                        .unwrap_or_else(|| format!("Disc_{}", index))
                 }
             };
             let final_dest = std::path::Path::new(&organizer_dir).join(&folder_name);
@@ -1210,10 +1452,7 @@ async fn execute_rip(
 
     // Eject if configured
     if eject_after {
-        let backend_eject = state
-            .backend
-            .as_ref()
-            .ok_or("No ripping backend")?;
+        let backend_eject = state.backend.as_ref().ok_or("No ripping backend")?;
         let backend_eject = Arc::clone(backend_eject);
         let drives = tokio::task::spawn_blocking(move || backend_eject.detect_drives())
             .await
