@@ -190,6 +190,7 @@ pub struct DetailedHealthResponse {
     pub drives: DriveHealth,
     pub makemkv: MakeMkvHealth,
     pub tmdb: TmdbHealth,
+    pub event_source: EventSourceHealth,
 }
 
 #[derive(serde::Serialize)]
@@ -209,6 +210,13 @@ pub struct MakeMkvHealth {
 #[derive(serde::Serialize)]
 pub struct TmdbHealth {
     pub configured: bool,
+    pub status: String,
+    pub error: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+pub struct EventSourceHealth {
+    pub available: bool,
     pub status: String,
     pub error: Option<String>,
 }
@@ -313,6 +321,12 @@ pub fn create_router(state: Arc<AppState>) -> Router {
                             "error".to_string()
                         };
 
+                        let event_source = EventSourceHealth {
+                            available: state.event_source_available,
+                            status: if state.event_source_available { "ok".to_string() } else { "unavailable".to_string() },
+                            error: if state.event_source_available { None } else { Some("No event source available — polling disabled".to_string()) },
+                        };
+
                         (
                             StatusCode::OK,
                             Json(DetailedHealthResponse {
@@ -322,6 +336,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
                                 drives,
                                 makemkv,
                                 tmdb,
+                                event_source,
                             }),
                         )
                     }

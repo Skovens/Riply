@@ -1,5 +1,6 @@
 pub mod analyze;
 pub mod config;
+pub mod drive_events;
 pub mod files;
 pub mod jobs;
 pub mod move_;

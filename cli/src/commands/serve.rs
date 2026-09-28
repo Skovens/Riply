@@ -40,15 +40,10 @@ pub async fn serve(
     let chain = DriveEventChain::new();
     let selected = chain.select();
 
-    let (drive_event_source, event_source_available, drive_event_rx) = if let Some(source) = selected.source {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let source_arc = Arc::clone(&source);
-        tokio::spawn(async move {
-            source_arc.listen(tx);
-        });
-        (Some(source), true, Some(rx))
+    let (drive_event_source, event_source_available) = if let Some(source) = selected.source {
+        (Some(source), true)
     } else {
-        (None, false, None)
+        (None, false)
     };
 
     let state = Arc::new(AppState {
@@ -70,9 +65,23 @@ pub async fn serve(
         naming_suggestions: RwLock::new(HashMap::new()),
         pending_accepts: RwLock::new(HashMap::new()),
         drive_event_source,
-        drive_event_rx: RwLock::new(drive_event_rx),
+        drive_event_rx: RwLock::new(None),
         event_source_available,
     });
+
+    // Spawn the drive event loop if an event source is available
+    if event_source_available {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let source = state.drive_event_source.as_ref().unwrap().clone();
+        let state_clone = Arc::clone(&state);
+        tokio::spawn(async move {
+            source.listen(tx);
+        });
+        tokio::spawn(async move {
+            web::routes::drive_events::drive_event_loop(state_clone, rx).await;
+        });
+        info!("Drive event loop started");
+    }
 
     // Start the auto-rip monitor. It watches drives that have auto-rip enabled
     // per drive and does no work otherwise.

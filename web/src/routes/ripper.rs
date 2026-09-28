@@ -9,7 +9,7 @@ use axum::{
 use riply_core::{DriveInfo, DriveState, MetadataSearcher, RipEvent, RipHandle};
 use serde::Deserialize;
 use serde_json::json;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use crate::api::{ApiResponse, AppState, DiscNameInfo};
 use crate::error::WebError;
@@ -895,37 +895,24 @@ fn copy_dir_all(
     Ok(())
 }
 
-pub async fn start_rip(
-    State(state): State<Arc<AppState>>,
-    Path(index): Path<usize>,
-    Json(_): Json<StartRipBody>,
-) -> Result<Json<ApiResponse<String>>, WebError> {
+/// Core rip logic extracted from the HTTP handler for event-driven use.
+pub async fn run_rip_task(
+    state: Arc<AppState>,
+    index: usize,
+) {
     let backend = match state.backend.clone() {
         Some(b) => b,
-        None => return Err(WebError::ServiceUnavailable(
-            "No ripping backend available. Install makemkvcon or Flatpak package.".to_string(),
-        )),
+        None => {
+            error!(drive_index = index, "No ripping backend available");
+            return;
+        }
     };
-
-    // Resolve disc name for the temp folder
-    let backend_clone = Arc::clone(&backend);
-    let drives = tokio::task::spawn_blocking(move || backend_clone.detect_drives())
-        .await
-        .unwrap_or(Ok(vec![]))
-        .unwrap_or(vec![]);
-
-    let disc_name = drives
-        .iter()
-        .find(|d| d.index == index)
-        .and_then(|d| d.disc_name.clone());
 
     // Create temp rip folder: {temp_directory}/{drive_index}/
     let config = state.config.read().await;
     let temp_dir = config.temp_directory.clone();
     drop(config);
     let temp_folder = format!("{}/{}", temp_dir, index);
-    // Don't create the directory here — let the backend create it inside the
-    // Flatpak namespace if needed (Flatpak MakeMKV can't see host directories)
 
     // Compute the actual destination path for progress tracking.
     // For Flatpak MakeMKV, files are written to $HOME/.var/app/com.makemkv.MakeMKV/riply/{index}
@@ -938,62 +925,34 @@ pub async fn start_rip(
         temp_folder.clone()
     };
 
-    let mut handle = backend
-        .start_rip(index, &temp_folder)
-        .map_err(|e| WebError::Internal(e.to_string()))?;
+    let mut handle = match backend.start_rip(index, &temp_folder) {
+        Ok(h) => h,
+        Err(e) => {
+            error!(drive_index = index, error = ?e, "Failed to start rip");
+            return;
+        }
+    };
 
     let sse = state.sse.clone();
-    let searcher = state.searcher.clone();
     let state_clone = Arc::clone(&state);
     let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(());
     let rip_handle = tokio::spawn(async move {
-        // Debug: write to file since Playwright filters stdout/stderr
-        let _ = std::fs::write(
-            "/tmp/riply-debug.log",
-            format!("DEBUG: rip_handle task started for drive {}\n", index),
-        );
-
         sse.send_json(json!({"kind":"rip","action":"starting","index":index,"data":{}}));
 
         // Process rip progress events, checking for cancellation
-        // Use actual_dest for progress tracking (the real path where files are written)
         let rip_result = tokio::select! {
             result = process_rip_events(&mut handle, &sse, index, Some(actual_dest.clone())) => result,
             _ = cancel_rx.changed() => {
-                // Cancellation requested - cancel the makemkvcon process
                 let _ = handle.cancel().await;
                 Err("Rip cancelled".to_string())
             }
         };
 
-        let _ = std::fs::write(
-            "/tmp/riply-debug.log",
-            format!(
-                "{}\nDEBUG: process_rip_events returned: {:?}",
-                std::fs::read_to_string("/tmp/riply-debug.log").unwrap_or_default(),
-                rip_result.is_ok()
-            ),
-        );
-
-        // Remove from active rips (whether success or error)
         state_clone.active_rips.write().await.remove(&index);
 
-        let _ = std::fs::write(
-            "/tmp/riply-debug.log",
-            format!(
-                "{}\nDEBUG: removed from active_rips",
-                std::fs::read_to_string("/tmp/riply-debug.log").unwrap_or_default()
-            ),
-        );
-
         if let Ok(()) = rip_result {
-            // Rip completed successfully — files are in actual_dest (Flatpak namespace)
             info!(rip_folder = %actual_dest, "Rip completed successfully, files in temp");
-
-            // Track this drive as having a completed rip (to override MakeMKV state)
             state_clone.completed_rips.write().await.insert(index);
-
-            // Tell UI rip is complete
             sse.send_json(json!({"kind":"rip","action":"complete","index":index,"data":{}}));
             sse.send_json(json!({"kind":"drive","action":"updated","index":index,"data":{}}));
 
@@ -1006,7 +965,6 @@ pub async fn start_rip(
                     "Executing queued accept — moving rip to library"
                 );
                 
-                // Execute the move
                 let config = state_clone.config.read().await;
                 let movies_dir = config.movies_directory.clone();
                 let temp_dir = config.temp_directory.clone();
@@ -1015,11 +973,9 @@ pub async fn start_rip(
                 let rip_folder = format!("{}/{}", temp_dir, index);
                 let final_dest = format!("{}/{} ({})/", movies_dir, accepted_name, year);
                 
-                // Apply (Copy N) if destination exists
                 let final_dest = apply_copy_n(std::path::Path::new(&final_dest));
                 let final_dest_str = final_dest.to_string_lossy().to_string();
                 
-                // Move rip folder to library
                 match std::fs::rename(&rip_folder, &final_dest_str) {
                     Ok(()) => {
                         info!(
@@ -1051,10 +1007,8 @@ pub async fn start_rip(
                 }
             }
         } else {
-            // Rip failed — clean up temp folder
             info!(rip_folder = %actual_dest, "Cleaning up failed rip");
-            // For Flatpak, clean up the Flatpak namespace directory
-            if backend.is_sandboxed() {
+            if is_sandboxed {
                 let _ = std::fs::remove_dir_all(&actual_dest);
             } else {
                 let _ = std::fs::remove_dir_all(&temp_folder);
@@ -1064,11 +1018,20 @@ pub async fn start_rip(
         }
     });
 
-    state
-        .active_rips
-        .write()
-        .await
-        .insert(index, (cancel_tx, rip_handle));
+    state.active_rips.write().await.insert(index, (cancel_tx, rip_handle));
+}
+
+pub async fn start_rip(
+    State(state): State<Arc<AppState>>,
+    Path(index): Path<usize>,
+    Json(_): Json<StartRipBody>,
+) -> Result<Json<ApiResponse<String>>, WebError> {
+    // Spawn the rip task directly
+    let state_clone = Arc::clone(&state);
+    let rip_index = index;
+    tokio::spawn(async move {
+        run_rip_task(state_clone, rip_index).await;
+    });
 
     Ok(Json(ApiResponse::ok(format!(
         "Rip started on drive {}",
