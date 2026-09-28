@@ -32,7 +32,7 @@ media-atlas/
 │   ├── api/               # Axum REST + SSE routes
 │   └── svelte/            # SvelteKit frontend (Tailwind, responsive, accessible)
 ├── cli/                   # CLI entrypoint (clap subcommands)
-└── tests/                 # Unit, integration, property-based, E2E
+└── docs/                  # Design documents and architecture decisions
 ```
 
 **Communication Flow:**
@@ -123,6 +123,9 @@ cargo run -- move --movies-dir /path/to/movies --tv-dir /path/to/tv-shows
 # Check pipeline status
 cargo run -- status
 
+# Check server health (requires server running)
+cargo run -- check
+
 # Rip DVDs
 cargo run -- rip
 ```
@@ -197,6 +200,8 @@ NEW → SCANNED → MATCHED → CONFIRMED → MOVED
 | GET | `/api/config` | Get current settings |
 | PUT | `/api/config` | Update settings |
 | GET | `/api/sse` | Server-Sent Events stream |
+| GET | `/health` | Basic health check |
+| GET | `/health/detailed` | Detailed health (DB, drives, MakeMKV, TMDb) |
 
 ## Development
 

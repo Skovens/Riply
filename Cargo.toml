@@ -50,9 +50,3 @@ clap = { version = "4", features = ["derive"] }
 
 # Retry
 backon = { version = "1", features = ["tokio"] }
-
-# Testing
-proptest = "1"
-wiremock = "0.5"
-assert_cmd = "2"
-predicates = "3"

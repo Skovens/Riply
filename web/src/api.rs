@@ -159,6 +159,38 @@ pub struct ReadinessResponse {
     pub error: Option<String>,
 }
 
+/// Detailed health check response
+#[derive(serde::Serialize)]
+pub struct DetailedHealthResponse {
+    pub status: String,
+    pub version: String,
+    pub database: String,
+    pub drives: DriveHealth,
+    pub makemkv: MakeMkvHealth,
+    pub tmdb: TmdbHealth,
+}
+
+#[derive(serde::Serialize)]
+pub struct DriveHealth {
+    pub count: usize,
+    pub status: String,
+    pub error: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+pub struct MakeMkvHealth {
+    pub available: bool,
+    pub status: String,
+    pub error: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+pub struct TmdbHealth {
+    pub configured: bool,
+    pub status: String,
+    pub error: Option<String>,
+}
+
 async fn health_handler() -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok".to_string(),
@@ -197,29 +229,110 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .merge(sse_handler::router(Arc::clone(&state)))
         .route("/health", get(health_handler))
         .route(
-            "/ready",
-            get(move || {
-                let db = shared_state.db.clone();
-                async move {
-                    let db_ok = db.ping().await.is_ok();
-                    if db_ok {
+            "/health/detailed",
+            get({
+                let state = Arc::clone(&shared_state);
+                move || {
+                    let state = Arc::clone(&state);
+                    async move {
+                        let db_status = if state.db.ping().await.is_ok() {
+                            "ok".to_string()
+                        } else {
+                            "error".to_string()
+                        };
+
+                        let drives = match state.backend.as_ref().map(|b| b.detect_drives()) {
+                            Some(Ok(drives)) => {
+                                let drive_count = drives.len();
+                                DriveHealth {
+                                    count: drive_count,
+                                    status: if drive_count > 0 { "ok".to_string() } else { "no_disc".to_string() },
+                                    error: None,
+                                }
+                            }
+                            Some(Err(e)) => DriveHealth {
+                                count: 0,
+                                status: "error".to_string(),
+                                error: Some(e.to_string()),
+                            },
+                            None => DriveHealth {
+                                count: 0,
+                                status: "unavailable".to_string(),
+                                error: Some("No rip backend configured".to_string()),
+                            },
+                        };
+
+                        let makemkv = match infra::MakemkvBackend::auto_detect() {
+                            Ok(_) => MakeMkvHealth {
+                                available: true,
+                                status: "ok".to_string(),
+                                error: None,
+                            },
+                            Err(e) => MakeMkvHealth {
+                                available: false,
+                                status: "unavailable".to_string(),
+                                error: Some(e.to_string()),
+                            },
+                        };
+
+                        let config = state.config.read().await;
+                        let tmdb_configured = config.tmdb_api_key.as_ref().map_or(false, |k| !k.is_empty());
+                        let tmdb = TmdbHealth {
+                            configured: tmdb_configured,
+                            status: if tmdb_configured { "ok".to_string() } else { "not_configured".to_string() },
+                            error: if tmdb_configured { None } else { Some("TMDb API key not configured".to_string()) },
+                        };
+
+                        let overall_status = if db_status == "ok" && makemkv.available {
+                            "ok".to_string()
+                        } else if db_status == "ok" {
+                            "degraded".to_string()
+                        } else {
+                            "error".to_string()
+                        };
+
                         (
                             StatusCode::OK,
-                            Json(ReadinessResponse {
-                                status: "ready".to_string(),
-                                database: "ok".to_string(),
-                                error: None,
+                            Json(DetailedHealthResponse {
+                                status: overall_status,
+                                version: env!("CARGO_PKG_VERSION").to_string(),
+                                database: db_status,
+                                drives,
+                                makemkv,
+                                tmdb,
                             }),
                         )
-                    } else {
-                        (
-                            StatusCode::SERVICE_UNAVAILABLE,
-                            Json(ReadinessResponse {
-                                status: "unavailable".to_string(),
-                                database: "error".to_string(),
-                                error: Some("Database unavailable".to_string()),
-                            }),
-                        )
+                    }
+                }
+            }),
+        )
+        .route(
+            "/ready",
+            get({
+                let db = shared_state.db.clone();
+                move || {
+                    let db = db.clone();
+                    async move {
+                        let db_ok = db.ping().await.is_ok();
+                        if db_ok {
+                            (
+                                StatusCode::OK,
+                                Json(ReadinessResponse {
+                                    status: "ready".to_string(),
+                                    database: "ok".to_string(),
+                                    error: None,
+                                }),
+                            )
+                        } else {
+                            (
+                                StatusCode::SERVICE_UNAVAILABLE,
+                                Json(ReadinessResponse {
+                                    status: "unavailable".to_string(),
+                                    database: "error".to_string(),
+                                    error: Some("Database unavailable".to_string()),
+                                }),
+                            )
+                        }
                     }
                 }
             }),

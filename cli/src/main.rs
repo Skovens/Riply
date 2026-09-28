@@ -5,7 +5,7 @@
 
 use clap::{Parser, Subcommand, ValueEnum};
 use commands::{
-    analyze_files, backup_database, duplicate::find_duplicates, library::scan_library, move_files,
+    analyze_files, backup_database, check_local, duplicate::find_duplicates, library::scan_library, move_files,
     restore_database, review_files, rip_command as do_rip, run_setup, scan_directory, show_status,
     watch::watch_directory, RipCommand, SetupArgs,
 };
@@ -134,6 +134,8 @@ enum Command {
     },
     /// Set up MakeMKV installation
     Setup(SetupArgs),
+    /// Check server health and dependencies
+    Check,
 }
 
 #[tokio::main]
@@ -241,6 +243,9 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Setup(args) => {
             run_setup(args)?;
+        }
+        Command::Check => {
+            check_local().await?;
         }
     }
 
