@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use app::JobScheduler;
+use infra::drive_events::DriveEventChain;
 use infra::{Config, Database};
 use riply_core::MetadataSearcher;
 use tokio::sync::RwLock;
@@ -35,6 +36,21 @@ pub async fn serve(
             None
         };
 
+    // Build event-driven drive detection chain and select source
+    let chain = DriveEventChain::new();
+    let selected = chain.select();
+
+    let (drive_event_source, event_source_available, drive_event_rx) = if let Some(source) = selected.source {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let source_arc = Arc::clone(&source);
+        tokio::spawn(async move {
+            source_arc.listen(tx);
+        });
+        (Some(source), true, Some(rx))
+    } else {
+        (None, false, None)
+    };
+
     let state = Arc::new(AppState {
         db: Arc::new(db),
         config: Arc::new(RwLock::new(config.clone())),
@@ -53,6 +69,9 @@ pub async fn serve(
         naming_completed: RwLock::new(HashSet::new()),
         naming_suggestions: RwLock::new(HashMap::new()),
         pending_accepts: RwLock::new(HashMap::new()),
+        drive_event_source,
+        drive_event_rx: RwLock::new(drive_event_rx),
+        event_source_available,
     });
 
     // Start the auto-rip monitor. It watches drives that have auto-rip enabled

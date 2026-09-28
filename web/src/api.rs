@@ -7,8 +7,10 @@ use axum::{
     routing::get,
     Json, Router,
 };
+use infra::drive_events::DriveEventSource;
 use riply_core::{MetadataSearcher, RipBackend};
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio::sync::RwLock;
 use tower_http::cors::CorsLayer;
@@ -82,6 +84,12 @@ pub struct AppState {
     /// Queued accepts: drives where user accepted naming while rip was in progress.
     /// When rip completes, these are executed automatically.
     pub pending_accepts: RwLock<HashMap<usize, (String, u16)>>,
+    /// Active drive event source (if available). None if no event source detected.
+    pub drive_event_source: Option<Arc<dyn DriveEventSource>>,
+    /// Receiver for drive events from the listener task.
+    pub drive_event_rx: RwLock<Option<mpsc::UnboundedReceiver<infra::drive_events::DriveEvent>>>,
+    /// Whether an event source is available (gates autorip toggle).
+    pub event_source_available: bool,
 }
 
 #[derive(Debug, serde::Deserialize)]
