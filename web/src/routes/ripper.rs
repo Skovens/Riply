@@ -75,12 +75,28 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/ripper/:index/accept", post(accept_naming))
         .route("/v1/ripper/:index/reject", post(reject_naming))
         .route("/v1/ripper/status", get(ripper_status))
+        .route("/v1/ripper/event-source", get(event_source_status))
         .route("/v1/ripper/autorip", get(autorip_status))
         .route("/v1/ripper/autorip/:index/toggle", post(autorip_toggle))
         .route("/v1/ripper/:index/start", post(start_rip))
         .route("/v1/ripper/:index/cancel", post(cancel_rip))
         .route("/v1/ripper/:index/eject", post(eject_disc))
         .with_state(state)
+}
+
+/// Get the current event source availability status.
+pub async fn event_source_status(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ApiResponse<EventSourceStatus>>, WebError> {
+    let status = EventSourceStatus {
+        available: state.event_source_available,
+    };
+    Ok(Json(ApiResponse::ok(status)))
+}
+
+#[derive(serde::Serialize)]
+struct EventSourceStatus {
+    available: bool,
 }
 
 pub async fn ripper_status(

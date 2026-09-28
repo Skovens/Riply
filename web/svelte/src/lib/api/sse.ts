@@ -152,3 +152,24 @@ export function connectSSE(onMessage: (event: SseEvent) => void, options?: SseOp
 
   return () => eventSource.close();
 }
+
+// ── Reactive SSE API ────────────────────────────────────────
+
+let currentHandler: ((event: SseEvent) => void) | null = null;
+
+/**
+ * Subscribe to SSE events. Only one handler can be active at a time.
+ * Returns a cleanup function to unsubscribe.
+ */
+export function subscribe(handler: (event: SseEvent) => void): () => void {
+  currentHandler = handler;
+  connectSSE(handler);
+  return () => {
+    currentHandler = null;
+  };
+}
+
+/** Get the current handler (for testing/debugging) */
+export function getHandler(): ((event: SseEvent) => void) | null {
+  return currentHandler;
+}

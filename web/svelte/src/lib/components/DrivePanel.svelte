@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { ripperApi } from '$lib/api';
+  import { sseApi } from '$lib/api/sse';
 
   let { open, onDriveClick } = $props();
 
@@ -10,6 +11,7 @@
   let loading = $state(false);
   let autoripDrives = $state([]);
   let rippingDriveIndex = $state(null);
+  let eventSourceAvailable = $state(false);
 
   async function fetchDrives() {
     loading = true;
@@ -30,14 +32,49 @@
     }
   }
 
+  /** Refresh drives for a specific drive index */
+  async function refreshDrive(index) {
+    // Trigger a full drive list refresh (server re-scans all drives)
+    await fetchDrives();
+  }
+
   /** @param {number} index */
   async function toggleAutorip(index) {
+    if (!eventSourceAvailable) {
+      console.warn('Auto-rip disabled: no event source available');
+      return;
+    }
     try {
       autoripDrives = await ripperApi.toggleAutorip(index);
     } catch (e) {
       console.error('Failed to toggle auto-rip:', e);
     }
   }
+
+  // Fetch event source status on mount
+  async function fetchEventSourceStatus() {
+    try {
+      const status = await ripperApi.getEventSourceStatus();
+      eventSourceAvailable = status.available;
+    } catch (e) {
+      console.error('Failed to fetch event source status:', e);
+      eventSourceAvailable = false;
+    }
+  }
+
+  // Subscribe to SSE events for auto-refresh
+  onMount(() => {
+    fetchDrives();
+    fetchEventSourceStatus();
+    sseApi.subscribe((event) => {
+      if (event.kind === 'drive' && event.action === 'updated') {
+        fetchDrives();
+      }
+      if (event.kind === 'rip' && (event.action === 'complete' || event.action === 'message')) {
+        fetchDrives();
+      }
+    });
+  });
 
   /** @param {number} index */
   async function startRip(index) {
@@ -165,11 +202,19 @@
                       Rip
                     </button>
                   {/if}
+                  <button
+                    class="btn btn--sm btn--secondary"
+                    onclick={() => refreshDrive(drive.index)}
+                    title="Refresh this drive"
+                  >
+                    ↻
+                  </button>
                 </div>
-                <label class="toggle autorip-toggle" title="Auto-rip discs inserted in this drive">
+                <label class="toggle autorip-toggle" title={eventSourceAvailable ? "Auto-rip discs inserted in this drive" : "Auto-rip requires event source (udev/inotify)"}>
                   <input
                     type="checkbox"
-                    checked={autoripDrives.includes(drive.index)}
+                    checked={eventSourceAvailable && autoripDrives.includes(drive.index)}
+                    disabled={!eventSourceAvailable}
                     onclick={() => toggleAutorip(drive.index)}
                   />
                   <span class="toggle__track"></span>

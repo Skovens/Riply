@@ -2,6 +2,14 @@ import { request } from './request';
 import type { DriveInfo, InstallationStatus } from '$lib/types';
 import type { MediaNamingChoice } from './media-naming';
 
+export interface NamingListEntry {
+  drive_index: number;
+  disc_name: string;
+  derived_name: string;
+  rip_status: string;
+  rip_progress: number | null;
+}
+
 export const ripperApi = {
   getStatus() {
     return request<InstallationStatus>('/v1/ripper/status');
@@ -57,5 +65,13 @@ export const ripperApi = {
     return request<void>(`/v1/ripper/drives/${index}/reject`, {
       method: 'POST',
     });
+  },
+
+  getNamingList() {
+    return request<NamingListEntry[]>('/v1/ripper/naming-list');
+  },
+
+  getEventSourceStatus() {
+    return request<{ available: boolean }>('/v1/ripper/event-source');
   },
 };
