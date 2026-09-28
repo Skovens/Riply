@@ -218,8 +218,29 @@ async fn resolve_rip_title_with_duration(
 
 **Important:** The move is triggered by user acceptance, NOT by rip completion alone. Rip completion only adds the entry to the naming list. If user accepted while rip was in progress, the move executes automatically when rip finishes.
 
-### 6. Error Handling
+### 6. Drive Detection
 
+**Event-driven detection replaces polling.** Sources tried in priority order:
+1. udev (Linux kernel device manager events)
+2. inotify on `/sys/block/` (filesystem event notifications)
+3. inotify on `/dev/sr*` (device node events)
+4. D-Bus (systemd-logind / udisks2 signals)
+
+First available source wins. Selected at server startup. Stored in AppState.
+
+**Autorip gating:**
+- Event source available → autorip toggle enabled
+- No event source → autorip toggle disabled with tooltip: "Event-driven detection unavailable — requires udev, inotify, or D-Bus"
+
+**Manual refresh:**
+- Refresh button always present per-drive card
+- Clicking refresh calls `list_drives()` for THAT drive only (not all drives)
+- Button disabled during refresh (prevents double-click)
+- Shows loading state per-drive
+- Initial page load auto-refreshes all drives once (on mount)
+- No continuous polling between events
+
+**Error handling:**
 | Scenario | Behavior |
 |----------|----------|
 | MakeMKV fails (disc scratch, hardware) | Descriptive error message. User can retry. |
@@ -229,6 +250,8 @@ async fn resolve_rip_title_with_duration(
 | Disk full | Basic information displayed. |
 | No TMDb/OMDb configured | Manual name entry mode. Rip still works, just no auto-naming. |
 | Auto-naming timeout (30s) | Treat as naming failure. Entry appears in naming list with "naming failed". |
+| Event fires but list_drives fails | Show "Detection failed — click Refresh" on drive card. Log warning. |
+| Event source dies mid-session | Log warning. Continue with existing state. User can click Refresh. |
 
 ---
 
