@@ -71,6 +71,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/ripper/drives/:index/rename", post(rename_disc))
         .route("/v1/ripper/drives/:index/accept", post(accept_rip_naming))
         .route("/v1/ripper/drives/:index/reject", post(reject_rip_naming))
+        .route("/v1/ripper/naming-list", get(get_naming_list))
+        .route("/v1/ripper/:index/accept", post(accept_naming))
+        .route("/v1/ripper/:index/reject", post(reject_naming))
         .route("/v1/ripper/status", get(ripper_status))
         .route("/v1/ripper/autorip", get(autorip_status))
         .route("/v1/ripper/autorip/:index/toggle", post(autorip_toggle))
@@ -166,29 +169,31 @@ pub async fn list_drives(
                 // Trigger auto-naming if drive has a disc but no naming info yet
                 // This handles the case where disc was inserted before server/page load
                 // Only trigger once per drive (tracked in naming_completed)
+                // Auto-naming starts at disc detection, NOT at rip completion
                 if drive.disc_name.is_some()
-                    && drive.state != DriveState::Ripping
                     && drive.state != DriveState::Empty
                     && !naming_completed.contains(&drive.index)
                 {
                     let has_naming_info = disc_names.contains_key(&drive.index);
-                    let temp_folder_exists = std::path::Path::new(&actual_temp_folder).exists();
+                    let naming_suggestions = state.naming_suggestions.read().await;
+                    let has_suggestion = naming_suggestions.contains_key(&drive.index);
+                    drop(naming_suggestions);
 
                     info!(
                         drive = drive.index,
-                        has_naming_info, temp_folder_exists, "Auto-naming check"
+                        has_naming_info, has_suggestion, "Auto-naming check"
                     );
 
-                    if !has_naming_info && temp_folder_exists {
-                        // Drive has completed rip but no naming info — trigger auto-naming
-                        // Mark as completed FIRST so drive state stays 'Complete' for Accept button
+                    if !has_naming_info && !has_suggestion {
+                        // Drive has disc but no naming info — trigger auto-naming
+                        // Auto-naming runs in background, independent of rip state
                         state.naming_completed.write().await.insert(drive.index);
 
                         let sse_clone = sse.clone();
                         let index_clone = drive.index;
                         let disc_name = drive.disc_name.clone();
-                        let naming_dest = actual_temp_folder.clone();
                         let searcher = searcher.clone();
+                        let state_clone = Arc::clone(&state);
 
                         info!(drive = drive.index, "Spawning auto-naming task");
 
@@ -196,26 +201,41 @@ pub async fn list_drives(
                             if let (Some(disc_name), Some(searcher)) = (disc_name, searcher) {
                                 let resolved = resolve_rip_title_with_duration(
                                     &disc_name,
-                                    &naming_dest,
+                                    "", // rip_folder not needed for disc detection naming
                                     Some(&*searcher),
                                 )
                                 .await;
+                                
+                                // Store suggestion in AppState
+                                let mut suggestions = state_clone.naming_suggestions.write().await;
                                 if !resolved.0.is_empty() {
-                                    let year = resolved.1.map(|y| y as u32);
+                                    let year = resolved.1.unwrap_or(0);
+                                    suggestions.insert(index_clone, Some((resolved.0.clone(), year)));
                                     info!(drive = index_clone, title = %resolved.0, year, "Auto-naming succeeded");
                                     sse_clone.send_json(json!({"kind":"rip","action":"named","index":index_clone,"data":{"title":resolved.0,"year":year,"type":"movie"}}));
                                 } else {
+                                    suggestions.insert(index_clone, None);
                                     info!(
                                         drive = index_clone,
                                         "Auto-naming failed - no title resolved"
                                     );
                                     sse_clone.send_json(json!({"kind":"rip","action":"naming_failed","index":index_clone,"data":{}}));
                                 }
+                                drop(suggestions);
+                                
+                                // Notify that naming list changed
+                                sse_clone.send_json(json!({"kind":"naming","action":"list_updated","data":{}}));
                             } else {
                                 info!(
                                     drive = index_clone,
                                     "Auto-naming skipped - no searcher configured"
                                 );
+                                // Still mark as failed since we can't name without searcher
+                                let mut suggestions = state_clone.naming_suggestions.write().await;
+                                suggestions.insert(index_clone, None);
+                                drop(suggestions);
+                                sse_clone.send_json(json!({"kind":"rip","action":"naming_failed","index":index_clone,"data":{}}));
+                                sse_clone.send_json(json!({"kind":"naming","action":"list_updated","data":{}}));
                             }
                         });
                     }
@@ -973,100 +993,62 @@ pub async fn start_rip(
             // Track this drive as having a completed rip (to override MakeMKV state)
             state_clone.completed_rips.write().await.insert(index);
 
-            // Run auto-naming synchronously (with timeout)
-            // Store result to send rip:named AFTER rip:complete
-            let naming_result: Option<(String, Option<u32>)> = if let Some(ref disc) = disc_name {
-                let searcher_clone = searcher.clone();
-                let naming_dest = actual_dest.clone();
-
-                let debug_msg = format!(
-                    "{}\nDEBUG: Starting synchronous auto-naming for drive {} with disc '{}'",
-                    std::fs::read_to_string("/tmp/riply-debug.log").unwrap_or_default(),
-                    index,
-                    disc
-                );
-                let _ = std::fs::write("/tmp/riply-debug.log", debug_msg);
-
-                // Use tokio::time::timeout to avoid blocking forever
-                let result = tokio::time::timeout(std::time::Duration::from_secs(30), async move {
-                    if let Some(ref searcher) = searcher_clone {
-                        resolve_rip_title_with_duration(disc, &naming_dest, Some(&**searcher))
-                            .await
-                    } else {
-                        (String::new(), None)
-                    }
-                })
-                .await;
-
-                match result {
-                    Ok((title, year)) => {
-                        let debug_msg = format!(
-                            "{}\nDEBUG: Auto-naming succeeded for drive {}: {} ({:?})",
-                            std::fs::read_to_string("/tmp/riply-debug.log").unwrap_or_default(),
-                            index,
-                            title,
-                            year
-                        );
-                        let _ = std::fs::write("/tmp/riply-debug.log", debug_msg);
-
-                        let year_u32 = year.map(|y| y as u32);
-                        if !title.is_empty() {
-                            Some((title, year_u32))
-                        } else {
-                            None
-                        }
-                    }
-                    Err(_) => {
-                        // Timeout — don't block the UI
-                        let debug_msg = format!(
-                            "{}\nDEBUG: Auto-naming timed out after 30s for drive {}",
-                            std::fs::read_to_string("/tmp/riply-debug.log").unwrap_or_default(),
-                            index
-                        );
-                        let _ = std::fs::write("/tmp/riply-debug.log", debug_msg);
-                        None
-                    }
-                }
-            } else {
-                let debug_msg = format!(
-                    "{}\nDEBUG: No disc name — skipping auto-naming for drive {}",
-                    std::fs::read_to_string("/tmp/riply-debug.log").unwrap_or_default(),
-                    index
-                );
-                let _ = std::fs::write("/tmp/riply-debug.log", debug_msg);
-                None
-            };
-
-            // Tell UI to refresh drive state (reverts from ⚡ Ripping to 💿 Ready)
-            // Send rip:complete FIRST, then rip:named, so the test has time to start
-            // waiting for the poster after rip:complete returns
+            // Tell UI rip is complete
             sse.send_json(json!({"kind":"rip","action":"complete","index":index,"data":{}}));
             sse.send_json(json!({"kind":"drive","action":"updated","index":index,"data":{}}));
 
-            // Now send rip:named so the test can wait for the poster
-            let debug_msg = format!(
-                "{}\nDEBUG: naming_result = {:?}",
-                std::fs::read_to_string("/tmp/riply-debug.log").unwrap_or_default(),
-                naming_result
-            );
-            let _ = std::fs::write("/tmp/riply-debug.log", debug_msg);
-
-            if let Some((ref title, year)) = naming_result {
-                let debug_msg = format!(
-                    "{}\nDEBUG: Sending rip:named event for drive {} with title '{}'",
-                    std::fs::read_to_string("/tmp/riply-debug.log").unwrap_or_default(),
-                    index,
-                    title
+            // Check for queued accept (user accepted while rip was in progress)
+            let queued_accept = state_clone.pending_accepts.write().await.remove(&index);
+            if let Some((accepted_name, year)) = queued_accept {
+                info!(
+                    drive = index,
+                    accepted_name = %accepted_name, year,
+                    "Executing queued accept — moving rip to library"
                 );
-                let _ = std::fs::write("/tmp/riply-debug.log", debug_msg);
-
-                sse.send_json(json!({"kind":"rip","action":"named","index":index,"data":{"title":title,"year":year,"type":"movie"}}));
-
-                let debug_msg = format!(
-                    "{}\nDEBUG: rip:named event sent successfully",
-                    std::fs::read_to_string("/tmp/riply-debug.log").unwrap_or_default()
-                );
-                let _ = std::fs::write("/tmp/riply-debug.log", debug_msg);
+                
+                // Execute the move
+                let config = state_clone.config.read().await;
+                let movies_dir = config.movies_directory.clone();
+                let temp_dir = config.temp_directory.clone();
+                drop(config);
+                
+                let rip_folder = format!("{}/{}", temp_dir, index);
+                let final_dest = format!("{}/{} ({})/", movies_dir, accepted_name, year);
+                
+                // Apply (Copy N) if destination exists
+                let final_dest = apply_copy_n(std::path::Path::new(&final_dest));
+                let final_dest_str = final_dest.to_string_lossy().to_string();
+                
+                // Move rip folder to library
+                match std::fs::rename(&rip_folder, &final_dest_str) {
+                    Ok(()) => {
+                        info!(
+                            from = %rip_folder,
+                            to = %final_dest_str,
+                            "Queued accept: moved rip to library"
+                        );
+                        sse.send_json(json!({
+                            "kind":"naming",
+                            "action":"accepted",
+                            "index":index,
+                            "data":{"message":format!("Moved to {}", final_dest_str)}
+                        }));
+                    }
+                    Err(e) => {
+                        warn!(
+                            error = %e,
+                            from = %rip_folder,
+                            to = %final_dest_str,
+                            "Queued accept: move to library failed"
+                        );
+                        sse.send_json(json!({
+                            "kind":"naming",
+                            "action":"move_failed",
+                            "index":index,
+                            "data":{"message":format!("Move failed: {}", e)}
+                        }));
+                    }
+                }
             }
         } else {
             // Rip failed — clean up temp folder
@@ -1182,6 +1164,187 @@ pub async fn eject_disc(
 
     Ok(Json(ApiResponse::ok(format!(
         "Ejected disc from drive {}",
+        index
+    ))))
+}
+
+/// Naming list entry for the API response
+#[derive(serde::Serialize)]
+pub(crate) struct NamingListEntry {
+    drive_index: usize,
+    original_name: String,
+    suggested_name: Option<String>,
+    year: Option<u16>,
+    status: String, // "named" or "naming_failed"
+    thumbnail_url: Option<String>,
+    rip_in_progress: bool,
+    accept_queued: bool,
+}
+
+/// Get the naming list — all naming suggestions (named or failed) that haven't been accepted/rejected
+pub async fn get_naming_list(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ApiResponse<Vec<NamingListEntry>>>, WebError> {
+    let naming_suggestions = state.naming_suggestions.read().await;
+    let naming_completed = state.naming_completed.read().await;
+    let completed_rips = state.completed_rips.read().await;
+    let active_rips = state.active_rips.read().await;
+    let disc_names = state.disc_names.read().await;
+    let pending_accepts = state.pending_accepts.read().await;
+
+    let mut entries = Vec::new();
+
+    for drive_index in naming_completed.iter() {
+        let suggestion = naming_suggestions.get(drive_index).cloned();
+        let original_name = disc_names.get(drive_index).map(|d| d.disc_name.clone()).unwrap_or_default();
+        let has_completed_rip = completed_rips.contains(drive_index);
+        let is_ripping = active_rips.contains_key(drive_index);
+        let accept_queued = pending_accepts.contains_key(drive_index);
+
+        // Only include entries that have a disc name or completed rip
+        if original_name.is_empty() && !has_completed_rip {
+            continue;
+        }
+
+        let status = match suggestion {
+            Some(Some((title, year))) => {
+                entries.push(NamingListEntry {
+                    drive_index: *drive_index,
+                    original_name: original_name.clone(),
+                    suggested_name: Some(title.clone()),
+                    year: Some(year),
+                    status: "named".to_string(),
+                    thumbnail_url: Some(format!("/api/media/thumbnail/{}", drive_index)),
+                    rip_in_progress: is_ripping,
+                    accept_queued,
+                });
+                continue;
+            }
+            Some(None) => "naming_failed".to_string(),
+            None => "naming_failed".to_string(),
+        };
+
+        entries.push(NamingListEntry {
+            drive_index: *drive_index,
+            original_name,
+            suggested_name: None,
+            year: None,
+            status,
+            thumbnail_url: None,
+            rip_in_progress: is_ripping,
+            accept_queued,
+        });
+    }
+
+    drop(naming_suggestions);
+    drop(naming_completed);
+    drop(completed_rips);
+    drop(active_rips);
+    drop(disc_names);
+    drop(pending_accepts);
+
+    Ok(Json(ApiResponse::ok(entries)))
+}
+
+/// Accept naming and move rip to library
+pub async fn accept_naming(
+    State(state): State<Arc<AppState>>,
+    Path(index): Path<usize>,
+) -> Result<Json<ApiResponse<String>>, WebError> {
+    let naming_suggestions = state.naming_suggestions.read().await;
+    let suggestion = naming_suggestions.get(&index).cloned();
+    drop(naming_suggestions);
+
+    let Some(Some((accepted_name, year))) = suggestion else {
+        return Ok(Json(ApiResponse::error("No naming suggestion available".to_string())));
+    };
+
+    let config = state.config.read().await;
+    let movies_dir = config.movies_directory.clone();
+    let temp_dir = config.temp_directory.clone();
+    let is_ripping = state.active_rips.read().await.contains_key(&index);
+    drop(config);
+
+    if is_ripping {
+        // Queue the accept — execute when rip completes
+        let accepted_name_for_log = accepted_name.clone();
+        state.pending_accepts.write().await.insert(index, (accepted_name, year));
+        info!(
+            drive = index,
+            accepted_name = %accepted_name_for_log, year,
+            "Accept queued — will move when rip completes"
+        );
+        state.sse.send_json(json!({
+            "kind":"naming",
+            "action":"accepted",
+            "index":index,
+            "data":{"message":format!("Naming accepted — will move when rip completes")}
+        }));
+        state.sse.send_json(json!({"kind":"naming","action":"list_updated","data":{}}));
+        return Ok(Json(ApiResponse::ok(format!(
+            "Naming accepted — will move when rip completes (drive {})",
+            index
+        ))));
+    }
+
+    // Immediate move (rip not in progress)
+    let completed_rips = state.completed_rips.read().await;
+    if !completed_rips.contains(&index) {
+        return Ok(Json(ApiResponse::error("Rip not completed yet".to_string())));
+    }
+    drop(completed_rips);
+
+    let rip_folder = format!("{}/{}", temp_dir, index);
+    let final_dest = format!("{}/{} ({})/", movies_dir, accepted_name, year);
+    let final_dest = apply_copy_n(std::path::Path::new(&final_dest));
+    let final_dest_str = final_dest.to_string_lossy().to_string();
+
+    match std::fs::rename(&rip_folder, &final_dest_str) {
+        Ok(()) => {
+            info!(
+                from = %rip_folder,
+                to = %final_dest_str,
+                "Moved rip to library"
+            );
+            state.naming_suggestions.write().await.remove(&index);
+            state.completed_rips.write().await.remove(&index);
+            state.sse.send_json(json!({
+                "kind":"naming",
+                "action":"accepted",
+                "index":index,
+                "data":{"message":format!("Moved to {}", final_dest_str)}
+            }));
+            state.sse.send_json(json!({"kind":"naming","action":"list_updated","data":{}}));
+            Ok(Json(ApiResponse::ok(format!("Moved to {}", final_dest_str))))
+        }
+        Err(e) => {
+            warn!(
+                error = %e,
+                from = %rip_folder,
+                to = %final_dest_str,
+                "Move to library failed"
+            );
+            Ok(Json(ApiResponse::error(format!("Move failed: {}", e))))
+        }
+    }
+}
+
+/// Reject naming — leave rip in temp
+pub async fn reject_naming(
+    State(state): State<Arc<AppState>>,
+    Path(index): Path<usize>,
+) -> Result<Json<ApiResponse<String>>, WebError> {
+    state.naming_suggestions.write().await.remove(&index);
+    state.pending_accepts.write().await.remove(&index);
+    state.sse.send_json(json!({
+        "kind":"naming",
+        "action":"rejected",
+        "index":index,
+        "data":{}
+    }));
+    state.sse.send_json(json!({"kind":"naming","action":"list_updated","data":{}}));
+    Ok(Json(ApiResponse::ok(format!(
+        "Naming rejected — rip left in temp (drive {})",
         index
     ))))
 }

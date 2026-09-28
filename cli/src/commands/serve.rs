@@ -51,6 +51,8 @@ pub async fn serve(
         disc_names: RwLock::new(HashMap::new()),
         completed_rips: RwLock::new(HashSet::new()),
         naming_completed: RwLock::new(HashSet::new()),
+        naming_suggestions: RwLock::new(HashMap::new()),
+        pending_accepts: RwLock::new(HashMap::new()),
     });
 
     // Start the auto-rip monitor. It watches drives that have auto-rip enabled

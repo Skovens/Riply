@@ -76,6 +76,12 @@ pub struct AppState {
     /// Drives that have already had auto-naming triggered.
     /// Prevents duplicate naming tasks when list_drives() is called repeatedly.
     pub naming_completed: RwLock<HashSet<usize>>,
+    /// Auto-naming suggestions per drive: index → (title, year) or None if failed.
+    /// Session-only, in-memory.
+    pub naming_suggestions: RwLock<HashMap<usize, Option<(String, u16)>>>,
+    /// Queued accepts: drives where user accepted naming while rip was in progress.
+    /// When rip completes, these are executed automatically.
+    pub pending_accepts: RwLock<HashMap<usize, (String, u16)>>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -108,6 +114,14 @@ impl<T: serde::Serialize> ApiResponse<T> {
             success: true,
             data: Some(data),
             error: None,
+        }
+    }
+
+    pub fn error(msg: String) -> Self {
+        Self {
+            success: false,
+            data: None,
+            error: Some(msg),
         }
     }
 }
@@ -381,6 +395,8 @@ mod tests {
             disc_names: RwLock::new(HashMap::new()),
             completed_rips: RwLock::new(HashSet::new()),
             naming_completed: RwLock::new(HashSet::new()),
+            naming_suggestions: RwLock::new(HashMap::new()),
+            pending_accepts: RwLock::new(HashMap::new()),
         };
         Arc::new(state)
     }
