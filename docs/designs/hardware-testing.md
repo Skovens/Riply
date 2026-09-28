@@ -255,21 +255,21 @@ test makemkv::parser::tests::test_parse_drive_with_quotes_in_name ... ok
 
 ## Phase 4: Eject Testing
 
-**Status: ✅ COMPLETE**
+**Status: ⏭️ DROPPED — Physical eject not achievable in current environment**
 
-### 4.1 CLI Eject
+### 4.1 CLI Eject (Software-Side Tested)
 
 ```bash
 cargo run -p cli -- rip eject 0
 ```
 
 **Verify:**
-- Disc ejects successfully
-- `eject /dev/sr0` handles "No medium found" gracefully (already empty)
+- `eject /dev/sr1` command succeeds (returns exit code 0)
+- `eject` handles "No medium found" gracefully (already empty)
 - Error handling for non-existent drive index
 - Error handling when user lacks cdrom group permissions
 
-**Result: ✅ Eject tested successfully (last phase due to slim drive warning).**
+**Result: ⏭️ Eject commands all succeed from software perspective, but physical eject not achievable in KVM VM with SCSI-passthrough drive. All software-side eject logic verified. Phase 4 dropped.**
 
 ### 4.2 Eject Error Cases
 
@@ -509,11 +509,7 @@ Phase 1 (Setup) Ôćĺ Phase 8 (Fix tests) Ôćĺ Phase 2-3 (Detection/Parser)
 
 ### Critical Hardware Note
 
-**SLIM DRIVE WARNING:** The DVD drive (`sr0`) is a slim drive that automatically pulls discs back in when not engaged. This means:
-- **Eject testing (Phase 4) must be done LAST**
-- Insert disc only when ready to begin testing
-- All other phases can proceed without disc in drive
-- After Phase 4 (eject tests), remove disc to return drive to safe state
+**DRIVE STATUS UPDATE:** The DVD drive is no longer a slim drive. Physical eject testing (Phase 4) was dropped because the KVM VM environment with SCSI-passthrough drive does not allow physical disc ejection, though all software-side eject logic has been verified.
 
 ### Recommended Sequence
 
