@@ -33,11 +33,22 @@ Buttons never disappear. Inactive buttons are greyed out with a tooltip.
 
 ---
 
-## Drive Polling
+## Drive Detection
 
-No constant polling. Drives are polled:
+### Event-Driven (Primary)
+
+When an event source is available (udev/inotify/D-Bus), disc insertion/ejection is detected instantly:
+
+1. OS fires event → event source adapter captures it
+2. `DriveEventChain` selects best available source
+3. Event broadcast via `mpsc::UnboundedSender<DriveEvent>`
+4. `drive_event_loop()` receives event → broadcasts SSE → triggers AutoRip if enabled
+
+### Polling (Fallback)
+
+When no event source is available, the autorip poll loop runs every 5 seconds:
 - On page load
-- When SSE `drive:changed` event arrives
+- When SSE `drive:updated` event arrives
 - When user clicks refresh button
 - After rip completes (to check for ejected discs)
 
@@ -45,19 +56,27 @@ No constant polling. Drives are polled:
 
 | Event | Format | When |
 |-------|--------|------|
-| `drive:inserted` | `drive:inserted:{index}` | Disc inserted |
-| `drive:ejected` | `drive:ejected:{index}` | Disc ejected |
+| `drive:inserted` | `drive:inserted:{index}` | Disc inserted (event-driven) |
+| `drive:ejected` | `drive:ejected:{index}` | Disc ejected (event-driven) |
 | `drive:removed` | `drive:removed:{index}` | Drive removed |
-| `drive:changed` | `drive:changed:{index}` | Full state change |
+| `drive:updated` | `drive:updated:{index}` | Full state change (polling or event) |
 
 ### Implementation
 
-**Backend (`infra/src/autorip.rs`):**
-- After detecting a disc insertion/ejection/removal, broadcast the event via `SseManager`
-- The poll loop already calls `detect_drives()` — capture the delta and broadcast events
+**Backend (`infra/src/drive_events/`):**
+- Chain of Responsibility pattern: udev → inotify_sysfs → inotify_dev → dbus
+- First available source wins
+- Events broadcast via SSE from `web/src/routes/drive_events.rs`
 
-**Frontend (`web/svelte/src/routes/+page.svelte`):**
-- Extend `handleSSEEvent()` to handle `drive:inserted`, `drive:ejected`, `drive:removed`
+**Backend (`web/src/routes/ripper.rs`):**
+- `autorip_poll_loop()` still exists but is disabled when event source is available
+- `run_rip_task()` extracted as standalone function for event-driven AutoRip
+
+**Frontend (`web/svelte/src/lib/components/DrivePanel.svelte`):**
+- Subscribes to SSE events on mount
+- Auto-refreshes on `drive:updated`, `rip:complete`, `rip:message`
+- Per-drive refresh button (↻)
+- Autorip toggle gated behind event source availability
 
 ---
 
@@ -97,6 +116,8 @@ No constant polling. Drives are polled:
 
 ## Purpose
 Manage optical drive discovery, state tracking, ripping, and auto-rip. This document describes the *current* behavior of the system.
+
+> **Event-Driven Detection:** Disc insertion/ejection is now detected via event sources (udev → inotify → D-Bus chain) instead of constant polling. The autorip poll loop still exists as a fallback but is disabled when an event source is available. See [drive-event-sources.md](./drive-event-sources.md) for full details.
 
 ---
 

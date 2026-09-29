@@ -42,6 +42,13 @@ media-atlas/
 - SQLite uses WAL mode for concurrent reads without blocking writes
 - MakeMKV integration uses async process handling with structured stdout parsing
 
+**Event-Driven Drive Detection:**
+- Chain of Responsibility pattern: udev → inotify (sysfs/dev) → D-Bus → fallback
+- Instant disc insertion/ejection detection without polling
+- AutoRip triggered automatically when event source is available and configured
+- Frontend auto-refreshes via SSE when drive state changes
+- Authorization gated behind event source availability (toggle disabled when no source)
+
 ## Tech Stack
 
 | Concern | Technology | Why |
@@ -62,6 +69,9 @@ media-atlas/
 - **File Organization** — Safe cross-device moves, duplicate detection, extras handling
 - **DVD Ripping** — MakeMKV integration with drive detection, progress tracking, AutoRip
 - **Real-time Dashboard** — SvelteKit frontend with SSE-powered live progress updates
+- **Event-Driven Drive Detection** — udev/inotify/D-Bus chain for instant disc insertion/ejection detection (no polling)
+- **AutoRip** — Automatic ripping when discs are inserted (requires event source)
+- **Naming Queue** — Accept naming during active rips, auto-move to library after rip completes
 - **CLI Interface** — Full pipeline control via `clap` subcommands
 - **Type-safe Migrations** — sqlx migrations with schema version tracking
 
@@ -201,7 +211,8 @@ NEW → SCANNED → MATCHED → CONFIRMED → MOVED
 | PUT | `/api/config` | Update settings |
 | GET | `/api/sse` | Server-Sent Events stream |
 | GET | `/health` | Basic health check |
-| GET | `/health/detailed` | Detailed health (DB, drives, MakeMKV, TMDb) |
+| GET | `/health/detailed` | Detailed health (DB, drives, MakeMKV, TMDb, event source) |
+| GET | `/v1/ripper/event-source` | Event source availability status |
 
 ## Development
 

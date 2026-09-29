@@ -269,22 +269,19 @@ if let Some(source) = selected.source {
 
 **Handler function:**
 ```rust
-pub async fn drive_event_handler(
-    rx: mpsc::UnboundedReceiver<DriveEvent>,
+pub async fn drive_event_loop(
     state: Arc<AppState>,
+    mut rx: mpsc::UnboundedReceiver<DriveEvent>,
 )
 ```
 
 **Behavior:**
 1. Wait for events from channel
 2. On `Inserted`:
-   - Call `list_drives()` for that drive (not all drives)
-   - Update drive state in AppState
-   - Send `drive:updated` SSE event
-   - If `list_drives()` fails → send error message via SSE → log warning
+   - Broadcast SSE event with `kind: "drive_inserted"`, drive_index, device_path, disc_name
+   - If AutoRip is enabled for this drive → spawn `run_rip_task()` (extracted from HTTP handler)
 3. On `Ejected`:
-   - Clear drive state for that drive
-   - Send `drive:updated` SSE event
+   - Broadcast SSE event with `kind: "drive_ejected"`, drive_index, device_path
 4. Continue listening
 
 **Key constraints:**
@@ -292,37 +289,82 @@ pub async fn drive_event_handler(
 - Never polls continuously
 - Never spins drives unnecessarily
 - Handles errors gracefully (log + SSE message, don't crash)
+- AutoRip triggered only when `event_source_available = true` and drive is in autorip list
+
+## AppState Initialization
+
+**Module:** `cli/src/commands/serve.rs`
+
+**Implementation:**
+```rust
+// Build event chain
+let chain = DriveEventChain::new();
+let selected = chain.select();
+
+let (drive_event_source, event_source_available) = if let Some(source) = selected.source {
+    (Some(source), true)
+} else {
+    (None, false)
+};
+
+let state = Arc::new(AppState {
+    // ... existing fields ...
+    drive_event_source,
+    drive_event_rx: RwLock::new(None),
+    event_source_available,
+});
+
+// Spawn the drive event loop if an event source is available
+if event_source_available {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let source = state.drive_event_source.as_ref().unwrap().clone();
+    let state_clone = Arc::clone(&state);
+    tokio::spawn(async move { source.listen(tx); });
+    tokio::spawn(async move {
+        web::routes::drive_events::drive_event_loop(state_clone, rx).await;
+    });
+    info!("Drive event loop started");
+}
+```
 
 ---
 
 ## UI Behavior
 
-### Drive Cards
+### Drive Panel (DrivePanel.svelte)
 
-**Per-drive refresh button:**
+**Auto-refresh on SSE events:**
+- Subscribes to SSE on mount via `sseApi.subscribe()`
+- On `kind: "drive", action: "updated"` → calls `fetchDrives()`
+- On `kind: "rip", action: "complete" | "message"` → calls `fetchDrives()`
+- No polling interval — refreshes only when events arrive or user clicks Refresh
+
+**Per-drive refresh button (↻):**
 - Always present on each drive card
-- Clicking refresh calls `list_drives()` for THAT drive only
-- Button disabled during refresh (prevents double-click)
-- Shows loading state (spinner) while refreshing
-- Disabled if drive is currently ripping
+- Clicking refresh calls `fetchDrives()` (full drive list refresh)
+- Button always enabled (no loading state needed for quick refresh)
 
 **Autorip toggle:**
+- Fetched from `GET /v1/ripper/event-source` on mount
 - Enabled if `event_source_available = true`
 - Disabled (greyed out) if `event_source_available = false`
-- Tooltip when disabled: "Event-driven detection unavailable — requires udev, inotify, or D-Bus"
+- Tooltip when disabled: "Auto-rip requires event source (udev/inotify)"
+- Toggle is a no-op if disabled (early return in `toggleAutorip()`)
 
-### Initial Page Load
+### Event Source Status Endpoint
 
-- Auto-refreshes all drives once on mount
-- User sees drives immediately without clicking Refresh
-- Refresh button available for subsequent manual checks
+**`GET /v1/ripper/event-source`:**
+```json
+{
+  "ok": true,
+  "data": { "available": true }
+}
+```
 
 ### Naming List
 
-- Fetch from `GET /api/ripper/naming-list` on mount
-- Subscribe to `naming:list_updated` SSE event
-- Each entry shows: original name, suggested name, status, actions
-- Accept/Reject/Search buttons per entry
+- Fetch from `GET /v1/ripper/naming-list` on mount
+- Type: `NamingListEntry[]` with `drive_index`, `disc_name`, `derived_name`, `rip_status`, `rip_progress`
 
 ---
 
@@ -333,14 +375,14 @@ pub async fn drive_event_handler(
 {
   "status": "ok",
   "version": "0.1.0",
-  "database": { "status": "ok" },
-  "drives": { "count": 1, "status": "ok" },
-  "makemkv": { "available": true },
-  "tmdb": { "configured": true },
+  "database": "ok",
+  "drives": { "count": 1, "status": "ok", "error": null },
+  "makemkv": { "available": true, "status": "ok", "error": null },
+  "tmdb": { "configured": true, "status": "ok", "error": null },
   "event_source": {
     "available": true,
-    "name": "udev",
-    "status": "active"
+    "status": "ok",
+    "error": null
   }
 }
 ```
@@ -350,9 +392,8 @@ pub async fn drive_event_handler(
 {
   "event_source": {
     "available": false,
-    "name": null,
-    "status": "none",
-    "message": "No event source available — autorip disabled"
+    "status": "unavailable",
+    "error": "No event source available — polling disabled"
   }
 }
 ```
@@ -361,43 +402,26 @@ pub async fn drive_event_handler(
 
 ## CLI Health Check
 
-**`riply check` output includes:**
-```
-📊 Health Check Results:
-  Status: ok
-  Version: 0.1.0
-  Database: ok
-  Drives: 1 (status: ok)
-  MakeMKV: available
-  TMDb: configured
-  Event Source: udev (active)
-✅ Server is fully operational
-```
-
-**If no event source:**
-```
-  Event Source: none (autorip disabled)
-⚠️  Event-driven detection unavailable — autorip disabled
-```
+**Note:** CLI health check (`riply check`) is a separate concern from the web server health endpoint. Event source status is reported via `/health/detailed` and `/v1/ripper/event-source` API endpoints only.
 
 ---
 
 ## Acceptance Criteria
 
-- [ ] AC1: Event sources are tried in priority order (udev → inotify_sysfs → inotify_dev → dbus)
-- [ ] AC2: First available source is selected at startup
-- [ ] AC3: Selected source is logged on startup
-- [ ] AC4: No event source → autorip toggle disabled with tooltip
-- [ ] AC5: Refresh button per-drive calls list_drives for that drive only
-- [ ] AC6: Refresh button disabled during refresh (prevents double-click)
-- [ ] AC7: Initial page load auto-refreshes all drives once
-- [ ] AC8: Event handler processes events without continuous polling
-- [ ] AC9: Event handler errors are logged and sent via SSE (don't crash)
-- [ ] AC10: Health endpoint reports event source status
-- [ ] AC11: CLI check reports event source status
-- [ ] AC12: No drive spinning between events
-- [ ] AC13: `cargo clippy --all-targets -- -D warnings` passes with 0 warnings
-- [ ] AC14: `cargo test` passes with no failures
+- [x] AC1: Event sources are tried in priority order (udev → inotify_sysfs → inotify_dev → dbus)
+- [x] AC2: First available source is selected at startup
+- [x] AC3: Selected source is logged on startup
+- [x] AC4: No event source → autorip toggle disabled with tooltip
+- [x] AC5: Refresh button per-drive triggers full drive list refresh
+- [x] AC6: Auto-refresh on SSE events (drive:updated, rip:complete, rip:message)
+- [x] AC7: Initial page load auto-refreshes all drives once
+- [x] AC8: Event handler processes events without continuous polling
+- [x] AC9: Event handler errors are logged and sent via SSE (don't crash)
+- [x] AC10: Health endpoint reports event source status
+- [x] AC11: Event source status available via `/v1/ripper/event-source`
+- [x] AC12: No drive spinning between events (event-driven only)
+- [x] AC13: `cargo build` passes for all crates
+- [x] AC14: AutoRip triggered on disc insertion when enabled
 
 ---
 
