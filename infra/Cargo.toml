@@ -24,4 +24,5 @@ chrono = { workspace = true }
 async-trait = { workspace = true }
 lru = "0.12"
 nix = { version = "0.28", features = ["fs", "inotify"] }
+tempfile = "3"
 

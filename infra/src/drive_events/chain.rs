@@ -3,12 +3,58 @@
 //! Sources are tried in priority order. First available source wins.
 //! Selection happens at server startup.
 
+use std::io::BufRead;
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
 use crate::drive_events::adapter::DriveEventSource;
 use crate::drive_events::event::DriveEvent;
+
+/// Run makemkvcon (flatpak or native) to get drive info.
+/// Returns a list of parsed drives.
+fn run_makemkv_list() -> Vec<crate::makemkv::parser::ParsedDrive> {
+    // Use the same command resolution as the backend: flatpak first, then native
+    let command = if std::process::Command::new("flatpak")
+        .args(["list", "--columns=application"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains("com.makemkv.MakeMKV"))
+        .unwrap_or(false)
+    {
+        vec![
+            "flatpak".to_string(),
+            "run".to_string(),
+            "--command=makemkvcon".to_string(),
+            "com.makemkv.MakeMKV".to_string(),
+        ]
+    } else if std::env::var("PATH")
+        .ok()
+        .and_then(|p| std::env::split_paths(&p).find(|dir| dir.join("makemkvcon").is_file()))
+        .is_some()
+    {
+        vec!["makemkvcon".to_string()]
+    } else {
+        return Vec::new();
+    };
+
+    let output = std::process::Command::new(&command[0])
+        .args(&command[1..])
+        .args(["-r", "--cache=1", "info", "disc:9999"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok());
+
+    let Some(stdout) = output else {
+        return Vec::new();
+    };
+
+    stdout
+        .lines()
+        .filter_map(crate::makemkv::parser::parse_drive_line)
+        .filter(|d| d.visible)
+        .collect()
+}
 
 /// Result of chain selection.
 pub struct SelectedSource {
@@ -93,9 +139,236 @@ impl DriveEventSource for UdevSource {
             || std::path::Path::new("/dev/.udev").exists()
     }
 
-    fn listen(self: Arc<Self>, _tx: mpsc::UnboundedSender<DriveEvent>) {
-        // udev implementation — see udev.rs for details
-        tracing::warn!("udev source available but not yet implemented — falling back to next source");
+    fn listen(self: Arc<Self>, tx: mpsc::UnboundedSender<DriveEvent>) {
+        Self::run_loop(tx);
+    }
+}
+
+impl UdevSource {
+    /// Watch for drive insertion/ejection via polling /sys/block/ and /dev/sr*.
+    /// Falls back to udevadm monitor if available, otherwise polls every 2s.
+    fn run_loop(tx: mpsc::UnboundedSender<DriveEvent>) {
+        tracing::info!("udev listener started");
+
+        // Check if udevadm monitor --subscribe works (needs netlink socket)
+        // We test by spawning it and checking if it stays alive for 500ms
+        let has_netlink = std::process::Command::new("udevadm")
+            .args(["monitor", "--subscribe"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .and_then(|mut c| {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                // If process is still alive, netlink works
+                match c.try_wait() {
+                    Ok(None) => { c.kill().ok(); Ok(()) }
+                    Ok(Some(_)) => Err(std::io::Error::new(std::io::ErrorKind::Other, "udevadm exited")),
+                    Err(_) => Err(std::io::Error::new(std::io::ErrorKind::Other, "wait error")),
+                }
+            })
+            .is_ok();
+
+        if has_netlink {
+            Self::watch_udev_subscribe(tx);
+        } else {
+            Self::poll_drives(tx);
+        }
+    }
+
+    /// Monitor udev events via udevadm monitor --subscribe (only works with netlink access).
+    fn watch_udev_subscribe(tx: mpsc::UnboundedSender<DriveEvent>) {
+        loop {
+            let mut child = match std::process::Command::new("udevadm")
+                .args(["monitor", "--subscribe", "--property"])
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::error!("Failed to spawn udevadm monitor: {}", e);
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    continue;
+                }
+            };
+
+            let stdout = child.stdout.take().expect("stdout should be captured");
+            let reader = std::io::BufReader::new(stdout);
+
+            let mut current_action: Option<String> = None;
+            let mut current_devname: Option<String> = None;
+            let mut current_devtype: Option<String> = None;
+
+            for line_result in reader.lines() {
+                match line_result {
+                    Ok(line) => {
+                        if line.is_empty() {
+                            if let (Some(action), Some(devname)) = (current_action.take(), current_devname.take()) {
+                                if let Some(devtype) = current_devtype.take() {
+                                    if devtype == "disk" {
+                                        Self::process_udev_event(&tx, &action, &devname);
+                                    }
+                                }
+                            }
+                        } else if let Some(key) = line.split_once('=') {
+                            match key.0 {
+                                "ACTION" => current_action = Some(key.1.to_string()),
+                                "DEVNAME" => current_devname = Some(key.1.to_string()),
+                                "DEVTYPE" => current_devtype = Some(key.1.to_string()),
+                                _ => {}
+                            }
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+
+            if let (Some(action), Some(devname)) = (current_action.take(), current_devname.take()) {
+                if let Some(devtype) = current_devtype.take() {
+                    if devtype == "disk" {
+                        Self::process_udev_event(&tx, &action, &devname);
+                    }
+                }
+            }
+
+            tracing::warn!("udevadm monitor exited, restarting in 2s");
+            drop(child);
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
+    }
+
+    /// Poll /sys/block/ and /dev/sr* for optical drive changes every 10 seconds.
+    /// Works in containers without netlink access. Uses caching to avoid repeated MakeMKV calls.
+    fn poll_drives(tx: mpsc::UnboundedSender<DriveEvent>) {
+        use std::collections::HashSet;
+        use std::time::Instant;
+
+        let mut known_drives: HashSet<String> = HashSet::new();
+        let mut last_check = Instant::now();
+        let poll_interval = std::time::Duration::from_secs(10);
+
+        loop {
+            let elapsed = last_check.elapsed();
+            if elapsed < poll_interval {
+                std::thread::sleep(poll_interval - elapsed);
+            }
+            last_check = Instant::now();
+
+            // Use filesystem polling (/sys/block/ and /dev/sr*) instead of MakeMKV
+            // to avoid spawning flatpak processes on every poll
+            let current_drives: HashSet<String> = Self::get_filesystem_drives();
+
+            // Check for new drives (inserted)
+            for drive_path in &current_drives {
+                if known_drives.insert(drive_path.clone()) {
+                    tracing::info!("Poll detected drive insertion: path={}", drive_path);
+                    let event = DriveEvent::Inserted {
+                        drive_index: 0, // Will be resolved by API via MakeMKV
+                        device_path: drive_path.clone(),
+                        disc_name: None,
+                    };
+                    if tx.send(event).is_err() {
+                        tracing::warn!("Channel closed, stopping listener");
+                        return;
+                    }
+                }
+            }
+
+            // Check for removed drives (ejected)
+            let removed: Vec<String> = known_drives.iter()
+                .filter(|d| !current_drives.contains(*d))
+                .cloned()
+                .collect();
+            for old_drive in removed {
+                tracing::info!("Poll detected drive ejection: path={}", old_drive);
+                let event = DriveEvent::Ejected {
+                    drive_index: 0,
+                    device_path: old_drive.clone(),
+                };
+                if tx.send(event).is_err() {
+                    tracing::warn!("Channel closed, stopping listener");
+                    return;
+                }
+                known_drives.remove(&old_drive);
+            }
+        }
+    }
+
+    /// Get optical drive paths from filesystem (/sys/block/ and /dev/sr*)
+    fn get_filesystem_drives() -> std::collections::HashSet<String> {
+        use std::collections::HashSet;
+        let mut drives = HashSet::new();
+
+        // Check /dev/sr* devices
+        if let Ok(entries) = std::fs::read_dir("/dev") {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                if name_str.starts_with("sr") {
+                    drives.insert(format!("/dev/{}", name_str));
+                }
+            }
+        }
+
+        // Check /sys/block/ for optical drives
+        if let Ok(entries) = std::fs::read_dir("/sys/block") {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                let type_path = entry.path().join("device/type");
+                if let Ok(type_data) = std::fs::read_to_string(&type_path) {
+                    // 5 = CD/DVD in /sys/block/*/device/type
+                    if type_data.trim() == "5" {
+                        drives.insert(format!("/sys/block/{}", name_str));
+                    }
+                }
+            }
+        }
+
+        drives
+    }
+
+    /// Process a udev event and send a DriveEvent if applicable.
+    /// Uses filesystem polling only - MakeMKV index resolution happens via API.
+    fn process_udev_event(tx: &mpsc::UnboundedSender<DriveEvent>, action: &str, devname: &str) {
+        // Only process change and remove actions
+        if action != "change" && action != "remove" {
+            return;
+        }
+
+        // Check if this is an optical drive using udev property (fast, no MakeMKV)
+        let is_optical = std::process::Command::new("udevadm")
+            .args(["info", "--query=property", "--name", devname])
+            .output()
+            .map(|o| {
+                String::from_utf8_lossy(&o.stdout).contains("ID_CDROM=")
+            })
+            .unwrap_or(false);
+
+        if !is_optical {
+            return;
+        }
+
+        // Send event with filesystem path - MakeMKV index resolution happens via API
+        if action == "change" {
+            let event = DriveEvent::Inserted {
+                drive_index: 0, // Resolved by API
+                device_path: devname.to_string(),
+                disc_name: None,
+            };
+            if tx.send(event).is_err() {
+                tracing::warn!("Channel closed, stopping listener");
+                return;
+            }
+        } else if action == "remove" {
+            let event = DriveEvent::Ejected {
+                drive_index: 0,
+                device_path: devname.to_string(),
+            };
+            if tx.send(event).is_err() {
+                tracing::warn!("Channel closed, stopping listener");
+                return;
+            }
+        }
     }
 }
 
@@ -216,7 +489,7 @@ impl InotifySysfsSource {
         }
 
         // Run makemkvcon to get drive mapping
-        let makemkv_drives = Self::run_makemkv_list();
+        let makemkv_drives = run_makemkv_list();
 
         // Build a map: device_path -> (drive_index, disc_name)
         let mut drive_map: std::collections::HashMap<String, (usize, Option<String>)> =
@@ -277,28 +550,6 @@ impl InotifySysfsSource {
         result.sort();
         result
     }
-
-    /// Run makemkvcon -r --cache=1 info disc:9999 to get drive info.
-    /// Returns a list of parsed drives.
-    fn run_makemkv_list() -> Vec<crate::makemkv::parser::ParsedDrive> {
-        // Try to find makemkvcon in PATH
-        let output = std::process::Command::new("makemkvcon")
-            .args(["-r", "--cache=1", "info", "disc:9999"])
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .and_then(|o| String::from_utf8(o.stdout).ok());
-
-        let Some(stdout) = output else {
-            return Vec::new();
-        };
-
-        stdout
-            .lines()
-            .filter_map(crate::makemkv::parser::parse_drive_line)
-            .filter(|d| d.visible)
-            .collect()
-    }
 }
 
 impl InotifyDevSource {
@@ -354,7 +605,7 @@ impl InotifyDevSource {
         }
 
         // Run makemkvcon to get drive mapping
-        let makemkv_drives = InotifySysfsSource::run_makemkv_list();
+        let makemkv_drives = run_makemkv_list();
 
         let mut drive_map: std::collections::HashMap<String, (usize, Option<String>)> =
             std::collections::HashMap::new();

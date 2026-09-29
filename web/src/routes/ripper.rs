@@ -62,15 +62,22 @@ pub struct RenameDriveBody {
     pub media_type: Option<String>,
 }
 
-/// Router for the ripper domain
-pub fn router(state: Arc<AppState>) -> Router {
-    // Specific routes MUST come before generic :index routes to avoid
-    // Axum matching `/v1/ripper/drives/0/rename` against `/v1/ripper/:index/cancel`.
+/// Drives router with 120s timeout for flatpak MakeMKV latency
+pub fn drives_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/v1/ripper/drives", get(list_drives))
         .route("/v1/ripper/drives/:index/rename", post(rename_disc))
         .route("/v1/ripper/drives/:index/accept", post(accept_rip_naming))
         .route("/v1/ripper/drives/:index/reject", post(reject_rip_naming))
+        .layer(tower_http::timeout::TimeoutLayer::new(
+            std::time::Duration::from_secs(120),
+        ))
+        .with_state(state)
+}
+
+/// Router for the ripper domain (without drives routes)
+pub fn router_no_drives(state: Arc<AppState>) -> Router {
+    Router::new()
         .route("/v1/ripper/naming-list", get(get_naming_list))
         .route("/v1/ripper/:index/accept", post(accept_naming))
         .route("/v1/ripper/:index/reject", post(reject_naming))
@@ -82,6 +89,12 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/ripper/:index/cancel", post(cancel_rip))
         .route("/v1/ripper/:index/eject", post(eject_disc))
         .with_state(state)
+}
+
+/// Deprecated: use router_no_drives + drives_router instead
+#[deprecated(note = "Use router_no_drives + drives_router for proper timeout handling")]
+pub fn router(state: Arc<AppState>) -> Router {
+    router_no_drives(state)
 }
 
 /// Get the current event source availability status.
@@ -135,168 +148,218 @@ pub async fn list_drives(
         None => return Ok(Json(ApiResponse::ok(vec![]))),
     };
 
-    let is_sandboxed = backend.is_sandboxed();
-    let drives = tokio::task::spawn_blocking(move || backend.detect_drives())
-        .await
-        .map_err(|e| WebError::Internal(format!("Task failed: {}", e)))?;
+    // Check cache first
+    let cache_ttl = state.drives_cache_ttl;
+    {
+        let cache = state.drives_cache.read().await;
+        if let Some((cached_drives, cached_at)) = cache.as_ref() {
+            if cached_at.elapsed() < cache_ttl {
+                info!("Returning cached drives data (TTL not expired)");
+                let rips = state.active_rips.read().await;
+                let disc_names = state.disc_names.read().await;
+                let is_sandboxed = backend.is_sandboxed();
+                let config = state.config.read().await;
+                let temp_dir = config.temp_directory.clone();
+                drop(config);
 
-    match drives {
-        Ok(mut drives) => {
-            let rips = state.active_rips.read().await;
-            let disc_names = state.disc_names.read().await;
-            let naming_completed = state.naming_completed.read().await;
-            let config = state.config.read().await;
-            let temp_dir = config.temp_directory.clone();
-            let searcher = state.searcher.clone();
-            let sse = &state.sse;
+                let mut drives = cached_drives.clone();
+                for drive in &mut drives {
+                    let temp_folder = format!("{}/{}", temp_dir, drive.index);
+                    let actual_temp_folder = if is_sandboxed {
+                        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+                        format!("{}/{}/{}", home, infra::makemkv::FLATPAK_RIP_TEMP_DIR, drive.index)
+                    } else {
+                        temp_folder.clone()
+                    };
+                    let temp_exists = std::path::Path::new(&actual_temp_folder).exists();
 
-            for drive in &mut drives {
-                // Priority: temp folder > active rips > MakeMKV state
-                // Temp folder existence is the most reliable indicator of completed rip
-                let temp_folder = format!("{}/{}", temp_dir, drive.index);
-                // For Flatpak MakeMKV, files are written to $HOME/.var/app/com.makemkv.MakeMKV/riply/{index}
-                let actual_temp_folder = if is_sandboxed {
-                    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-                    format!("{}/{}/{}", home, infra::makemkv::FLATPAK_RIP_TEMP_DIR, drive.index)
-                } else {
-                    temp_folder.clone()
-                };
-                let temp_exists = std::path::Path::new(&actual_temp_folder).exists();
-
-                if temp_exists {
-                    // Temp folder exists = rip completed (or in progress)
-                    // If NOT in active rips anymore, the rip is done — show as Complete
-                    // so the Accept button appears for user-triggered move
-                    if !rips.contains_key(&drive.index) {
-                        drive.state = DriveState::Complete;
-                    } else if drive.state == DriveState::Ripping {
-                        // Still actively ripping
+                    if temp_exists {
+                        if !rips.contains_key(&drive.index) {
+                            drive.state = DriveState::Complete;
+                        } else if drive.state == DriveState::Ripping {
+                            drive.state = DriveState::Ripping;
+                        }
+                    } else if rips.contains_key(&drive.index) {
                         drive.state = DriveState::Ripping;
                     }
-                } else if rips.contains_key(&drive.index) {
-                    // No temp folder but in active rips = still ripping
+                    if let Some(info) = disc_names.get(&drive.index) {
+                        drive.derived_name = Some(info.final_name.clone());
+                    }
+                }
+                return Ok(Json(ApiResponse::ok(drives)));
+            }
+        }
+    }
+
+    // Cache miss or expired — fire-and-forget detect_drives in background
+    // Return stale cached data immediately if available
+    let state_clone = Arc::clone(&state);
+    let backend_clone = Arc::clone(&backend);
+    let is_sandboxed_clone = backend.is_sandboxed();
+    tokio::spawn(async move {
+        let _lock = state_clone.drives_detect_lock.try_lock();
+        if _lock.is_err() {
+            warn!("detect_drives() already in progress (background task)");
+            return;
+        }
+
+        info!("Background detect_drives() started");
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            tokio::task::spawn_blocking(move || backend_clone.detect_drives()),
+        )
+        .await;
+
+        let drives = match result {
+            Ok(Ok(Ok(d))) => d,
+            Ok(Ok(Err(e))) => {
+                warn!("detect_drives() task failed: {}", e);
+                return;
+            }
+            Ok(Err(_)) => {
+                warn!("detect_drives() task join error");
+                return;
+            }
+            Err(_) => {
+                warn!("detect_drives() timed out after 10s (background task)");
+                return;
+            }
+        };
+
+        // Update cache with fresh data
+        let rips = state_clone.active_rips.read().await;
+        let disc_names = state_clone.disc_names.read().await;
+        let naming_completed = state_clone.naming_completed.read().await;
+        let config = state_clone.config.read().await;
+        let temp_dir = config.temp_directory.clone();
+        drop(config);
+        drop(disc_names);
+
+        let mut drives = drives;
+        for drive in &mut drives {
+            let actual_temp_folder = if is_sandboxed_clone {
+                let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+                format!("{}/{}/{}", home, infra::makemkv::FLATPAK_RIP_TEMP_DIR, drive.index)
+            } else {
+                format!("{}/{}", temp_dir, drive.index)
+            };
+            let temp_exists = std::path::Path::new(&actual_temp_folder).exists();
+
+            if temp_exists {
+                if !rips.contains_key(&drive.index) {
+                    drive.state = DriveState::Complete;
+                } else if drive.state == DriveState::Ripping {
                     drive.state = DriveState::Ripping;
                 }
-                // Apply user-set name if it exists
-                if let Some(info) = disc_names.get(&drive.index) {
-                    drive.derived_name = Some(info.final_name.clone());
-                }
+            } else if rips.contains_key(&drive.index) {
+                drive.state = DriveState::Ripping;
+            }
+        }
 
-                // Trigger auto-naming if drive has a disc but no naming info yet
-                // This handles the case where disc was inserted before server/page load
-                // Only trigger once per drive (tracked in naming_completed)
-                // Auto-naming starts at disc detection, NOT at rip completion
+        // Populate disc_names from fresh MakeMKV data so naming list can show original names
+        {
+            let mut dn = state_clone.disc_names.write().await;
+            for drive in &drives {
+                if let Some(ref disc_name) = drive.disc_name {
+                    dn.insert(drive.index, DiscNameInfo {
+                        disc_name: disc_name.clone(),
+                        final_name: String::new(),
+                    });
+                }
+            }
+        }
+
+        let mut cache = state_clone.drives_cache.write().await;
+        *cache = Some((drives.clone(), std::time::Instant::now()));
+        info!("Background detect_drives() completed, cache updated");
+
+        // Trigger auto-naming for drives with discs but no naming info
+        let has_searcher = state_clone.searcher.is_some();
+        if has_searcher {
+            for drive in &drives {
                 if drive.disc_name.is_some()
                     && drive.state != DriveState::Empty
                     && !naming_completed.contains(&drive.index)
                 {
-                    let has_naming_info = disc_names.contains_key(&drive.index);
-                    let naming_suggestions = state.naming_suggestions.read().await;
-                    let has_suggestion = naming_suggestions.contains_key(&drive.index);
-                    drop(naming_suggestions);
-
-                    info!(
-                        drive = drive.index,
-                        has_naming_info, has_suggestion, "Auto-naming check"
-                    );
-
-                    if !has_naming_info && !has_suggestion {
-                        // Drive has disc but no naming info — trigger auto-naming
-                        // Auto-naming runs in background, independent of rip state
-                        state.naming_completed.write().await.insert(drive.index);
-
-                        let sse_clone = sse.clone();
-                        let index_clone = drive.index;
-                        let disc_name = drive.disc_name.clone();
-                        let searcher = searcher.clone();
-                        let state_clone = Arc::clone(&state);
-
-                        info!(drive = drive.index, "Spawning auto-naming task");
-
-                        tokio::spawn(async move {
-                            if let (Some(disc_name), Some(searcher)) = (disc_name, searcher) {
+                    let state_nc = state_clone.clone();
+                    let disc_name = drive.disc_name.clone();
+                    let drive_idx = drive.index;
+                    info!(drive = drive_idx, "Spawning auto-naming task from background");
+                    tokio::spawn(async move {
+                        if let Some(ref searcher) = state_nc.searcher {
+                            if let Some(ref dn) = disc_name {
                                 let resolved = resolve_rip_title_with_duration(
-                                    &disc_name,
-                                    "", // rip_folder not needed for disc detection naming
-                                    Some(&*searcher),
-                                )
-                                .await;
-                                
-                                // Store suggestion in AppState
-                                let mut suggestions = state_clone.naming_suggestions.write().await;
+                                    dn, "", Some(&**searcher),
+                                ).await;
                                 if !resolved.0.is_empty() {
                                     let year = resolved.1.unwrap_or(0);
-                                    suggestions.insert(index_clone, Some((resolved.0.clone(), year)));
-                                    info!(drive = index_clone, title = %resolved.0, year, "Auto-naming succeeded");
-                                    sse_clone.send_json(json!({"kind":"rip","action":"named","index":index_clone,"data":{"title":resolved.0,"year":year,"type":"movie"}}));
+                                    let mut suggestions = state_nc.naming_suggestions.write().await;
+                                    suggestions.insert(drive_idx, Some((resolved.0.clone(), year)));
+                                    drop(suggestions);
+                                    // Mark as completed so it shows in naming list
+                                    state_nc.naming_completed.write().await.insert(drive_idx);
+                                    info!(drive = drive_idx, title = %resolved.0, year, "Auto-naming succeeded");
+                                    state_nc.sse.send_json(json!({"kind":"rip","action":"named","index":drive_idx,"data":{"title":resolved.0,"year":year,"type":"movie"}}));
+                                    state_nc.sse.send_json(json!({"kind":"naming","action":"list_updated","data":{}}));
                                 } else {
-                                    suggestions.insert(index_clone, None);
-                                    info!(
-                                        drive = index_clone,
-                                        "Auto-naming failed - no title resolved"
-                                    );
-                                    sse_clone.send_json(json!({"kind":"rip","action":"naming_failed","index":index_clone,"data":{}}));
+                                    let mut suggestions = state_nc.naming_suggestions.write().await;
+                                    suggestions.insert(drive_idx, None);
+                                    drop(suggestions);
+                                    state_nc.naming_completed.write().await.insert(drive_idx);
+                                    state_nc.sse.send_json(json!({"kind":"rip","action":"naming_failed","index":drive_idx,"data":{}}));
+                                    state_nc.sse.send_json(json!({"kind":"naming","action":"list_updated","data":{}}));
                                 }
-                                drop(suggestions);
-                                
-                                // Notify that naming list changed
-                                sse_clone.send_json(json!({"kind":"naming","action":"list_updated","data":{}}));
-                            } else {
-                                info!(
-                                    drive = index_clone,
-                                    "Auto-naming skipped - no searcher configured"
-                                );
-                                // Still mark as failed since we can't name without searcher
-                                let mut suggestions = state_clone.naming_suggestions.write().await;
-                                suggestions.insert(index_clone, None);
-                                drop(suggestions);
-                                sse_clone.send_json(json!({"kind":"rip","action":"naming_failed","index":index_clone,"data":{}}));
-                                sse_clone.send_json(json!({"kind":"naming","action":"list_updated","data":{}}));
                             }
-                        });
-                    }
+                        }
+                    });
                 }
             }
-
-            // Fallback: if MakeMKV returns 0 drives but we have completed rips,
-            // create placeholder entries so the UI can still show eject button
-            // (Flatpak sandbox may temporarily lose drive access after move)
-            let completed_count = state.completed_rips.read().await.len();
-            info!(
-                drive_count = drives.len(),
-                completed_count, "Drive detection status"
-            );
-            if drives.is_empty() && completed_count != 0 {
-                let completed = state.completed_rips.read().await;
-                if !completed.is_empty() {
-                    warn!(
-                        count = completed.len(),
-                        "MakeMKV returned 0 drives, using completed_rips fallback"
-                    );
-                    drives = completed
-                        .iter()
-                        .map(|&idx| DriveInfo {
-                            index: idx,
-                            name: format!("Drive {}", idx),
-                            disc_name: None,
-                            derived_name: None,
-                            device_path: None,
-                            state: DriveState::Empty,
-                        })
-                        .collect();
-                }
-            }
-
-            Ok(Json(ApiResponse::ok(drives)))
         }
-        Err(e) => {
-            warn!(error = %e, "Failed to detect drives");
-            Err(WebError::Internal(format!(
-                "Failed to detect drives: {}",
-                e
-            )))
+    });
+
+    // Return stale cached data immediately if available, otherwise empty list
+    let (cached_drives, is_sandboxed, temp_dir) = {
+        let cache = state.drives_cache.read().await;
+        if let Some((cached_drives, _)) = cache.as_ref() {
+            let is_sandboxed = backend.is_sandboxed();
+            let config = state.config.read().await;
+            let temp_dir = config.temp_directory.clone();
+            drop(config);
+            (cached_drives.clone(), is_sandboxed, temp_dir)
+        } else {
+            info!("No cached drives data available, returning empty list");
+            return Ok(Json(ApiResponse::ok(vec![])));
+        }
+    };
+
+    info!("Returning stale cached drives data (background refresh in progress)");
+    let rips = state.active_rips.read().await;
+    let disc_names = state.disc_names.read().await;
+
+    let mut drives = cached_drives;
+    for drive in &mut drives {
+        let actual_temp_folder = if is_sandboxed {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            format!("{}/{}/{}", home, infra::makemkv::FLATPAK_RIP_TEMP_DIR, drive.index)
+        } else {
+            format!("{}/{}", temp_dir, drive.index)
+        };
+        let temp_exists = std::path::Path::new(&actual_temp_folder).exists();
+
+        if temp_exists {
+            if !rips.contains_key(&drive.index) {
+                drive.state = DriveState::Complete;
+            } else if drive.state == DriveState::Ripping {
+                drive.state = DriveState::Ripping;
+            }
+        } else if rips.contains_key(&drive.index) {
+            drive.state = DriveState::Ripping;
+        }
+        if let Some(info) = disc_names.get(&drive.index) {
+            drive.derived_name = Some(info.final_name.clone());
         }
     }
+    Ok(Json(ApiResponse::ok(drives)))
 }
 
 /// Rename a disc's final name. Called when the user selects a media match
@@ -1241,6 +1304,7 @@ pub async fn accept_naming(
     let config = state.config.read().await;
     let movies_dir = config.movies_directory.clone();
     let temp_dir = config.temp_directory.clone();
+    let is_sandboxed = state.backend.as_ref().map(|b| b.is_sandboxed()).unwrap_or(false);
     let is_ripping = state.active_rips.read().await.contains_key(&index);
     drop(config);
 
@@ -1273,20 +1337,40 @@ pub async fn accept_naming(
     }
     drop(completed_rips);
 
-    let rip_folder = format!("{}/{}", temp_dir, index);
+    let temp_folder = format!("{}/{}", temp_dir, index);
+    let actual_temp_folder = if is_sandboxed {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        format!("{}/{}/{}", home, infra::makemkv::FLATPAK_RIP_TEMP_DIR, index)
+    } else {
+        temp_folder.clone()
+    };
     let final_dest = format!("{}/{} ({})/", movies_dir, accepted_name, year);
     let final_dest = apply_copy_n(std::path::Path::new(&final_dest));
     let final_dest_str = final_dest.to_string_lossy().to_string();
 
-    match std::fs::rename(&rip_folder, &final_dest_str) {
+    let move_result = if std::fs::rename(&actual_temp_folder, &final_dest_str).is_ok() {
+        Ok(())
+    } else {
+        // Fallback: try copy + delete for cross-device links
+        warn!(
+            from = %actual_temp_folder,
+            to = %final_dest_str,
+            "rename failed, trying copy as fallback"
+        );
+        copy_dir_all(&actual_temp_folder, &final_dest_str)
+            .and_then(|_| std::fs::remove_dir_all(&actual_temp_folder).map_err(|e| e.to_string()))
+    };
+
+    match move_result {
         Ok(()) => {
             info!(
-                from = %rip_folder,
+                from = %actual_temp_folder,
                 to = %final_dest_str,
                 "Moved rip to library"
             );
             state.naming_suggestions.write().await.remove(&index);
             state.completed_rips.write().await.remove(&index);
+            state.naming_completed.write().await.remove(&index);
             state.sse.send_json(json!({
                 "kind":"naming",
                 "action":"accepted",
@@ -1299,7 +1383,7 @@ pub async fn accept_naming(
         Err(e) => {
             warn!(
                 error = %e,
-                from = %rip_folder,
+                from = %actual_temp_folder,
                 to = %final_dest_str,
                 "Move to library failed"
             );
@@ -1315,6 +1399,8 @@ pub async fn reject_naming(
 ) -> Result<Json<ApiResponse<String>>, WebError> {
     state.naming_suggestions.write().await.remove(&index);
     state.pending_accepts.write().await.remove(&index);
+    state.naming_completed.write().await.remove(&index);
+    state.completed_rips.write().await.remove(&index);
     state.sse.send_json(json!({
         "kind":"naming",
         "action":"rejected",

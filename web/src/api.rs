@@ -84,6 +84,12 @@ pub struct AppState {
     /// Queued accepts: drives where user accepted naming while rip was in progress.
     /// When rip completes, these are executed automatically.
     pub pending_accepts: RwLock<HashMap<usize, (String, u16)>>,
+    /// Cached drives list with timestamp. Invalidation on drive events.
+    pub drives_cache: RwLock<Option<(Vec<riply_core::DriveInfo>, std::time::Instant)>>,
+    /// Cache TTL for drives list (60s).
+    pub drives_cache_ttl: std::time::Duration,
+    /// Lock to prevent concurrent detect_drives calls (flatpak is slow).
+    pub drives_detect_lock: tokio::sync::Mutex<()>,
     /// Active drive event source (if available). None if no event source detected.
     pub drive_event_source: Option<Arc<dyn DriveEventSource>>,
     /// Receiver for drive events from the listener task.
@@ -240,6 +246,10 @@ pub fn create_router(state: Arc<AppState>) -> Router {
     // jobs streamed over SSE), so a 30s timeout protects against hung
     // handlers. SSE and the static fallback are intentionally outside the
     // timed router: SSE is a long-lived stream.
+    //
+    // NOTE: The drives endpoint needs a longer timeout (120s) for flatpak
+    // MakeMKV latency. We place it in a separate router OUTSIDE the 30s
+    // timeout layer so the override takes effect.
     let api = Router::new()
         .merge(files::router(Arc::clone(&state)))
         .merge(review::router(Arc::clone(&state)))
@@ -247,15 +257,20 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .merge(analyze::router(Arc::clone(&state)))
         .merge(mover_routes::router(Arc::clone(&state)))
         .merge(jobs::router(Arc::clone(&state)))
-        .merge(ripper::router(Arc::clone(&state)))
+        // ripper routes without drives (drives have separate 120s timeout)
+        .merge(ripper::router_no_drives(Arc::clone(&state)))
         .merge(cfg::router(Arc::clone(&state)))
         .merge(search::router(Arc::clone(&state)))
         .merge(organizer::router(Arc::clone(&state)))
         .merge(session_state::router(Arc::clone(&state)))
         .layer(TimeoutLayer::new(std::time::Duration::from_secs(30)));
 
+    // Drives router with 120s timeout for flatpak MakeMKV latency
+    let drives_router = ripper::drives_router(Arc::clone(&state));
+
     Router::new()
-        .merge(api)
+        .merge(drives_router)  // 120s timeout (outer)
+        .merge(api)             // 30s timeout (inner)
         .merge(sse_handler::router(Arc::clone(&state)))
         .route("/health", get(health_handler))
         .route(
@@ -420,6 +435,9 @@ mod tests {
             naming_completed: RwLock::new(HashSet::new()),
             naming_suggestions: RwLock::new(HashMap::new()),
             pending_accepts: RwLock::new(HashMap::new()),
+            drives_cache: RwLock::new(None),
+            drives_cache_ttl: std::time::Duration::from_secs(60),
+            drives_detect_lock: tokio::sync::Mutex::new(()),
             drive_event_source: None,
             drive_event_rx: RwLock::new(None),
             event_source_available: false,

@@ -27,6 +27,12 @@ pub async fn handle_drive_inserted(state: &Arc<AppState>, event: &DriveEvent) {
         "Drive insertion event received"
     );
 
+    // Invalidate drives cache
+    {
+        let mut cache = state.drives_cache.write().await;
+        *cache = None;
+    }
+
     // Send SSE notification
     let sse_data = serde_json::json!({
         "type": "drive_inserted",
@@ -55,6 +61,12 @@ pub async fn handle_drive_ejected(state: &Arc<AppState>, event: &DriveEvent) {
     let device_path = event.device_path();
 
     info!(drive_index, device_path = %device_path, "Drive ejection event received");
+
+    // Invalidate drives cache
+    {
+        let mut cache = state.drives_cache.write().await;
+        *cache = None;
+    }
 
     // Send SSE notification
     let sse_data = serde_json::json!({
