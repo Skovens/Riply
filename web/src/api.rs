@@ -306,7 +306,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
                         };
 
                         let config = state.config.read().await;
-                        let tmdb_configured = config.tmdb_api_key.as_ref().map_or(false, |k| !k.is_empty());
+                        let tmdb_configured = config.tmdb_api_key.as_ref().is_some_and(|k| !k.is_empty());
                         let tmdb = TmdbHealth {
                             configured: tmdb_configured,
                             status: if tmdb_configured { "ok".to_string() } else { "not_configured".to_string() },
@@ -420,6 +420,9 @@ mod tests {
             naming_completed: RwLock::new(HashSet::new()),
             naming_suggestions: RwLock::new(HashMap::new()),
             pending_accepts: RwLock::new(HashMap::new()),
+            drive_event_source: None,
+            drive_event_rx: RwLock::new(None),
+            event_source_available: false,
         };
         Arc::new(state)
     }

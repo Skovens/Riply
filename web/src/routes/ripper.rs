@@ -95,8 +95,8 @@ pub async fn event_source_status(
 }
 
 #[derive(serde::Serialize)]
-struct EventSourceStatus {
-    available: bool,
+pub struct EventSourceStatus {
+    pub available: bool,
 }
 
 pub async fn ripper_status(
@@ -1149,15 +1149,15 @@ pub async fn eject_disc(
 
 /// Naming list entry for the API response
 #[derive(serde::Serialize)]
-pub(crate) struct NamingListEntry {
-    drive_index: usize,
-    original_name: String,
-    suggested_name: Option<String>,
-    year: Option<u16>,
-    status: String, // "named" or "naming_failed"
-    thumbnail_url: Option<String>,
-    rip_in_progress: bool,
-    accept_queued: bool,
+pub struct NamingListEntry {
+    pub drive_index: usize,
+    pub original_name: String,
+    pub suggested_name: Option<String>,
+    pub year: Option<u16>,
+    pub status: String, // "named" or "naming_failed"
+    pub thumbnail_url: Option<String>,
+    pub rip_in_progress: bool,
+    pub accept_queued: bool,
 }
 
 /// Get the naming list — all naming suggestions (named or failed) that haven't been accepted/rejected
@@ -1257,7 +1257,7 @@ pub async fn accept_naming(
             "kind":"naming",
             "action":"accepted",
             "index":index,
-            "data":{"message":format!("Naming accepted — will move when rip completes")}
+            "data":{"message":"Naming accepted — will move when rip completes".to_string()}
         }));
         state.sse.send_json(json!({"kind":"naming","action":"list_updated","data":{}}));
         return Ok(Json(ApiResponse::ok(format!(
@@ -1495,10 +1495,10 @@ pub async fn autorip_poll_loop(state: Arc<AppState>) {
             let temp_folder = format!("{}/{}", temp_dir, drive.index);
             // For Flatpak MakeMKV, don't create directory on host — backend creates it in namespace
             let is_sandboxed = state.backend.as_ref().map(|b| b.is_sandboxed()).unwrap_or(false);
-            if !is_sandboxed {
-                if std::fs::create_dir_all(&temp_folder).is_err() {
-                    continue;
-                }
+            if !is_sandboxed
+                && std::fs::create_dir_all(&temp_folder).is_err()
+            {
+                continue;
             }
 
             // Start the rip in a background task

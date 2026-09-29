@@ -1,7 +1,7 @@
-/// Chain of responsibility for selecting a drive event source.
-///
-/// Sources are tried in priority order. First available source wins.
-/// Selection happens at server startup.
+//! Chain of responsibility for selecting a drive event source.
+//!
+//! Sources are tried in priority order. First available source wins.
+//! Selection happens at server startup.
 
 use std::sync::Arc;
 
@@ -34,19 +34,12 @@ impl DriveEventChain {
     ///
     /// Sources are added in priority order.
     pub fn new() -> Self {
-        let mut sources: Vec<Arc<dyn DriveEventSource>> = Vec::new();
-
-        // Priority 1: udev (most reliable on Linux)
-        sources.push(Arc::new(UdevSource));
-
-        // Priority 2: inotify on /sys/block/
-        sources.push(Arc::new(InotifySysfsSource));
-
-        // Priority 3: inotify on /dev/sr*
-        sources.push(Arc::new(InotifyDevSource));
-
-        // Priority 4: D-Bus
-        sources.push(Arc::new(DbusSource));
+        let sources: Vec<Arc<dyn DriveEventSource>> = vec![
+            Arc::new(UdevSource),
+            Arc::new(InotifySysfsSource),
+            Arc::new(InotifyDevSource),
+            Arc::new(DbusSource),
+        ];
 
         Self { sources }
     }
@@ -302,7 +295,7 @@ impl InotifySysfsSource {
 
         stdout
             .lines()
-            .filter_map(|line| crate::makemkv::parser::parse_drive_line(line))
+            .filter_map(crate::makemkv::parser::parse_drive_line)
             .filter(|d| d.visible)
             .collect()
     }

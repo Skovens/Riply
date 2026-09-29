@@ -1,13 +1,12 @@
-/// Event handler for drive events.
-///
-/// Receives events from the event source channel, processes them,
-/// updates drive state, and sends SSE notifications.
+//! Event handler for drive events.
+//!
+//! Receives events from the event source channel, processes them,
+//! updates drive state, and sends SSE notifications.
 
 use std::sync::Arc;
 
 use infra::drive_events::DriveEvent;
-use riply_core::RipBackend;
-use tracing::{error, info};
+use tracing::info;
 
 use super::ripper;
 use crate::api::AppState;

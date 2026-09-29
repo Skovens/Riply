@@ -1,7 +1,7 @@
-/// Standardized drive event type used by all sources.
-///
-/// All adapters (udev, inotify, D-Bus) convert their native events
-/// into this type so the rest of the system never sees raw events.
+//! Standardized drive event type used by all sources.
+//!
+//! All adapters (udev, inotify, D-Bus) convert their native events
+//! into this type so the rest of the system never sees raw events.
 
 /// Represents a disc insertion or ejection event from any source.
 #[derive(Debug, Clone)]

@@ -1,7 +1,7 @@
-/// Trait that all drive event sources must implement.
-///
-/// Each source (udev, inotify, D-Bus) wraps its native event format
-/// into the standardized `DriveEvent` type.
+//! Trait that all drive event sources must implement.
+//!
+//! Each source (udev, inotify, D-Bus) wraps its native event format
+//! into the standardized `DriveEvent` type.
 
 use std::sync::Arc;
 use tokio::sync::mpsc;

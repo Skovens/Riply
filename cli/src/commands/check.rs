@@ -23,6 +23,7 @@ struct DriveHealth {
 #[derive(Debug, Deserialize)]
 struct MakeMkvHealth {
     available: bool,
+    #[allow(dead_code)]
     status: String,
     error: Option<String>,
 }
@@ -30,6 +31,7 @@ struct MakeMkvHealth {
 #[derive(Debug, Deserialize)]
 struct TmdbHealth {
     configured: bool,
+    #[allow(dead_code)]
     status: String,
     error: Option<String>,
 }
