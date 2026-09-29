@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
 
 use riply_core::{DriveInfo, DriveState, RipBackend, RipError, RipHandle};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use super::parser;
 use super::session::MakemkvSession;
@@ -207,6 +207,26 @@ impl RipBackend for MakemkvBackend {
         let dest_path = Path::new(dest);
 
         info!(drive, dest = %dest, "Starting rip");
+
+        // Handle existing destination: rename to {index}_backup to avoid MakeMKV overwrite prompt
+        // MakeMKV will prompt "already exists, overwrite?" in interactive mode, which breaks
+        // our non-interactive flow. We handle this by renaming the existing directory first.
+        let backup_path = format!("{}_backup", dest);
+        if dest_path.exists() {
+            info!(
+                dest = %dest,
+                backup = %backup_path,
+                "Destination exists, renaming to backup before rip"
+            );
+            if let Err(e) = std::fs::rename(dest_path, &backup_path) {
+                warn!(
+                    error = %e,
+                    dest = %dest,
+                    "Failed to rename existing destination to backup — removing instead"
+                );
+                let _ = std::fs::remove_dir_all(dest_path);
+            }
+        }
 
         // For Flatpak MakeMKV, always create the directory inside the Flatpak namespace
         // because MakeMKV cannot see host-created directories in /tmp
