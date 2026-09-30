@@ -457,8 +457,8 @@
   <div class="ripper__drives">
     {#each drives as drive (drive.index)}
       <div class="drive-card" class:drive-card--active={drive.state === 'Ripping'}>
-        <!-- Poster (left side) -->
-        <div class="drive-card__poster">
+        <!-- Poster (left side) — clickable to open naming modal -->
+        <div class="drive-card__poster" onclick={() => openNamingModal({ driveIndex: drive.index, discName: drive.disc_name || '' })} style="cursor: pointer;">
           {#if ripPosters[drive.index]?.posterUrl}
             <img src={ripPosters[drive.index].posterUrl} alt="Poster" class="drive-card__poster-img" />
           {:else}

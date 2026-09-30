@@ -229,7 +229,6 @@ pub async fn list_drives(
         // Update cache with fresh data
         let rips = state_clone.active_rips.read().await;
         let disc_names = state_clone.disc_names.read().await;
-        let naming_completed = state_clone.naming_completed.read().await;
         let config = state_clone.config.read().await;
         let temp_dir = config.temp_directory.clone();
         drop(config);
@@ -272,49 +271,6 @@ pub async fn list_drives(
         let mut cache = state_clone.drives_cache.write().await;
         *cache = Some((drives.clone(), std::time::Instant::now()));
         info!("Background detect_drives() completed, cache updated");
-
-        // Trigger auto-naming for drives with discs but no naming info
-        let has_searcher = state_clone.searcher.is_some();
-        if has_searcher {
-            for drive in &drives {
-                if drive.disc_name.is_some()
-                    && drive.state != DriveState::Empty
-                    && !naming_completed.contains(&drive.index)
-                {
-                    let state_nc = state_clone.clone();
-                    let disc_name = drive.disc_name.clone();
-                    let drive_idx = drive.index;
-                    info!(drive = drive_idx, "Spawning auto-naming task from background");
-                    tokio::spawn(async move {
-                        if let Some(ref searcher) = state_nc.searcher {
-                            if let Some(ref dn) = disc_name {
-                                let resolved = resolve_rip_title_with_duration(
-                                    dn, "", Some(&**searcher),
-                                ).await;
-                                if !resolved.0.is_empty() {
-                                    let year = resolved.1.unwrap_or(0);
-                                    let mut suggestions = state_nc.naming_suggestions.write().await;
-                                    suggestions.insert(drive_idx, Some((resolved.0.clone(), year)));
-                                    drop(suggestions);
-                                    // Mark as completed so it shows in naming list
-                                    state_nc.naming_completed.write().await.insert(drive_idx);
-                                    info!(drive = drive_idx, title = %resolved.0, year, "Auto-naming succeeded");
-                                    state_nc.sse.send_json(json!({"kind":"rip","action":"named","index":drive_idx,"data":{"title":resolved.0,"year":year,"type":"movie"}}));
-                                    state_nc.sse.send_json(json!({"kind":"naming","action":"list_updated","data":{}}));
-                                } else {
-                                    let mut suggestions = state_nc.naming_suggestions.write().await;
-                                    suggestions.insert(drive_idx, None);
-                                    drop(suggestions);
-                                    state_nc.naming_completed.write().await.insert(drive_idx);
-                                    state_nc.sse.send_json(json!({"kind":"rip","action":"naming_failed","index":drive_idx,"data":{}}));
-                                    state_nc.sse.send_json(json!({"kind":"naming","action":"list_updated","data":{}}));
-                                }
-                            }
-                        }
-                    });
-                }
-            }
-        }
     });
 
     // Return stale cached data immediately if available, otherwise empty list
@@ -855,7 +811,7 @@ fn _unique_rip_destination(candidate: &str, subdir_name: Option<&str>) -> String
 /// Resolve a disc name to a title (+ year) for the output directory.
 /// For movies, searches TMDb/OMDb and uses the matched title.
 /// For TV episodes, also verifies the ripped video duration against TMDb.
-async fn resolve_rip_title_with_duration(
+pub async fn resolve_rip_title_with_duration(
     disc_name: &str,
     rip_folder: &str,
     searcher: Option<&dyn MetadataSearcher>,
