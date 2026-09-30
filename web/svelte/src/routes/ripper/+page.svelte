@@ -56,10 +56,6 @@
 
   onDestroy(() => {
     sseDisconnect?.();
-    if (pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-    }
   });
 
   // ── Data fetching ──────────────────────────────────────────
@@ -72,39 +68,6 @@
     } finally {
       drivesLoading = false;
     }
-    // If drives are empty, start polling (Flatpak MakeMKV may take time to re-detect)
-    if (drives.length === 0) {
-      pollForDrives();
-    }
-  }
-
-  // Poll for drives if the list is empty (Flatpak MakeMKV may take time to re-detect)
-  let pollTimer = null;
-  async function pollForDrives(maxRetries = 10, delayMs = 3000) {
-    if (pollTimer) clearInterval(pollTimer);
-    let retries = 0;
-    pollTimer = setInterval(async () => {
-      if (drives.length > 0) {
-        clearInterval(pollTimer);
-        pollTimer = null;
-        return;
-      }
-      retries++;
-      if (retries > maxRetries) {
-        clearInterval(pollTimer);
-        pollTimer = null;
-        return;
-      }
-      try {
-        drives = await ripperApi.listDrives();
-        if (drives.length > 0) {
-          clearInterval(pollTimer);
-          pollTimer = null;
-        }
-      } catch (e) {
-        console.error('Drive poll failed:', e);
-      }
-    }, delayMs);
   }
 
   async function fetchAutoripStatus() {
@@ -530,7 +493,7 @@
           <!-- Unidentified message -->
           {#if (drive.state === 'Complete' || drive.state === 'Error') && !drive.derived_name}
             <div class="drive-card__naming">
-              <span class="drive-card__failed-name">Unidentified — view in Organizer</span>
+              <span class="drive-card__failed-name">Unidentified — awaiting naming approval</span>
             </div>
           {/if}
 
@@ -614,17 +577,6 @@
                     Eject
                   </button>
                 </Tooltip>
-              {/if}
-
-              <!-- View in Organizer button (unidentified rips) -->
-              {#if (drive.state === 'Complete' || drive.state === 'Error') && !drive.derived_name}
-                <a
-                  href="/organizer"
-                  class="btn btn--primary btn--sm"
-                  title="View in Organizer"
-                >
-                  View in Organizer
-                </a>
               {/if}
             </div>
 

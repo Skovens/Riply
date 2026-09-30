@@ -3063,6 +3063,7 @@ dependencies = [
  "axum",
  "core",
  "infra",
+ "libc",
  "reqwest",
  "rust-embed",
  "serde",

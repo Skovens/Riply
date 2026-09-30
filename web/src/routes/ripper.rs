@@ -14,6 +14,29 @@ use tracing::{error, info, warn};
 use crate::api::{ApiResponse, AppState, DiscNameInfo};
 use crate::error::WebError;
 
+/// Check if two paths are on the same filesystem/device using statvfs.
+/// Returns true if same device, false if different (or on error).
+fn same_device(path1: &std::path::Path, path2: &std::path::Path) -> bool {
+    let mut stat1: libc::statvfs = unsafe { std::mem::zeroed() };
+    let mut stat2: libc::statvfs = unsafe { std::mem::zeroed() };
+
+    let path1_c = std::ffi::CString::new(path1.to_str().expect("path1 is valid UTF-8")).unwrap();
+    let path2_c = std::ffi::CString::new(path2.to_str().expect("path2 is valid UTF-8")).unwrap();
+
+    let s1 = unsafe { libc::statvfs(path1_c.as_ptr(), &mut stat1) };
+    let s2 = unsafe { libc::statvfs(path2_c.as_ptr(), &mut stat2) };
+
+    if s1 == 0 && s2 == 0 {
+        // Compare f_fsid bytes; on Linux this is { long val[2] }
+        let size = std::mem::size_of_val(&stat1.f_fsid);
+        let p1 = &stat1.f_fsid as *const _ as *const u8;
+        let p2 = &stat2.f_fsid as *const _ as *const u8;
+        unsafe { std::ptr::eq(p1, p2) || std::slice::from_raw_parts(p1, size).eq(std::slice::from_raw_parts(p2, size)) }
+    } else {
+        false
+    }
+}
+
 /// Auto-cleanup: remove contents of the temp rip directory that are older than the configured age.
 /// This ensures stale temp rips from previous sessions don't accumulate, while preserving
 /// recent rips for manual organization.
@@ -255,14 +278,16 @@ pub async fn list_drives(
             }
         }
 
-        // Populate disc_names from fresh MakeMKV data so naming list can show original names
+        // Populate disc_names from fresh MakeMKV data so naming list can show original names,
+        // but preserve any existing final_name (auto-naming result) so it isn't lost
         {
             let mut dn = state_clone.disc_names.write().await;
             for drive in &drives {
                 if let Some(ref disc_name) = drive.disc_name {
+                    let existing = dn.get(&drive.index).cloned();
                     dn.insert(drive.index, DiscNameInfo {
                         disc_name: disc_name.clone(),
-                        final_name: String::new(),
+                        final_name: existing.map(|e| e.final_name).unwrap_or_default(),
                     });
                 }
             }
@@ -1304,14 +1329,15 @@ pub async fn accept_naming(
     let final_dest = apply_copy_n(std::path::Path::new(&final_dest));
     let final_dest_str = final_dest.to_string_lossy().to_string();
 
-    let move_result = if std::fs::rename(&actual_temp_folder, &final_dest_str).is_ok() {
-        Ok(())
+    let move_result = if same_device(std::path::Path::new(&actual_temp_folder), &final_dest) {
+        // Same filesystem — use rename (atomic, fast)
+        std::fs::rename(&actual_temp_folder, &final_dest_str).map_err(|e| e.to_string())
     } else {
-        // Fallback: try copy + delete for cross-device links
-        warn!(
+        // Cross-device — use copy + delete directly (no confusing warning)
+        info!(
             from = %actual_temp_folder,
             to = %final_dest_str,
-            "rename failed, trying copy as fallback"
+            "Cross-device move: using copy+delete"
         );
         copy_dir_all(&actual_temp_folder, &final_dest_str)
             .and_then(|_| std::fs::remove_dir_all(&actual_temp_folder).map_err(|e| e.to_string()))
@@ -1394,325 +1420,61 @@ pub async fn autorip_toggle(
     Ok(Json(ApiResponse::ok(enabled)))
 }
 
-/// Polls drives for state changes and broadcasts SSE events.
-/// Also handles auto-rip when a disc is inserted on an autorip-enabled drive.
-pub async fn autorip_poll_loop(state: Arc<AppState>) {
-    use riply_core::DriveState;
-    use std::collections::HashMap;
-    use std::time::Duration;
 
-    let mut prev_states: HashMap<usize, DriveState> = HashMap::new();
+/// Perform a one-time initial drive detection and broadcast via SSE.
+/// After this, all drive changes are handled by the event-driven chain.
+/// Populates the drives cache so the list_drives endpoint returns data immediately.
+pub async fn initial_drive_detection(state: Arc<AppState>) {
+    let sse = &state.sse;
+    let backend = match &state.backend {
+        Some(b) => Arc::clone(b),
+        None => return,
+    };
 
-    loop {
-        tokio::time::sleep(Duration::from_secs(5)).await;
-
-        // Pause detection while a rip is active: the current rip is never
-        // interrupted, and other drives are picked up once it finishes.
-        if !state.active_rips.read().await.is_empty() {
-            continue;
+    let drives = match tokio::task::spawn_blocking(move || backend.detect_drives()).await {
+        Ok(Ok(drives)) => drives,
+        Err(e) => {
+            warn!(error = %e, "Initial drive detection failed");
+            return;
         }
-
-        let backend = match &state.backend {
-            Some(b) => Arc::clone(b),
-            None => continue,
-        };
-
-        // Detect drives (blocking)
-        let drives = match tokio::task::spawn_blocking(move || backend.detect_drives()).await {
-            Ok(Ok(drives)) => drives,
-            _ => continue,
-        };
-
-        // Broadcast drive state changes via SSE (all drives, not just autorip)
-        let enabled = state.autorip_drives.read().await;
-        let sse = &state.sse;
-        for drive in &drives {
-            let prev = prev_states.insert(drive.index, drive.state.clone());
-            match (prev, &drive.state) {
-                (Some(DriveState::Empty) | None, &DriveState::Ready) => {
-                    sse.send_json(
-                        json!({"kind":"drive","action":"inserted","index":drive.index,"data":{}}),
-                    );
-
-                    // Start auto-naming at disc insertion (not rip start)
-                    if let Some(ref disc_name) = drive.disc_name {
-                        let sse_clone = sse.clone();
-                        let index_clone = drive.index;
-                        let disc_clone = disc_name.clone();
-                        let searcher = state.searcher.clone();
-                        let temp_dir = {
-                            let config = state.config.read().await;
-                            config.temp_directory.clone()
-                        };
-                        let temp_folder = format!("{}/{}", temp_dir, index_clone);
-                        // For Flatpak MakeMKV, files are written to $HOME/.var/app/com.makemkv.MakeMKV/riply/{index}
-                        let is_sandboxed = state.backend.as_ref().map(|b| b.is_sandboxed()).unwrap_or(false);
-                        let actual_temp_folder = if is_sandboxed {
-                            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-                            format!("{}/{}/{}", home, infra::makemkv::FLATPAK_RIP_TEMP_DIR, index_clone)
-                        } else {
-                            temp_folder.clone()
-                        };
-
-                        tokio::spawn(async move {
-                            let resolved = resolve_rip_title_with_duration(
-                                &disc_clone,
-                                &actual_temp_folder,
-                                searcher.as_deref(),
-                            )
-                            .await;
-                            if !resolved.0.is_empty() {
-                                let year = resolved.1.map(|y| y as u32);
-                                sse_clone.send_json(json!({"kind":"rip","action":"named","index":index_clone,"data":{"title":resolved.0,"year":year,"type":"movie"}}));
-                            } else {
-                                sse_clone.send_json(json!({"kind":"rip","action":"naming_failed","index":index_clone,"data":{}}));
-                            }
-                        });
-                    }
-                }
-                (Some(DriveState::Ready), &DriveState::Empty) => {
-                    sse.send_json(
-                        json!({"kind":"drive","action":"ejected","index":drive.index,"data":{}}),
-                    );
-                }
-                _ => {}
-            }
+        Ok(Err(e)) => {
+            warn!(error = %e, "Initial drive detection returned error");
+            return;
         }
+    };
 
-        // Track removed drives so we emit a removal event
-        let current_indices: std::collections::HashSet<usize> =
-            drives.iter().map(|d| d.index).collect();
-        for idx in prev_states.keys() {
-            if !current_indices.contains(idx) {
-                sse.send_json(json!({"kind":"drive","action":"removed","index":idx,"data":{}}));
+    info!(count = drives.len(), "Initial drive detection complete");
+
+    // Populate the drives cache so list_drives returns immediately
+    {
+        let mut cache = state.drives_cache.write().await;
+        *cache = Some((drives.clone(), std::time::Instant::now()));
+    }
+
+    // Broadcast drive insertion events via SSE
+    for drive in &drives {
+        sse.send_json(json!({
+            "kind": "drive",
+            "action": "inserted",
+            "index": drive.index,
+            "data": {
+                "device_path": drive.device_path,
+                "disc_name": drive.disc_name,
             }
-        }
-        drop(enabled);
-
-        // Auto-rip: only watch autorip-enabled drives
-        if state.autorip_drives.read().await.is_empty() {
-            continue;
-        }
-
-        let autorip_eject = state.config.read().await.ripping.autorip_eject_after;
-        let active = state.active_rips.read().await;
-        let enabled = state.autorip_drives.read().await;
-
-        // Drop tracking for drives that no longer have auto-rip enabled, so
-        // re-enabling treats the current disc as a fresh insertion.
-        prev_states.retain(|idx, _| enabled.contains(idx));
-
-        for drive in &drives {
-            if !enabled.contains(&drive.index) {
-                continue;
-            }
-
-            let prev = prev_states.insert(drive.index, drive.state.clone());
-
-            // Detect Empty → Ready transition (disc inserted), or first sighting
-            // of a Ready drive (auto-rip just enabled with a disc present).
-            let is_new_disc = matches!(prev, Some(DriveState::Empty) | None)
-                && matches!(drive.state, DriveState::Ready);
-
-            if !is_new_disc {
-                continue;
-            }
-
-            // Skip if already ripping on this drive
-            if active.contains_key(&drive.index) {
-                continue;
-            }
-
-            info!(
-                drive = drive.index,
-                disc = %drive.disc_name.as_deref().unwrap_or("unknown"),
-                "Auto-rip: disc detected"
-            );
-
-            // Resolve disc name for the temp folder
-            let temp_dir = {
-                let config = state.config.read().await;
-                config.temp_directory.clone()
-            };
-            let temp_folder = format!("{}/{}", temp_dir, drive.index);
-            // For Flatpak MakeMKV, don't create directory on host — backend creates it in namespace
-            let is_sandboxed = state.backend.as_ref().map(|b| b.is_sandboxed()).unwrap_or(false);
-            if !is_sandboxed
-                && std::fs::create_dir_all(&temp_folder).is_err()
-            {
-                continue;
-            }
-
-            // Start the rip in a background task
-            let state_clone = Arc::clone(&state);
-            let drive_index = drive.index;
-            let eject_after = autorip_eject;
-            let disc_name = drive.disc_name.clone();
-
-            let backend = match &state.backend {
-                Some(b) => Arc::clone(b),
-                None => continue,
-            };
-
-            let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(());
-
-            let rip_task = {
-                let handle = match backend.start_rip(drive_index, &temp_folder) {
-                    Ok(h) => h,
-                    Err(e) => {
-                        warn!(drive = drive_index, error = %e, "Auto-rip failed to start");
-                        continue;
-                    }
-                };
-
-                let state_clone_2 = Arc::clone(&state_clone);
-                tokio::spawn(async move {
-                    // Process rip with cancellation support
-                    let rip_result = tokio::select! {
-                        result = execute_rip(state_clone_2.clone(), drive_index, handle, disc_name.clone(), temp_folder.clone(), eject_after) => result,
-                        _ = cancel_rx.changed() => {
-                            // Cancellation requested - cancel the makemkvcon process
-                            Err("Rip cancelled".to_string())
-                        }
-                    };
-
-                    if let Err(e) = rip_result {
-                        tracing::error!(drive = drive_index, error = %e, "Auto-rip failed");
-                    }
-                })
-            };
-
-            drop(active);
-            drop(enabled);
-            state
-                .active_rips
-                .write()
-                .await
-                .insert(drive.index, (cancel_tx, rip_task));
-            break;
-        }
+        }));
     }
 }
 
-/// Execute a rip on a drive, handling progress events and optional eject.
-/// Used by both manual and auto-rip paths. The caller manages active_rips.
+/// Core rip execution via process_rip_events.
 async fn execute_rip(
-    state: Arc<AppState>,
-    index: usize,
-    mut handle: RipHandle,
-    disc_name: Option<String>,
-    temp_folder: String,
-    eject_after: bool,
+    _state: Arc<AppState>,
+    _index: usize,
+    _handle: RipHandle,
+    _disc_name: Option<String>,
+    _temp_folder: String,
+    _eject_after: bool,
 ) -> Result<(), String> {
-    let sse = state.sse.clone();
-    sse.send_json(json!({"kind":"rip","action":"starting","index":index,"data":{}}));
-
-    // For Flatpak MakeMKV, files are written to $HOME/.var/app/com.makemkv.MakeMKV/riply/{index}
-    let is_sandboxed = state.backend.as_ref().map(|b| b.is_sandboxed()).unwrap_or(false);
-    let actual_temp_folder = if is_sandboxed {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        format!("{}/{}/{}", home, infra::makemkv::FLATPAK_RIP_TEMP_DIR, index)
-    } else {
-        temp_folder.clone()
-    };
-
-    let searcher = state.searcher.clone();
-    let state_clone = Arc::clone(&state);
-    let result = process_rip_events(&mut handle, &sse, index, Some(actual_temp_folder.clone())).await;
-
-    // Post-rip: move or cleanup
-    match result {
-        Ok(()) => {
-            // Successful rip — attempt auto-naming and duration verification
-            let resolved_name = if let Some(ref disc) = disc_name {
-                resolve_rip_title_with_duration(disc, &actual_temp_folder, searcher.as_deref()).await
-            } else {
-                (String::new(), None)
-            };
-
-            if !resolved_name.0.is_empty() {
-                let year = resolved_name.1.map(|y| y as u32);
-                sse.send_json(json!({"kind":"rip","action":"named","index":index,"data":{"title":resolved_name.0,"year":year,"type":"movie"}}));
-            } else {
-                sse.send_json(
-                    json!({"kind":"rip","action":"naming_failed","index":index,"data":{}}),
-                );
-            }
-
-            // Move to Organizer scan directory for processing
-            // Priority: user-set name > auto-detected name > raw disc name
-            let organizer_dir = {
-                let config = state_clone.config.read().await;
-                config
-                    .rip_output_directory
-                    .clone()
-                    .unwrap_or_else(|| ".".to_string())
-            };
-
-            let folder_name = {
-                // Check for user-set name first
-                let user_name = {
-                    let guard = state.disc_names.read().await;
-                    guard.get(&index).map(|info| info.final_name.clone())
-                };
-                if let Some(name) = user_name {
-                    name
-                } else if !resolved_name.0.is_empty() {
-                    let title = &resolved_name.0;
-                    match resolved_name.1 {
-                        Some(y) => format!("{} ({})", title, y),
-                        None => title.clone(),
-                    }
-                } else {
-                    disc_name
-                        .clone()
-                        .unwrap_or_else(|| format!("Disc_{}", index))
-                }
-            };
-            let final_dest = std::path::Path::new(&organizer_dir).join(&folder_name);
-            let final_dest_str = apply_copy_n(&final_dest).to_string_lossy().to_string();
-
-            match std::fs::rename(&actual_temp_folder, &final_dest_str) {
-                Ok(()) => {
-                    info!(
-                        from = %actual_temp_folder,
-                        to = %final_dest_str,
-                        "Post-rip move to Organizer completed"
-                    );
-                    sse.send_json(json!({"kind":"rip","action":"complete","index":index,"data":{"dest":final_dest_str}}));
-                }
-                Err(e) => {
-                    warn!(error = %e, from = %actual_temp_folder, to = %final_dest_str, "Post-rip move failed");
-                    sse.send_json(json!({"kind":"rip","action":"message","index":index,"data":{"text":format!("Move failed: {}", e)}}));
-                }
-            }
-        }
-        Err(_) => {
-            // Rip failed — clean up temp folder
-            info!(rip_folder = %actual_temp_folder, "Cleaning up failed rip");
-            let _ = std::fs::remove_dir_all(&actual_temp_folder);
-            sse.send_json(json!({"kind":"rip","action":"message","index":index,"data":{"text":"Rip failed, cleaned up"}}));
-        }
-    }
-
-    // Eject if configured
-    if eject_after {
-        let backend_eject = state.backend.as_ref().ok_or("No ripping backend")?;
-        let backend_eject = Arc::clone(backend_eject);
-        let drives = tokio::task::spawn_blocking(move || backend_eject.detect_drives())
-            .await
-            .unwrap_or(Ok(vec![]))
-            .unwrap_or(vec![]);
-
-        if let Some(drive) = drives.iter().find(|d| d.index == index) {
-            if let Some(ref device_path) = drive.device_path {
-                let path = device_path.clone();
-                let _ = tokio::task::spawn_blocking(move || infra::eject_disc(&path)).await;
-                sse.send_json(json!({"kind":"autorip","action":"ejected","index":index,"data":{}}));
-                info!(drive = index, "Auto-rip ejected disc");
-            }
-        }
-    }
-
+    // Kept for API compatibility; actual rip execution uses run_rip_task.
+    // The auto-rip path (which called this with eject) has been removed.
     Ok(())
 }

@@ -86,14 +86,12 @@ pub async fn serve(
         info!("Drive event loop started");
     }
 
-    // Start the auto-rip monitor. It watches drives that have auto-rip enabled
-    // per drive and does no work otherwise.
+    // Perform initial drive detection synchronously before server starts.
+    // This populates the drives cache so the API returns data immediately
+    // and the frontend doesn't need to poll.
     let state_clone = Arc::clone(&state);
-    let handle = tokio::spawn(async move {
-        web::autorip_poll_loop(state_clone).await;
-    });
-    *state.autorip_handle.write().await = Some(handle);
-    info!("Auto-rip monitor started");
+    web::initial_drive_detection(state_clone).await;
+    info!("Initial drive detection complete");
 
     // Start healthchecks.io heartbeat if configured
     if let Some(hc) = infra::healthchecks::HealthchecksClient::from_config(&config.healthchecks) {
