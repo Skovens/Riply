@@ -108,6 +108,7 @@ See `README.md` for the full architecture diagram. Key modules:
 
 - **One branch + one PR per feature or fix.** Before starting work, create a branch: `git switch -c feat/<topic>` or `fix/<topic>` (never commit directly to `main`).
 - The PR is the review surface: CI (build + vet + `go test -race`) gates the change before it reaches `main`, and the PR serves as permanent history for what changed and why.
+- **CI must pass before a task is done.** Before pushing, run locally exactly what CI runs (`go build ./...`, `go vet ./...`, `go test -race ./...`) so the first push is expected green. After pushing, watch the run (`gh pr checks <N> --watch`) and fix any failure before reporting completion — a red run means the task is not finished. Never merge on a failing check.
 - Do not switch branches with uncommitted changes in the tree — commit or ask first; a switch would yank files out from under an in-progress session.
 - Push and open the PR with `gh pr create` once the change is verified; merge via PR, never by pushing to `main` directly.
 
