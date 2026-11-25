@@ -109,6 +109,7 @@ type RipSession struct {
 	ID            int                `json:"id"`
 	DrivePath     string             `json:"drive_path"`
 	DiscName      string             `json:"disc_name"`
+	DiscHash      string             `json:"-"` // disc fingerprint; empty when unknown
 	State         string             `json:"state"` // "ripping", "queued", "complete", "accepted", "error"
 	OutputDir     string             `json:"-"`     // internal: path to rip output directory
 	OutputPath    string             `json:"output_path,omitempty"`
@@ -242,9 +243,14 @@ func (s *Server) StartAutoNaming(drivePath, discName string) {
 	s.startAutoNaming(drivePath, discName)
 }
 
-// DuplicateCheck publishes a warning if this disc was ripped before.
+// DuplicateCheck publishes a warning if this disc was ripped before. The
+// hash comes from the scanner state set during resolveDiscName.
 func (s *Server) DuplicateCheck(ctx context.Context, drivePath, discName string) {
-	s.duplicateWarning(ctx, drivePath, discName)
+	hash := ""
+	if d, ok := s.scanner.Snapshot(drivePath); ok {
+		hash = d.DiscHash
+	}
+	s.duplicateWarning(ctx, drivePath, discName, hash)
 }
 
 // AutoSequenceDefault reports the global Auto-Sequence config default for a
@@ -453,8 +459,9 @@ func (s *Server) startRipForPath(drivePath string) (*RipSession, error) {
 	}
 	discSize := d.MediaSize
 	discName := d.DiscName
+	discHash := d.DiscHash
 	// Warn (without blocking) if library history shows a previous rip of this disc.
-	s.duplicateWarning(s.baseCtx, drivePath, discName)
+	s.duplicateWarning(s.baseCtx, drivePath, discName, discHash)
 
 	// Register the rip with the shutdown WaitGroup only after every early
 	// return is past; a count added before a 400/404/409 would leak and stall
@@ -511,6 +518,7 @@ func (s *Server) startRipForPath(drivePath string) (*RipSession, error) {
 		ID:            s.ripCount,
 		DrivePath:     drivePath,
 		DiscName:      discName,
+		DiscHash:      discHash,
 		State:         string(StateRipping),
 		OutputDir:     outDir,
 		Cancel:        ripCancel,
@@ -719,6 +727,7 @@ func (s *Server) startRipForPath(drivePath string) (*RipSession, error) {
 				session.OutputPath = result.Destination
 				session.CompletedAt = time.Now()
 				sessDisc := session.DiscName
+				sessHash := session.DiscHash
 				mt := session.MediaType
 				s.mu.Unlock()
 				movedAt := time.Now().UTC().Format(time.RFC3339)
@@ -729,6 +738,7 @@ func (s *Server) startRipForPath(drivePath string) (*RipSession, error) {
 						records = append(records, library.Entry{
 							OutputPath: me.Path,
 							DiscName:   sessDisc,
+							DiscHash:   sessHash,
 							Title:      title,
 							Year:       year,
 							MediaType:  "tv",
@@ -742,6 +752,7 @@ func (s *Server) startRipForPath(drivePath string) (*RipSession, error) {
 					records = append(records, library.Entry{
 						OutputPath: result.MainFile,
 						DiscName:   sessDisc,
+						DiscHash:   sessHash,
 						Title:      title,
 						Year:       year,
 						MediaType:  ripMediaType(tvSeason, resolveMediaType(mt, pa.TMDB)),
@@ -1539,6 +1550,9 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	movedAt := time.Now().UTC().Format(time.RFC3339)
+	s.mu.Lock()
+	sessHash := session.DiscHash
+	s.mu.Unlock()
 	if len(result.Episodes) > 0 {
 		// N1: a TV move landed one file per episode; record each so the
 		// series next-up advances over all of them.
@@ -1546,6 +1560,7 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 			s.recordRipEntry(library.Entry{
 				OutputPath: me.Path,
 				DiscName:   discName,
+				DiscHash:   sessHash,
 				Title:      title,
 				Year:       year,
 				MediaType:  "tv",
@@ -1559,6 +1574,7 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 		s.recordRipEntry(library.Entry{
 			OutputPath: result.MainFile,
 			DiscName:   discName,
+			DiscHash:   sessHash,
 			Title:      title,
 			Year:       year,
 			MediaType:  ripMediaType(tvSeason, resolveMediaType(mt, tmdbResult)),
@@ -1728,6 +1744,7 @@ func (s *Server) handleAcceptTitle(w http.ResponseWriter, r *http.Request) {
 	s.recordRipEntry(library.Entry{
 		OutputPath: result.Dest,
 		DiscName:   discName,
+		DiscHash:   session.DiscHash,
 		Title:      recordTitle,
 		Year:       body.Year,
 		MediaType:  mediaType,

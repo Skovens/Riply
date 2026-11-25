@@ -39,6 +39,7 @@ type Drive struct {
 	AcceptedYear        int    `json:"accepted_year,omitempty"`  // year of accepted year
 	Poster              string `json:"poster,omitempty"`         // TMDb poster URL from the naming match
 	MediaSize           int64  `json:"media_size,omitempty"`     // disc capacity in bytes; 0 when unknown
+	DiscHash            string `json:"disc_hash,omitempty"`      // title-metadata fingerprint; empty when unknown
 }
 
 // Scanner handles drive discovery and state management.
@@ -104,6 +105,7 @@ func (s *Scanner) handleEvent(event DiscEvent) {
 				logger.Info("Disc inserted while drive not empty; re-resolving",
 					"path", event.Path, "previous_state", d.State, "previous_disc_name", d.DiscName)
 				d.DiscName = ""
+				d.DiscHash = ""
 				d.CanonicalName = ""
 				d.CanonicalYear = 0
 				d.CanonicalID = 0
@@ -117,6 +119,7 @@ func (s *Scanner) handleEvent(event DiscEvent) {
 			s.insertGen[event.Path]++
 			d.State = StateNoDisc
 			d.DiscName = ""
+			d.DiscHash = ""
 			d.CanonicalName = ""
 			d.CanonicalYear = 0
 			d.HasDisc = false
@@ -156,6 +159,24 @@ func (s *Scanner) CommitReady(path, discName string, gen uint64) bool {
 	d.State = StateReady
 	d.DiscName = discName
 	return true
+}
+
+// SetDiscHash stores the disc fingerprint for path, but only while the
+// generation still matches the resolve that computed it — a landing eject
+// or hotswap must not receive a stale hash.
+func (s *Scanner) SetDiscHash(path, hash string, gen uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, ok := s.drives[path]
+	if !ok || hash == "" {
+		return
+	}
+	if s.insertGen[path] != gen || !d.HasDisc || d.State == StateRipping {
+		logger.Debug("Disc hash dropped: stale resolve", "path", path, "state", d.State)
+		return
+	}
+	d.DiscHash = hash
+	logger.Info("Disc hash stored", "path", path, "hash", hash)
 }
 
 // Snapshot returns a copy of the drive at path.

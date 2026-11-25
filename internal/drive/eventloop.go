@@ -113,12 +113,14 @@ func (l *EventLoop) resolveDiscName(path string) {
 		})
 
 		// Call GetDiscInfo via MakeMKV
+		var discHash string
 		if l.ripper != nil && l.ripper.IsAvailable() {
 			logger.Info("GetDiscInfo", "path", d.Path, "operation", "info")
 			discInfo, err := l.ripper.GetDiscInfo(l.ctx, d.Path)
 			if err == nil && discInfo.Title != "" {
 				discName = discInfo.Title
-				logger.Info("Disc name resolved from GetDiscInfo", "title", discName)
+				discHash = discInfo.Hash
+				logger.Info("Disc name resolved from GetDiscInfo", "title", discName, "hash", discHash)
 			} else if err != nil {
 				logger.Warn("GetDiscInfo failed", "path", path, "error", err, "message", "using fallback name")
 			}
@@ -152,6 +154,7 @@ func (l *EventLoop) resolveDiscName(path string) {
 			logger.Info("Ready commit dropped: stale resolve", "path", d.Path, "disc_name", discName)
 			return
 		}
+		l.scanner.SetDiscHash(d.Path, discHash, gen)
 		if discName != UnknownDiscName {
 			logger.Info("Starting auto-naming", "drive", d.Path)
 			l.hooks.StartAutoNaming(d.Path, discName)
