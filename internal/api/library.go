@@ -91,9 +91,39 @@ func (s *Server) recordRipEntry(e library.Entry) {
 }
 
 // duplicateWarning checks library history for a previous rip of this disc and
-// publishes a warning SSE event. Failures are logged, never fatal.
-func (s *Server) duplicateWarning(ctx context.Context, drivePath, discName string) {
-	if s.lib == nil || !searchableName(discName) {
+// publishes a warning SSE event. A non-empty disc hash is checked first —
+// it is reliable even when the disc name is generic ("DVD_VIDEO"); the
+// name-based check is the fallback. Failures are logged, never fatal.
+func (s *Server) duplicateWarning(ctx context.Context, drivePath, discName, discHash string) {
+	if s.lib == nil {
+		return
+	}
+	// A known hash is authoritative: match → warn, mismatch → silent. The
+	// name check runs only when no hash is available, because generic disc
+	// names ("DVD_VIDEO") produce false positives.
+	if discHash != "" {
+		hashMatches, err := s.lib.HashMatches(ctx, discHash)
+		if err != nil {
+			logger.Warn("Duplicate hash check failed", "disc", discName, "error", err)
+			return
+		}
+		if len(hashMatches) == 0 {
+			return
+		}
+		m := hashMatches[0]
+		label := m.Title
+		if label == "" {
+			label = m.DiscName
+		}
+		logger.Info("Disc was ripped before (hash match)", "disc", discName, "hash", discHash, "title", m.Title, "path", m.OutputPath)
+		s.sseMgr.Publish(sse.Event{
+			Type:    "rip_duplicate",
+			Drive:   drivePath,
+			Message: fmt.Sprintf("Disc already ripped (hash match): %q → %s", label, m.OutputPath),
+		})
+		return
+	}
+	if !searchableName(discName) {
 		return
 	}
 	matches, err := s.lib.RipMatches(ctx, discName)

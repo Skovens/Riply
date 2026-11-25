@@ -216,7 +216,7 @@ func (s *Store) Scan(ctx context.Context, moviesDir string) (ScanResult, error) 
 	for _, p := range paths {
 		e := found[p]
 		if _, err := tx.ExecContext(ctx, upsertEntrySQL,
-			e.DiscName, e.Title, e.Year, e.MediaType, e.Season, e.Episode,
+			e.DiscName, e.DiscHash, e.Title, e.Year, e.MediaType, e.Season, e.Episode,
 			e.TMDBID, e.OutputPath, e.Source, 0, e.MovedAt, e.CreatedAt); err != nil {
 			return ScanResult{}, fmt.Errorf("library: upsert %q: %w", p, err)
 		}

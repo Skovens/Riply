@@ -3,11 +3,14 @@ package rip
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -309,24 +312,19 @@ func (m *makeMKV) readDiscInfo(ctx context.Context, driveIdx int) (DiscInfo, boo
 
 	var out strings.Builder
 	var info DiscInfo
+	// Scan the whole output: cancelling on title would truncate the TINFO
+	// metadata the disc hash is computed from.
 	for line := range lines {
 		out.WriteString(line)
 		out.WriteByte('\n')
 		if rawFile != nil {
 			m.writeRawLine(line)
 		}
-		if info.Title == "" {
-			if parsed := parseDiscInfo(line); parsed.Title != "" {
-				info = parsed
-				cancel() // name known; stop the scan
-			}
-		}
 	}
 	cmd.Wait()
 
-	if info.Title == "" {
-		info = parseDiscInfo(out.String())
-	}
+	info = parseDiscInfo(out.String())
+	logger.Debug("readDiscInfo result", "drive", driveIdx, "disc", info.Title, "hash", info.Hash)
 	return info, hasMediaInOutput(out.String())
 }
 
@@ -701,15 +699,24 @@ func tryEjectCmd(ctx context.Context, devName string) error {
 var drvRegex = regexp.MustCompile(`^DRV:(\d+),(\d+),(\d+),(\d+),"([^"]+)","([^"]+)","([^"]*)"`)
 
 // tinfoRegex matches title metadata: TINFO:titleIndex,code,flags,"value"
+var tinfoRegex = regexp.MustCompile(`^TINFO:(\d+),(\d+),\d+,"(.*)"`)
 
 // parseDiscInfo parses makemkvcon info output to extract disc info.
 // MakeMKV v2.0.0 changed output format: DRV lines now contain disc name.
 // Only the v2 robot-mode DRV format is supported; an older TITLE:/STREO:
 // fallback once lived here but never matched real output and was removed.
+//
+// The disc hash is SHA-256 over the sorted (titleIndex, code, value) TINFO
+// triples, so identically-named discs with different title structure hash
+// differently while the same disc hashes stably across runs.
 func parseDiscInfo(output string) DiscInfo {
 	lines := strings.Split(output, "\n")
 
 	var title string
+	type titleMeta struct {
+		pairs []string
+	}
+	metas := map[string]*titleMeta{}
 
 	for _, line := range lines {
 		// DRV format: DRV:index,visible,enabled,flags,"drive name","disc name","/dev/sr0"
@@ -724,11 +731,40 @@ func parseDiscInfo(output string) DiscInfo {
 				title = discName
 				logger.Info("parseDiscInfo using disc name", "title", title)
 			}
+			continue
 		}
+		// TINFO:2,28,0,"0" — collect every (code,value) pair per title.
+		if matches := tinfoRegex.FindStringSubmatch(line); matches != nil {
+			idx, code := matches[1], matches[2]
+			meta, ok := metas[idx]
+			if !ok {
+				meta = &titleMeta{}
+				metas[idx] = meta
+			}
+			meta.pairs = append(meta.pairs, code+"="+matches[3])
+		}
+	}
+
+	var hash string
+	if len(metas) > 0 {
+		ids := make([]string, 0, len(metas))
+		for id := range metas {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		var b strings.Builder
+		for _, id := range ids {
+			meta := metas[id]
+			sort.Strings(meta.pairs)
+			b.WriteString(fmt.Sprintf("T%s;%s\n", id, strings.Join(meta.pairs, ";")))
+		}
+		sum := sha256.Sum256([]byte(b.String()))
+		hash = hex.EncodeToString(sum[:])
 	}
 
 	return DiscInfo{
 		Title: title,
+		Hash:  hash,
 	}
 }
 

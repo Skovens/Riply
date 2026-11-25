@@ -24,6 +24,7 @@ import (
 type Entry struct {
 	ID         int64  `json:"id"`
 	DiscName   string `json:"disc_name,omitempty"`
+	DiscHash   string `json:"disc_hash,omitempty"` // disc fingerprint (SHA-256 of TINFO metadata)
 	Title      string `json:"title"`
 	Year       int    `json:"year,omitempty"`
 	MediaType  string `json:"media_type"` // "movie" | "tv"
@@ -78,10 +79,11 @@ type Store struct {
 }
 
 const upsertEntrySQL = `INSERT INTO library
-  (disc_name, title, year, media_type, season, episode, tmdb_id, output_path, source, missing, moved_at, created_at)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+  (disc_name, disc_hash, title, year, media_type, season, episode, tmdb_id, output_path, source, missing, moved_at, created_at)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(output_path) DO UPDATE SET
   disc_name  = CASE WHEN excluded.disc_name <> '' THEN excluded.disc_name ELSE library.disc_name END,
+  disc_hash  = CASE WHEN excluded.disc_hash <> '' THEN excluded.disc_hash ELSE library.disc_hash END,
   title      = excluded.title,
   year       = CASE WHEN excluded.year > 0 THEN excluded.year ELSE library.year END,
   media_type = excluded.media_type,
@@ -116,7 +118,7 @@ func Open(path string) (*Store, error) {
 // N-1 to N. Append one entry per schema change — never edit or renumber an
 // existing entry, and never delete one: an installed library.db may be at
 // any earlier version.
-const schemaVersion = 1
+const schemaVersion = 2
 
 type migration struct {
 	version int
@@ -126,6 +128,7 @@ type migration struct {
 func migrations() []migration {
 	return []migration{
 		{1, migrateV1},
+		{2, migrateV2},
 	}
 }
 
@@ -156,6 +159,22 @@ func migrateV1(db *sql.DB) error {
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("migrate v1: %w", err)
+		}
+	}
+	return nil
+}
+
+// migrateV2 adds the disc_hash fingerprint column (issue #104): a SHA-256
+// over the disc's TINFO metadata, used to detect already-ripped discs whose
+// disc_name is generic (e.g. "DVD_VIDEO").
+func migrateV2(db *sql.DB) error {
+	stmts := []string{
+		`ALTER TABLE library ADD COLUMN disc_hash TEXT NOT NULL DEFAULT ''`,
+		`CREATE INDEX IF NOT EXISTS idx_library_disc_hash ON library(disc_hash)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("migrate v2: %w", err)
 		}
 	}
 	return nil
@@ -215,7 +234,7 @@ func (s *Store) Add(ctx context.Context, e Entry) error {
 		e.CreatedAt = time.Now().UTC().Format(time.RFC3339)
 	}
 	_, err := s.db.ExecContext(ctx, upsertEntrySQL,
-		e.DiscName, e.Title, e.Year, e.MediaType, e.Season, e.Episode,
+		e.DiscName, e.DiscHash, e.Title, e.Year, e.MediaType, e.Season, e.Episode,
 		e.TMDBID, e.OutputPath, e.Source, 0, e.MovedAt, e.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("library: upsert entry %q: %w", e.OutputPath, err)
@@ -227,7 +246,7 @@ func (s *Store) Add(ctx context.Context, e Entry) error {
 func (s *Store) Snapshot(ctx context.Context) (Snapshot, error) {
 	snap := Snapshot{Entries: make([]Entry, 0)}
 
-	rows, err := s.db.QueryContext(ctx, `SELECT id, disc_name, title, year, media_type, season, episode, tmdb_id, output_path, source, missing, moved_at, created_at FROM library ORDER BY title COLLATE NOCASE, season, episode`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, disc_name, disc_hash, title, year, media_type, season, episode, tmdb_id, output_path, source, missing, moved_at, created_at FROM library ORDER BY title COLLATE NOCASE, season, episode`)
 	if err != nil {
 		return snap, fmt.Errorf("library: query entries: %w", err)
 	}
@@ -239,7 +258,7 @@ func (s *Store) Snapshot(ctx context.Context) (Snapshot, error) {
 			e       Entry
 			missing int
 		)
-		if err := rows.Scan(&e.ID, &e.DiscName, &e.Title, &e.Year, &e.MediaType,
+		if err := rows.Scan(&e.ID, &e.DiscName, &e.DiscHash, &e.Title, &e.Year, &e.MediaType,
 			&e.Season, &e.Episode, &e.TMDBID, &e.OutputPath, &e.Source,
 			&missing, &e.MovedAt, &e.CreatedAt); err != nil {
 			return snap, fmt.Errorf("library: scan entry: %w", err)
@@ -467,7 +486,7 @@ func (s *Store) RipMatches(ctx context.Context, name string) ([]Entry, error) {
 	if name == "" {
 		return nil, nil
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, disc_name, title, year, media_type, season, episode, tmdb_id, output_path, source, missing, moved_at, created_at FROM library WHERE disc_name LIKE ? ESCAPE '\' AND missing = 0 ORDER BY moved_at DESC, created_at DESC`, escapeLike(name))
+	rows, err := s.db.QueryContext(ctx, `SELECT id, disc_name, disc_hash, title, year, media_type, season, episode, tmdb_id, output_path, source, missing, moved_at, created_at FROM library WHERE disc_name LIKE ? ESCAPE '\' AND missing = 0 ORDER BY moved_at DESC, created_at DESC`, escapeLike(name))
 	if err != nil {
 		return nil, fmt.Errorf("library: rip matches: %w", err)
 	}
@@ -479,7 +498,7 @@ func (s *Store) RipMatches(ctx context.Context, name string) ([]Entry, error) {
 			e       Entry
 			missing int
 		)
-		if err := rows.Scan(&e.ID, &e.DiscName, &e.Title, &e.Year, &e.MediaType, &e.Season, &e.Episode, &e.TMDBID, &e.OutputPath, &e.Source, &missing, &e.MovedAt, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.DiscName, &e.DiscHash, &e.Title, &e.Year, &e.MediaType, &e.Season, &e.Episode, &e.TMDBID, &e.OutputPath, &e.Source, &missing, &e.MovedAt, &e.CreatedAt); err != nil {
 			return nil, fmt.Errorf("library: scan rip matches: %w", err)
 		}
 		e.Missing = missing != 0
@@ -493,6 +512,39 @@ func (s *Store) RipMatches(ctx context.Context, name string) ([]Entry, error) {
 		return nil, fmt.Errorf("library: read rip matches: %w", err)
 	}
 	return out, nil
+}
+
+// HashMatches reports library entries whose disc_hash equals hash exactly
+// (missing entries excluded), newest first. This is the reliable duplicate
+// signal when the disc_name is generic.
+func (s *Store) HashMatches(ctx context.Context, hash string) ([]Entry, error) {
+	hash = strings.TrimSpace(hash)
+	if hash == "" {
+		return nil, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, disc_name, disc_hash, title, year, media_type, season, episode, tmdb_id, output_path, source, missing, moved_at, created_at FROM library WHERE disc_hash = ? AND missing = 0 ORDER BY moved_at DESC, created_at DESC`, hash)
+	if err != nil {
+		return nil, fmt.Errorf("library: hash matches: %w", err)
+	}
+	defer rows.Close()
+	out := make([]Entry, 0)
+	seen := make(map[string]bool)
+	for rows.Next() {
+		var (
+			e       Entry
+			missing int
+		)
+		if err := rows.Scan(&e.ID, &e.DiscName, &e.DiscHash, &e.Title, &e.Year, &e.MediaType, &e.Season, &e.Episode, &e.TMDBID, &e.OutputPath, &e.Source, &missing, &e.MovedAt, &e.CreatedAt); err != nil {
+			return nil, fmt.Errorf("library: scan hash matches: %w", err)
+		}
+		e.Missing = missing != 0
+		if seen[e.OutputPath] {
+			continue
+		}
+		seen[e.OutputPath] = true
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 // escapeLike escapes LIKE metacharacters so a disc name matches literally.

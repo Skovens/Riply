@@ -384,3 +384,107 @@ func TestOpenIdempotentOnCurrentVersion(t *testing.T) {
 		t.Errorf("entries after reopen = %d, want 1", len(snap.Entries))
 	}
 }
+
+func TestHashMatchesAndMigrationV2(t *testing.T) {
+	store := openStore(t, filepath.Join(t.TempDir(), "library.db"))
+	ctx := context.Background()
+
+	// Legacy entry (hash unknown) + two entries with hashes.
+	if err := store.Add(ctx, Entry{Title: "Old Rip", MediaType: "movie", OutputPath: "/m/Old Rip/Inception.mkv"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Add(ctx, Entry{Title: "Hashed", MediaType: "movie", DiscHash: "abc123", OutputPath: "/m/Hashed/main.mkv"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Add(ctx, Entry{Title: "Other", MediaType: "movie", DiscHash: "def456", OutputPath: "/m/Other/main.mkv"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Exact-hash match only.
+	matches, err := store.HashMatches(ctx, "abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 || matches[0].Title != "Hashed" {
+		t.Fatalf("hash matches = %+v, want exactly [Hashed]", matches)
+	}
+
+	// Empty hash never matches anything.
+	if m, err := store.HashMatches(ctx, ""); err != nil || len(m) != 0 {
+		t.Fatalf("empty hash matched: %v %v", m, err)
+	}
+
+	// Entries survive a Snapshot round-trip with their hash.
+	snap, err := store.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hashes := map[string]string{}
+	for _, e := range snap.Entries {
+		hashes[e.Title] = e.DiscHash
+	}
+	if hashes["Hashed"] != "abc123" || hashes["Old Rip"] != "" {
+		t.Fatalf("snapshot hashes = %v", hashes)
+	}
+}
+
+func TestUpsertPreservesExistingHash(t *testing.T) {
+	store := openStore(t, filepath.Join(t.TempDir(), "library.db"))
+	ctx := context.Background()
+
+	// Rip writes the hash...
+	if err := store.Add(ctx, Entry{Title: "X", MediaType: "movie", DiscHash: "h1", Source: "rip", OutputPath: "/m/X/main.mkv"}); err != nil {
+		t.Fatal(err)
+	}
+	// ...a later scan-derived upsert without a hash must not clobber it.
+	if err := store.Add(ctx, Entry{Title: "X", MediaType: "movie", Source: "scan", OutputPath: "/m/X/main.mkv"}); err != nil {
+		t.Fatal(err)
+	}
+	matches, err := store.HashMatches(ctx, "h1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("hash lost after scan upsert: %v", matches)
+	}
+}
+
+func TestMigrateV2AddsColumnToV1Database(t *testing.T) {
+	// Build a v1-shaped DB (user_version = 1, no disc_hash column) with raw SQL.
+	path := filepath.Join(t.TempDir(), "library.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`CREATE TABLE library (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  disc_name TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL,
+  year INTEGER NOT NULL DEFAULT 0,
+  media_type TEXT NOT NULL,
+  season INTEGER NOT NULL DEFAULT 0,
+  episode INTEGER NOT NULL DEFAULT 0,
+  tmdb_id INTEGER NOT NULL DEFAULT 0,
+  output_path TEXT NOT NULL UNIQUE,
+  source TEXT NOT NULL,
+  missing INTEGER NOT NULL DEFAULT 0,
+  moved_at TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+)`,
+		`INSERT INTO library (title, media_type, output_path, source, created_at) VALUES ('Legacy', 'movie', '/m/L/a.mkv', 'rip', '2024-01-01T00:00:00Z')`,
+		`PRAGMA user_version=1`,
+	} {
+		if _, err := raw.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store := openStore(t, path)
+	if _, err := store.HashMatches(context.Background(), "whatever"); err != nil {
+		t.Fatalf("hash query on migrated db: %v", err)
+	}
+}

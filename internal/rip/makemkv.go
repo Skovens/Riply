@@ -7,6 +7,11 @@ import (
 // DiscInfo holds information about a disc in a drive.
 type DiscInfo struct {
 	Title string
+	// Hash is a deterministic fingerprint of the disc's title metadata
+	// (SHA-256 of the sorted TINFO code/value pairs). Identically-named
+	// discs with different contents produce different hashes. Empty when
+	// the info output carried no TINFO metadata.
+	Hash string
 }
 
 // RipProgress represents the progress of a rip operation.
