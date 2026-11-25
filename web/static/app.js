@@ -840,6 +840,21 @@
 
 
   // Settings
+  async function loadPathOptions() {
+    try {
+      const { paths } = await api('/api/paths');
+      const dl = document.getElementById('path-options');
+      dl.innerHTML = '';
+      for (const p of paths || []) {
+        const opt = document.createElement('option');
+        opt.value = p;
+        dl.appendChild(opt);
+      }
+    } catch (err) {
+      console.error('Failed to load path suggestions:', err);
+    }
+  }
+
   async function loadSettings() {
     try {
       const cfg = await api('/api/config');
@@ -1047,6 +1062,7 @@
   loadDrives();
   loadRips();
   loadSettings();
+  loadPathOptions();
   loadLibrary();
   connectSSE();
   checkMakemkv();
