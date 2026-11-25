@@ -1,0 +1,19 @@
+{
+  "adapters": {
+    "dlv": {
+      "command": ".omp/dlv-wrapper.sh",
+      "languages": ["go"],
+      "fileTypes": [".go"],
+      "rootMarkers": ["go.mod"],
+      "acceptsDirectoryProgram": true,
+      "launchDefaults": {
+        "request": "launch",
+        "mode": "debug"
+      },
+      "attachDefaults": {
+        "request": "attach",
+        "mode": "local"
+      }
+    }
+  }
+}

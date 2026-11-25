@@ -1,0 +1,39 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# TOML config files
+*.toml text
+
+# Markdown files
+*.md text
+
+# Shell scripts
+*.sh text eol=lf
+
+# JSON files
+*.json text
+
+# YAML files
+*.yml text
+*.yaml text
+
+# JS/TS files
+*.js text
+*.ts text
+
+# CSS files
+*.css text
+
+# HTML files
+*.html text
+
+# Go files
+*.go text
+
+# Prevent diff for binary files
+*.db binary
+*.db-shm binary
+*.db-wal binary
+*.png binary
+*.jpg binary
+*.ico binary

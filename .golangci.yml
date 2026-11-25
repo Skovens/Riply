@@ -1,0 +1,13 @@
+# Local-only lint config (not wired into CI). Run monthly:
+#   golangci-lint run --fix
+run:
+  timeout: 3m
+
+linters:
+  disable-all: true
+  enable:
+    - gofmt
+    - goimports
+    - vet
+    - ineffassign
+    - staticcheck

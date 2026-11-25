@@ -1,0 +1,36 @@
+# Build artifacts
+*.d
+*.profdata
+*.profraw
+*.swo
+*.swp
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# SQLite
+*.db
+*.db-shm
+*.db-wal
+
+# Node
+node_modules/
+test-results/
+playwright-report/
+
+# User config
+config.toml
+
+# Go binary
+riply
+riply.db
+server
+__debug_bin*
+
+# Local Go build cache
+.gocache/

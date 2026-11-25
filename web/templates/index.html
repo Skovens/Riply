@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Riply</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Riply</h1>
+    <nav>
+      <a href="#drives" class="active">Drives</a>
+      <a href="#rips">Rips</a>
+      <a href="#library">Library</a>
+      <a href="#settings">Settings</a>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Drives Section -->
+    <section id="drives" class="section active">
+      <h2>Drives</h2>
+      <div id="drive-list" class="drive-grid"></div>
+    </section>
+
+    <!-- Rips Section -->
+    <section id="rips" class="section">
+      <h2>Finished Rips</h2>
+      <div id="rip-list" class="rip-list"></div>
+    </section>
+
+    <!-- Library Section -->
+    <section id="library" class="section">
+      <h2>Library</h2>
+      <div id="library-summary" class="library-summary"></div>
+      <div id="library-series" class="library-series"></div>
+      <div id="library-movies" class="library-movies"></div>
+    </section>
+
+    <!-- Settings Section -->
+    <section id="settings" class="section">
+      <h2>Settings</h2>
+      <form id="settings-form" class="settings-form">
+        <div class="form-group">
+          <label for="movies_dir">Movies Directory</label>
+          <div class="input-row">
+            <input type="text" id="movies_dir" name="movies_dir" placeholder="/path/to/movies">
+            <button type="button" id="scan-library" class="btn btn-secondary">Scan</button>
+          </div>
+        </div>
+        <div class="form-group library-db">
+          <label>Library Database</label>
+          <p class="form-hint">Riply's index of ripped and scanned media. Resetting clears only this index — your movie and TV files are never modified or deleted. Use Scan afterwards to rebuild it.</p>
+          <button type="button" id="reset-library" class="btn btn-danger">Reset database</button>
+          <div id="reset-confirm" class="reset-confirm hidden">
+            <span>Clear the library index? Media files on disk are not touched.</span>
+            <button type="button" id="reset-confirm-yes" class="btn btn-danger">Confirm reset</button>
+            <button type="button" id="reset-cancel" class="btn btn-secondary">Cancel</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="temp_dir">Temp Directory</label>
+          <input type="text" id="temp_dir" name="temp_dir" placeholder="/tmp/riply">
+        </div>
+        <div class="form-group">
+          <label for="tmdb_api_key">TMDb API Key</label>
+          <input type="password" id="tmdb_api_key" name="tmdb_api_key" placeholder="Enter TMDb API key">
+        </div>
+        <div class="form-group">
+          <label for="http_port">HTTP Port</label>
+          <input type="number" id="http_port" name="http_port" placeholder="3000">
+        </div>
+        <div class="form-group">
+          <label for="auto_sequence">Auto-Sequence</label>
+          <input type="checkbox" id="auto_sequence" name="auto_sequence" checked>
+        </div>
+        <button type="submit" class="btn btn-primary">Save Settings</button>
+      </form>
+      <footer class="attribution">
+        <img src="/static/tmdb-logo.svg" alt="The Movie Database (TMDB)" class="tmdb-logo" loading="lazy">
+        <p>This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.</p>
+      </footer>
+    </section>
+  </main>
+
+  <!-- TMDb Search Modal -->
+  <div id="modal" class="modal">
+    <div class="modal-content">
+      <span class="modal-close">&times;</span>
+      <h3 id="modal-title">Search TMDb</h3>
+      <div class="modal-body">
+        <input type="text" id="search-input" placeholder="Search for a movie...">
+        <div id="search-results" class="search-results"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

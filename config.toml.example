@@ -1,0 +1,31 @@
+# Riply Configuration
+# Place this file at ~/.config/riply/config.toml (or $XDG_CONFIG_HOME/riply/config.toml).
+# Riply creates a default config there automatically on first run.
+
+# Directory where ripped movies will be stored (Jellyfin-compliant structure)
+movies_dir = "/media/movies"
+
+# Temporary directory for rip operations
+temp_dir = "/tmp/riply"
+
+# TMDb API key for auto-naming (optional)
+# Get one at https://www.themoviedb.org/settings/api
+tmdb_api_key = ""
+
+# HTTP server settings (http_host/http_port/makemkv_path take effect on restart)
+http_host = "127.0.0.1"
+http_port = 3000
+
+# MakeMKV binary path (empty = use PATH lookup)
+makemkv_path = ""
+
+# Pre-fill the search modal from the last ripped title (default true)
+auto_sequence = true
+
+# Automatically eject after a successful accept and start ripping newly inserted discs (default true)
+autorip = true
+
+# Skip titles shorter than this many seconds (makemkvcon --minlength).
+# Titles shorter than the limit are assumed to be intros/adverts and are not
+# ripped. 0 = rip every title (omit the flag). Default 300 (5 minutes).
+min_title_length = 300

@@ -1,0 +1,19 @@
+{
+  "name": "Riply",
+  "image": "ubuntu:24.04",
+  "features": {
+    "ghcr.io/devcontainers/features/go:1": { "version": "latest" },
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go",
+        "tamasfe.even-better-toml",
+        "editorconfig.editorconfig-checker",
+        "eamodio.gitlens"
+      ]
+    }
+  }
+}
