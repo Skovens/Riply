@@ -104,6 +104,13 @@ See `README.md` for the full architecture diagram. Key modules:
 - SSE connection via `EventSource` to `/events`
 - Auto-reconnect on connection loss
 
+## Git Workflow
+
+- **One branch + one PR per feature or fix.** Before starting work, create a branch: `git switch -c feat/<topic>` or `fix/<topic>` (never commit directly to `main`).
+- The PR is the review surface: CI (build + vet + `go test -race`) gates the change before it reaches `main`, and the PR serves as permanent history for what changed and why.
+- Do not switch branches with uncommitted changes in the tree — commit or ask first; a switch would yank files out from under an in-progress session.
+- Push and open the PR with `gh pr create` once the change is verified; merge via PR, never by pushing to `main` directly.
+
 ## Verification Philosophy
 
 This is a 1-person team — verify on real hardware with real discs. `.github/workflows/ci.yml` runs build + vet + `go test -race` on every push/PR; there are no Dockerfiles.
