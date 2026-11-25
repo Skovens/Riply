@@ -91,6 +91,7 @@ func TestTempFillLimitZeroDisables(t *testing.T) {
 	if _, err := s.startRipForPath("/dev/sr0"); err != nil {
 		t.Fatalf("rip blocked despite disabled check: %v", err)
 	}
+	waitRipsIdle(s, 5*time.Second) // goroutine must finish before TempDir cleanup
 }
 
 // TestMoveFillLimitBlocksAccept: an over-limit destination must reject the
@@ -129,5 +130,6 @@ func TestFillLimitUnknownUsageProceeds(t *testing.T) {
 	if _, err := s.startRipForPath("/dev/sr0"); err != nil {
 		t.Fatalf("rip blocked on unknown usage: %v", err)
 	}
+	waitRipsIdle(s, 5*time.Second) // goroutine must finish before TempDir cleanup
 }
 
