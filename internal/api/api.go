@@ -343,6 +343,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/library", s.handleGetLibrary)
 	mux.HandleFunc("POST /api/library/scan", s.handleScanLibrary)
 	mux.HandleFunc("POST /api/library/reset", s.handleResetLibrary)
+	mux.HandleFunc("GET /api/paths", s.handlePaths)
 	mux.HandleFunc("GET /api/config", s.handleGetConfig)
 	mux.HandleFunc("PUT /api/config", s.handlePutConfig)
 	mux.HandleFunc("GET /api/metrics", s.handleMetrics)

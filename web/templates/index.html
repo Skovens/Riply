@@ -42,10 +42,11 @@
     <section id="settings" class="section">
       <h2>Settings</h2>
       <form id="settings-form" class="settings-form">
+        <datalist id="path-options"></datalist>
         <div class="form-group">
           <label for="movies_dir">Movies Directory</label>
           <div class="input-row">
-            <input type="text" id="movies_dir" name="movies_dir" placeholder="/path/to/movies">
+            <input type="text" id="movies_dir" name="movies_dir" placeholder="/path/to/movies" list="path-options">
             <button type="button" id="scan-library" class="btn btn-secondary">Scan</button>
           </div>
         </div>
@@ -61,7 +62,7 @@
         </div>
         <div class="form-group">
           <label for="temp_dir">Temp Directory</label>
-          <input type="text" id="temp_dir" name="temp_dir" placeholder="/tmp/riply">
+          <input type="text" id="temp_dir" name="temp_dir" placeholder="/tmp/riply" list="path-options">
         </div>
         <div class="form-group">
           <label for="tmdb_api_key">TMDb API Key</label>
