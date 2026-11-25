@@ -165,6 +165,11 @@ type Server struct {
 	wg           sync.WaitGroup
 	ripMu        sync.Mutex
 	shuttingDown atomic.Bool
+
+	// manualRipStarted is set true the first time the user manually starts a
+	// rip. Until then, MaybeStartAutoRip is a no-op so Riply does not auto-rip
+	// a disc that was already in the tray at startup.
+	manualRipStarted atomic.Bool
 }
 
 // driveAccept is a pre-rip drive-level accept. Season/Episode (N1) carry an
@@ -262,6 +267,10 @@ func (s *Server) AutoRipDefault() bool {
 // Ready and Autorip is enabled for that drive. It guards against loops and
 // races before starting the rip.
 func (s *Server) MaybeStartAutoRip(drivePath, discName string) {
+	if !s.manualRipStarted.Load() {
+		logger.Debug("Autorip skipped: no manual rip started yet", "drive", drivePath)
+		return
+	}
 	if s.ripper == nil || !s.ripper.IsAvailable() {
 		logger.Debug("Autorip skipped: MakeMKV unavailable", "drive", drivePath)
 		return
@@ -794,6 +803,10 @@ func (s *Server) handleStartRip(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
+
+	// First manual rip of the session enables autorip for later inserts.
+	s.manualRipStarted.Store(true)
+	logger.Info("Manual rip started; autorip enabled for session", "drive", drivePath)
 
 	writeJSON(w, map[string]int{"rip_id": session.ID})
 }

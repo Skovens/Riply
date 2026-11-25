@@ -96,11 +96,51 @@ func TestAutoRipDisabledSkipsEject(t *testing.T) {
 func TestMaybeStartAutoRip(t *testing.T) {
 	s, scanner := newRipServer(t, &instantRipper{outName: "movie.mkv"})
 	scanner.UpdateState("/dev/sr0", drive.StateReady, "DISC")
+	s.manualRipStarted.Store(true)
 
 	s.MaybeStartAutoRip("/dev/sr0", "DISC")
 
-	if err := waitForActiveRip(s, 5*time.Second); err != nil {
-		t.Fatalf("auto-rip did not start: %v", err)
+	// Wait for the auto-started rip goroutine to finish entirely (it keeps
+	// working after the session state flips: classification, eject) so it
+	// is not racing t.TempDir cleanup.
+	if err := waitForRipCount(s, 1, 5*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitRipsIdle(s, 5*time.Second); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// waitForRipCount fails the test if s.ripCount does not reach want within timeout.
+func waitForRipCount(s *Server, want int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		s.mu.Lock()
+		count := s.ripCount
+		s.mu.Unlock()
+		if count >= want {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("ripCount = %d, want >= %d", count, want)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// waitRipsIdle blocks until every rip goroutine tracked by s.wg has exited,
+// so tests can end without racing TempDir cleanup.
+func waitRipsIdle(s *Server, timeout time.Duration) error {
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-time.After(timeout):
+		return fmt.Errorf("rip goroutines still running after %s", timeout)
 	}
 }
 
@@ -108,6 +148,7 @@ func TestMaybeStartAutoRipDisabled(t *testing.T) {
 	s, scanner := newRipServer(t, &instantRipper{outName: "movie.mkv"})
 	scanner.UpdateState("/dev/sr0", drive.StateReady, "DISC")
 	scanner.SetAutoRip("/dev/sr0", false)
+	s.manualRipStarted.Store(true)
 
 	s.MaybeStartAutoRip("/dev/sr0", "DISC")
 
@@ -127,6 +168,7 @@ func TestMaybeStartAutoRipSameDiscGuard(t *testing.T) {
 	s.mu.Lock()
 	s.lastAutoEjectedDisc["/dev/sr0"] = "DISC"
 	s.mu.Unlock()
+	s.manualRipStarted.Store(true)
 
 	s.MaybeStartAutoRip("/dev/sr0", "DISC")
 
@@ -157,4 +199,42 @@ func waitForActiveRip(s *Server, timeout time.Duration) error {
 		time.Sleep(5 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout waiting for active rip")
+}
+
+func TestMaybeStartAutoRipBlockedBeforeManualRip(t *testing.T) {
+	s, scanner := newRipServer(t, &instantRipper{outName: "movie.mkv"})
+	scanner.UpdateState("/dev/sr0", drive.StateReady, "DISC")
+
+	// manualRipStarted is false (zero value) — autorip must not start.
+	s.MaybeStartAutoRip("/dev/sr0", "DISC")
+
+	time.Sleep(50 * time.Millisecond)
+	s.mu.Lock()
+	count := s.ripCount
+	s.mu.Unlock()
+	if count != 0 {
+		t.Errorf("ripCount = %d, want 0 before manual rip", count)
+	}
+}
+
+func TestManualRipEnablesAutorip(t *testing.T) {
+	s, scanner := newRipServer(t, &instantRipper{outName: "movie.mkv"})
+	scanner.UpdateState("/dev/sr0", drive.StateReady, "DISC")
+
+	// First: manual rip via the HTTP endpoint.
+	id := startRipViaAPI(t, s)
+	waitDone(s, id, 5*time.Second)
+
+	// Now: simulate a new disc insert with autorip enabled.
+	scanner.UpdateState("/dev/sr0", drive.StateReady, "DISC2")
+	s.MaybeStartAutoRip("/dev/sr0", "DISC2")
+
+	// The auto-started second rip completes in ~1 ms; wait for its goroutine
+	// to finish so it does not race t.TempDir cleanup.
+	if err := waitForRipCount(s, 2, 5*time.Second); err != nil {
+		t.Fatalf("autorip did not start after manual rip: %v", err)
+	}
+	if err := waitRipsIdle(s, 5*time.Second); err != nil {
+		t.Fatal(err)
+	}
 }
