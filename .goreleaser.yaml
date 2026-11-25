@@ -1,0 +1,37 @@
+version: 2
+
+project_name: riply
+
+builds:
+  - id: riply
+    main: ./cmd/server
+    binary: riply
+    env:
+      - CGO_ENABLED=0        # pure-Go sqlite (modernc.org/sqlite) → static cross-compiles
+    goos:
+      - linux               # darwin excluded: maintainer has no Mac to test on; add when available
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+
+archives:
+  - format: zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  github:
+    owner: Skovens
+    name: Riply

@@ -14,6 +14,16 @@ go build -o riply ./cmd/server/
 
 The server starts on `http://127.0.0.1:3000` and opens your default browser automatically. The binary is self-contained — the frontend (HTML/CSS/JS) is compiled in via `embed`.
 
+### Download a release
+
+Prebuilt binaries for Linux (amd64/arm64) are attached to each [GitHub release](https://github.com/Skovens/Riply/releases). Verify with `checksums.txt`:
+
+```bash
+curl -LO https://github.com/Skovens/Riply/releases/latest/download/riply_<version>_linux_amd64.zip
+unzip riply_<version>_linux_amd64.zip && chmod +x riply
+```
+
+
 ### Runtime dependencies
 
 | Binary | Needed for |
