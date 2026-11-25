@@ -96,6 +96,7 @@ func TestAutoRipDisabledSkipsEject(t *testing.T) {
 func TestMaybeStartAutoRip(t *testing.T) {
 	s, scanner := newRipServer(t, &instantRipper{outName: "movie.mkv"})
 	scanner.UpdateState("/dev/sr0", drive.StateReady, "DISC")
+	s.manualRipStarted.Store(true)
 
 	s.MaybeStartAutoRip("/dev/sr0", "DISC")
 
@@ -108,6 +109,7 @@ func TestMaybeStartAutoRipDisabled(t *testing.T) {
 	s, scanner := newRipServer(t, &instantRipper{outName: "movie.mkv"})
 	scanner.UpdateState("/dev/sr0", drive.StateReady, "DISC")
 	scanner.SetAutoRip("/dev/sr0", false)
+	s.manualRipStarted.Store(true)
 
 	s.MaybeStartAutoRip("/dev/sr0", "DISC")
 
@@ -127,6 +129,7 @@ func TestMaybeStartAutoRipSameDiscGuard(t *testing.T) {
 	s.mu.Lock()
 	s.lastAutoEjectedDisc["/dev/sr0"] = "DISC"
 	s.mu.Unlock()
+	s.manualRipStarted.Store(true)
 
 	s.MaybeStartAutoRip("/dev/sr0", "DISC")
 
@@ -157,4 +160,49 @@ func waitForActiveRip(s *Server, timeout time.Duration) error {
 		time.Sleep(5 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout waiting for active rip")
+}
+
+func TestMaybeStartAutoRipBlockedBeforeManualRip(t *testing.T) {
+	s, scanner := newRipServer(t, &instantRipper{outName: "movie.mkv"})
+	scanner.UpdateState("/dev/sr0", drive.StateReady, "DISC")
+
+	// manualRipStarted is false (zero value) — autorip must not start.
+	s.MaybeStartAutoRip("/dev/sr0", "DISC")
+
+	time.Sleep(50 * time.Millisecond)
+	s.mu.Lock()
+	count := s.ripCount
+	s.mu.Unlock()
+	if count != 0 {
+		t.Errorf("ripCount = %d, want 0 before manual rip", count)
+	}
+}
+
+func TestManualRipEnablesAutorip(t *testing.T) {
+	s, scanner := newRipServer(t, &instantRipper{outName: "movie.mkv"})
+	scanner.UpdateState("/dev/sr0", drive.StateReady, "DISC")
+
+	// First: manual rip via the HTTP endpoint.
+	id := startRipViaAPI(t, s)
+	waitDone(s, id, 5*time.Second)
+
+	// Now: simulate a new disc insert with autorip enabled.
+	scanner.UpdateState("/dev/sr0", drive.StateReady, "DISC2")
+	s.MaybeStartAutoRip("/dev/sr0", "DISC2")
+
+	// instantRipper completes within milliseconds, so poll the rip counter
+	// instead of the transient "ripping" state.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		s.mu.Lock()
+		count := s.ripCount
+		s.mu.Unlock()
+		if count >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("autorip did not start after manual rip: ripCount = %d, want 2", count)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
