@@ -251,9 +251,16 @@ func (m *makeMKV) resolveDriveIndex(ctx context.Context, devPath string) int {
 	return fallback
 }
 
+// discInfoTimeout bounds one `info` run. MakeMKV prints DRV/title lines early
+// but only emits TINFO metadata (the disc-hash input, #104) after its title
+// scan finishes, which can take tens of seconds on a slow disc — the old 10s
+// cap killed the scan before any TINFO line appeared.
+const discInfoTimeout = 120 * time.Second
+
 func (m *makeMKV) GetDiscInfo(ctx context.Context, devPath string) (DiscInfo, error) {
 	driveIdx := m.resolveDriveIndex(ctx, devPath)
 
+	var best DiscInfo
 	for attempt := 0; attempt < 5; attempt++ {
 		logger.Info("GetDiscInfo attempt", "attempt", attempt+1, "drive", driveIdx)
 		if attempt > 0 {
@@ -266,8 +273,11 @@ func (m *makeMKV) GetDiscInfo(ctx context.Context, devPath string) (DiscInfo, er
 
 		info, hasMedia := m.readDiscInfo(ctx, driveIdx)
 		if info.Title != "" {
-			logger.Info("GetDiscInfo resolved", "drive", driveIdx, "disc", info.Title, "source", "DRV", "attempt", attempt+1)
-			return info, nil
+			best = info
+		}
+		if best.Title != "" && (best.Hash != "" || !hasMedia) {
+			logger.Info("GetDiscInfo resolved", "drive", driveIdx, "disc", best.Title, "hash", best.Hash, "source", "DRV", "attempt", attempt+1)
+			return best, nil
 		}
 		if ctx.Err() != nil {
 			break
@@ -276,11 +286,19 @@ func (m *makeMKV) GetDiscInfo(ctx context.Context, devPath string) (DiscInfo, er
 			logger.Debug("GetDiscInfo drive not ready", "drive", driveIdx, "hasMedia", false)
 			continue
 		}
-		break
+		// Media present but title metadata still incomplete: retry so the
+		// hash (#104) gets a chance to fill in from a full title scan. Two
+		// extra attempts maximum — a disc that yields no TINFO (rare) still
+		// resolves within reasonable time instead of blocking the event loop
+		// for minutes.
+		if attempt >= 2 && best.Title != "" {
+			logger.Info("GetDiscInfo giving up on hash after retries", "drive", driveIdx, "disc", best.Title)
+			return best, nil
+		}
 	}
 
-	logger.Warn("GetDiscInfo unresolved", "drive", driveIdx)
-	return DiscInfo{}, nil
+	logger.Warn("GetDiscInfo unresolved", "drive", driveIdx, "disc", best.Title, "hash", best.Hash)
+	return best, nil
 }
 
 func (m *makeMKV) readDiscInfo(ctx context.Context, driveIdx int) (DiscInfo, bool) {
@@ -289,7 +307,7 @@ func (m *makeMKV) readDiscInfo(ctx context.Context, driveIdx int) (DiscInfo, boo
 		path = "makemkvcon"
 	}
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	timeoutCtx, cancel := context.WithTimeout(ctx, discInfoTimeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(timeoutCtx, path, "-r", "info", fmt.Sprintf("disc:%d", driveIdx))
