@@ -488,3 +488,42 @@ func TestMigrateV2AddsColumnToV1Database(t *testing.T) {
 		t.Fatalf("hash query on migrated db: %v", err)
 	}
 }
+
+// #103: a corrupt/unreadable scan root must not crash or wedge the store.
+func TestScanUnreadableRootAndUnreadableSubdir(t *testing.T) {
+	store := openStore(t, filepath.Join(t.TempDir(), "library.db"))
+	ctx := context.Background()
+
+	// Not a directory / missing → explicit error.
+	if _, err := store.Scan(ctx, filepath.Join(t.TempDir(), "nope")); err == nil {
+		t.Error("Scan on missing dir succeeded, want error")
+	}
+
+	// Unreadable subdirectory: walk must warn + skip, not fail.
+	root := t.TempDir()
+	movies := filepath.Join(root, "movies")
+	readable := filepath.Join(movies, "Good Movie (2001)")
+	unreadable := filepath.Join(movies, "Locked Movie (2002)")
+	if err := os.MkdirAll(readable, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(unreadable, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mkFile(t, filepath.Join(readable, "Good Movie (2001).mkv"))
+	if err := os.Chmod(unreadable, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if os.Getuid() == 0 {
+		t.Skip("running as root: unreadable dir is still readable")
+	}
+	defer os.Chmod(unreadable, 0o755)
+
+	res, err := store.Scan(ctx, movies)
+	if err != nil {
+		t.Fatalf("Scan failed on unreadable subdir: %v", err)
+	}
+	if res.Added != 1 {
+		t.Errorf("Added = %d, want 1 (readable entry scanned, unreadable skipped)", res.Added)
+	}
+}

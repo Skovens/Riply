@@ -145,3 +145,38 @@ func TestRateLimitCancelDuringWait(t *testing.T) {
 		t.Errorf("rateLimit waited %v; want prompt release on ctx done", elapsed)
 	}
 }
+
+// Malformed TMDb JSON must surface as an error (or empty result), never a
+// panic and never a bogus result.
+func TestSearchMalformedJSON(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    string
+		status  int
+		wantErr bool
+	}{
+		{"truncated json", `{"results":[{"id":27205,"title":"Inc`, 200, true},
+		{"html error page", "<html>502 Bad Gateway</html>", 200, true},
+		{"empty body", "", 200, true},
+		{"wrong types", `{"results": "not-an-array"}`, 200, true},
+		{"valid but null results", `{"results": null}`, 200, false},
+	}
+	for _, tc := range cases {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(tc.status)
+			_, _ = w.Write([]byte(tc.body))
+		}))
+		c := NewClient("k")
+		c.cooldown = 0
+		c.baseURL = srv.URL
+
+		results, err := c.Search(context.Background(), "Inception")
+		if tc.wantErr && err == nil {
+			t.Errorf("%s: Search(%q) = %v, want error", tc.name, tc.body, results)
+		}
+		if !tc.wantErr && err != nil {
+			t.Errorf("%s: Search error = %v, want nil (null results are valid)", tc.name, err)
+		}
+		srv.Close()
+	}
+}
