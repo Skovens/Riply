@@ -100,18 +100,47 @@ func TestMaybeStartAutoRip(t *testing.T) {
 
 	s.MaybeStartAutoRip("/dev/sr0", "DISC")
 
-	// Wait for the auto-started rip to reach a terminal state so the
-	// background goroutine is done writing before t.TempDir cleanup.
-	deadline := time.Now().Add(5 * time.Second)
+	// Wait for the auto-started rip goroutine to finish entirely (it keeps
+	// working after the session state flips: classification, eject) so it
+	// is not racing t.TempDir cleanup.
+	if err := waitForRipCount(s, 1, 5*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitRipsIdle(s, 5*time.Second); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// waitForRipCount fails the test if s.ripCount does not reach want within timeout.
+func waitForRipCount(s *Server, want int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
 	for {
-		state, count := ripStates(s)
-		if count > 0 && !isActive(state) {
-			break
+		s.mu.Lock()
+		count := s.ripCount
+		s.mu.Unlock()
+		if count >= want {
+			return nil
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("auto-rip never reached a terminal state (state=%q count=%d)", state, count)
+			return fmt.Errorf("ripCount = %d, want >= %d", count, want)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// waitRipsIdle blocks until every rip goroutine tracked by s.wg has exited,
+// so tests can end without racing TempDir cleanup.
+func waitRipsIdle(s *Server, timeout time.Duration) error {
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-time.After(timeout):
+		return fmt.Errorf("rip goroutines still running after %s", timeout)
 	}
 }
 
@@ -200,42 +229,12 @@ func TestManualRipEnablesAutorip(t *testing.T) {
 	scanner.UpdateState("/dev/sr0", drive.StateReady, "DISC2")
 	s.MaybeStartAutoRip("/dev/sr0", "DISC2")
 
-	// Wait for the auto-started second rip to reach a terminal state
-	// (instantRipper completes in ~1 ms, so poll for it deterministically).
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		s.mu.Lock()
-		count := s.ripCount
-		var second string
-		for _, sess := range s.rips {
-			if sess.DrivePath == "/dev/sr0" {
-				second = sess.State
-			}
-		}
-		s.mu.Unlock()
-		if count >= 2 && !isActive(second) {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("autorip did not start after manual rip: ripCount = %d, state = %q", count, second)
-		}
-		time.Sleep(10 * time.Millisecond)
+	// The auto-started second rip completes in ~1 ms; wait for its goroutine
+	// to finish so it does not race t.TempDir cleanup.
+	if err := waitForRipCount(s, 2, 5*time.Second); err != nil {
+		t.Fatalf("autorip did not start after manual rip: %v", err)
 	}
-}
-
-// ripStates returns the rip counter and the latest session state on the
-// test drive. Caller must not hold s.mu.
-func ripStates(s *Server) (string, int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var state string
-	for _, sess := range s.rips {
-		state = sess.State
+	if err := waitRipsIdle(s, 5*time.Second); err != nil {
+		t.Fatal(err)
 	}
-	return state, s.ripCount
-}
-
-// isActive reports whether a rip state is still in-flight.
-func isActive(state string) bool {
-	return state == string(StateRipping) || state == string(StateQueued)
 }
