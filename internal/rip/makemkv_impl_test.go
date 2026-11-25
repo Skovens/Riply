@@ -1,10 +1,12 @@
 package rip
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -859,5 +861,54 @@ echo 'MSG:5004,1,0,"1 title saved, 0 failed"'`)
 	}
 	if last.Percent != 100 {
 		t.Errorf("final percent = %v, want 100", last.Percent)
+	}
+}
+
+
+// #99: a probe failure after a version was seen is transient noise (busy
+// binary, ejected drive) and must log at DEBUG; only a failure with no
+// version ever seen justifies the WARN.
+func TestProbeFailureLogLevelAfterVersionSeen(t *testing.T) {
+	origTO := probeTimeout
+	t.Cleanup(func() { probeTimeout = origTO })
+	probeTimeout = 300 * time.Millisecond
+
+	tmp, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tmp.Close()
+	savedFD, err := syscall.Dup(syscall.Stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { syscall.Dup2(savedFD, syscall.Stderr) })
+
+	// A failing binary (non-zero exit, no banner).
+	script := writeFakeMakemkv(t, "exit 3")
+
+	// First: never-seen version → the failure must WARN.
+	syscall.Dup2(int(tmp.Fd()), syscall.Stderr)
+	m := NewMakeMKV(script)
+	if m.IsAvailable() {
+		t.Fatal("failing makemkvcon reported available")
+	}
+	tmp.Sync()
+	data, _ := os.ReadFile(tmp.Name())
+	if !bytes.Contains(data, []byte("level=WARN msg=" + `"MakeMKV probe failed"`)) {
+		t.Errorf("first failure should WARN, output:\n%s", data)
+	}
+
+	// Simulate a version having been seen earlier, then failing again.
+	m.mu.Lock()
+	m.version = "v2.0.0"
+	m.mu.Unlock()
+	tmp.Truncate(0)
+	tmp.Seek(0, 0)
+	m.check()
+	tmp.Sync()
+	data, _ = os.ReadFile(tmp.Name())
+	if bytes.Contains(data, []byte("MakeMKV probe failed")) && !bytes.Contains(data, []byte("level=DEBUG msg=" + `"MakeMKV probe failed (transient; version seen earlier)"`)) {
+		t.Errorf("transient failure should not WARN, output:\n%s", data)
 	}
 }
