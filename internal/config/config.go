@@ -22,21 +22,29 @@ type Config struct {
 	AutoSequence   bool   `toml:"auto_sequence" json:"auto_sequence"`       // pre-fill the search modal from last rip; default true
 	AutoRip        bool   `toml:"autorip" json:"autorip"`                   // automatically eject after accept and start ripping new discs; default true
 	MinTitleLength int    `toml:"min_title_length" json:"min_title_length"` // seconds; makemkvcon --minlength, 0 = omit the flag (rip every title)
+	// TempFillLimitPercent blocks a rip when temp_dir usage (current + estimated
+	// disc size) would exceed this percentage. 0 disables the check.
+	TempFillLimitPercent int `toml:"temp_fill_limit_percent" json:"temp_fill_limit_percent"`
+	// MoveFillLimitPercent blocks the move to movies_dir when its filesystem
+	// usage (current + rip output size) would exceed this percentage. 0 disables.
+	MoveFillLimitPercent int `toml:"move_fill_limit_percent" json:"move_fill_limit_percent"`
 }
 
 // Default returns a Config with sensible defaults.
 func Default() *Config {
 	home, _ := os.UserHomeDir()
 	return &Config{
-		MoviesDir:      filepath.Join(home, "Movies"),
-		TempDir:        "/tmp/riply",
-		TMDBKey:        "",
-		HTTPHost:       "127.0.0.1",
-		HTTPPort:       3000,
-		Makemkv:        "",
-		AutoSequence:   true,
-		AutoRip:        true,
-		MinTitleLength: 300,
+		MoviesDir:            filepath.Join(home, "Movies"),
+		TempDir:              "/tmp/riply",
+		TMDBKey:              "",
+		HTTPHost:             "127.0.0.1",
+		HTTPPort:             3000,
+		Makemkv:              "",
+		AutoSequence:         true,
+		AutoRip:              true,
+		MinTitleLength:       300,
+		TempFillLimitPercent: 80,
+		MoveFillLimitPercent: 95,
 	}
 }
 

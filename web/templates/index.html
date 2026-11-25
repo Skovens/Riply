@@ -65,6 +65,16 @@
           <input type="text" id="temp_dir" name="temp_dir" placeholder="/tmp/riply" list="path-options">
         </div>
         <div class="form-group">
+          <label for="temp_fill_limit_percent">Temp Fill Limit %</label>
+          <p class="form-hint">Block rips when the temp volume would exceed this fill level (current usage + disc size). 0 disables.</p>
+          <input type="number" id="temp_fill_limit_percent" name="temp_fill_limit_percent" min="0" max="100" placeholder="80">
+        </div>
+        <div class="form-group">
+          <label for="move_fill_limit_percent">Move Fill Limit %</label>
+          <p class="form-hint">Block moving rips into the movies directory when its volume would exceed this fill level. 0 disables.</p>
+          <input type="number" id="move_fill_limit_percent" name="move_fill_limit_percent" min="0" max="100" placeholder="95">
+        </div>
+        <div class="form-group">
           <label for="tmdb_api_key">TMDb API Key</label>
           <input type="password" id="tmdb_api_key" name="tmdb_api_key" placeholder="Enter TMDb API key">
         </div>
