@@ -100,8 +100,18 @@ func TestMaybeStartAutoRip(t *testing.T) {
 
 	s.MaybeStartAutoRip("/dev/sr0", "DISC")
 
-	if err := waitForActiveRip(s, 5*time.Second); err != nil {
-		t.Fatalf("auto-rip did not start: %v", err)
+	// Wait for the auto-started rip to reach a terminal state so the
+	// background goroutine is done writing before t.TempDir cleanup.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		state, count := ripStates(s)
+		if count > 0 && !isActive(state) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("auto-rip never reached a terminal state (state=%q count=%d)", state, count)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -190,19 +200,42 @@ func TestManualRipEnablesAutorip(t *testing.T) {
 	scanner.UpdateState("/dev/sr0", drive.StateReady, "DISC2")
 	s.MaybeStartAutoRip("/dev/sr0", "DISC2")
 
-	// instantRipper completes within milliseconds, so poll the rip counter
-	// instead of the transient "ripping" state.
+	// Wait for the auto-started second rip to reach a terminal state
+	// (instantRipper completes in ~1 ms, so poll for it deterministically).
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		s.mu.Lock()
 		count := s.ripCount
+		var second string
+		for _, sess := range s.rips {
+			if sess.DrivePath == "/dev/sr0" {
+				second = sess.State
+			}
+		}
 		s.mu.Unlock()
-		if count >= 2 {
+		if count >= 2 && !isActive(second) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("autorip did not start after manual rip: ripCount = %d, want 2", count)
+			t.Fatalf("autorip did not start after manual rip: ripCount = %d, state = %q", count, second)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+// ripStates returns the rip counter and the latest session state on the
+// test drive. Caller must not hold s.mu.
+func ripStates(s *Server) (string, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var state string
+	for _, sess := range s.rips {
+		state = sess.State
+	}
+	return state, s.ripCount
+}
+
+// isActive reports whether a rip state is still in-flight.
+func isActive(state string) bool {
+	return state == string(StateRipping) || state == string(StateQueued)
 }
