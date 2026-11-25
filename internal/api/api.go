@@ -463,6 +463,13 @@ func (s *Server) startRipForPath(drivePath string) (*RipSession, error) {
 	// Warn (without blocking) if library history shows a previous rip of this disc.
 	s.duplicateWarning(s.baseCtx, drivePath, discName, discHash)
 
+	// Fill-limit check (#101): block the rip when temp_dir usage plus the
+	// estimated disc size would exceed temp_fill_limit_percent. Runs before
+	// wg.Add so a blocked rip never registers with shutdown.
+	if err := s.checkTempFillLimit(drivePath, discSize); err != nil {
+		return nil, err
+	}
+
 	// Register the rip with the shutdown WaitGroup only after every early
 	// return is past; a count added before a 400/404/409 would leak and stall
 	// Shutdown for its whole deadline. The lock prevents Add from racing with
@@ -714,6 +721,13 @@ func (s *Server) startRipForPath(drivePath string) (*RipSession, error) {
 			s.mu.Unlock()
 
 			session.acceptLock().Lock()
+			if err := s.checkMoveFillLimit(drivePath, moviesDir, ripDir); err != nil {
+				s.mu.Lock()
+				session.State = string(StateError)
+				session.Error = err.Error()
+				s.mu.Unlock()
+				return
+			}
 			result, err := move.Move(ripDir, moviesDir, title, strconv.Itoa(year), tvSeason, tvEpisode)
 			if err != nil {
 				failed := 0
@@ -1532,6 +1546,10 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 	defer mu.Unlock()
 
 	// Move to library
+	if err := s.checkMoveFillLimit(drivePath, moviesDir, ripDir); err != nil {
+		http.Error(w, err.Error(), http.StatusInsufficientStorage)
+		return
+	}
 	result, err := move.Move(ripDir, moviesDir, title, strconv.Itoa(year), tvSeason, tvEpisode)
 	if err != nil {
 		failed := 0
@@ -1702,6 +1720,10 @@ func (s *Server) handleAcceptTitle(w http.ResponseWriter, r *http.Request) {
 
 	// Move exactly the selected title's source file; MoveTitleFile never
 	// re-picks by name/size heuristics.
+	if err := s.checkMoveFillLimit(session.DrivePath, moviesDir, ripDir); err != nil {
+		http.Error(w, err.Error(), http.StatusInsufficientStorage)
+		return
+	}
 	result, err := move.MoveTitleFile(ripDir, moviesDir, title.AcceptedName, body.Year, title.SourceFile, title.IsMainFile, body.TvSeason, body.TvEpisode)
 	if err != nil {
 		logger.Error("Move failed", "title", body.TitleName, "error", err)
@@ -1919,6 +1941,26 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		s.cfg.MinTitleLength = n
 	}
+	if v, ok := updates["temp_fill_limit_percent"].(float64); ok {
+		n := int(v)
+		if n < 0 {
+			n = 0
+		}
+		if n > 100 {
+			n = 100
+		}
+		s.cfg.TempFillLimitPercent = n
+	}
+	if v, ok := updates["move_fill_limit_percent"].(float64); ok {
+		n := int(v)
+		if n < 0 {
+			n = 0
+		}
+		if n > 100 {
+			n = 100
+		}
+		s.cfg.MoveFillLimitPercent = n
+	}
 	// Snapshot the config for saving and response, release lock before I/O
 	cfgCopy := *s.cfg
 
@@ -1949,6 +1991,81 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	// Never echo the API key back.
 	cfgCopy.TMDBKey = ""
 	writeJSON(w, cfgCopy)
+}
+
+// diskUsageFn and dirSizeFn are seams for the fill-limit checks; tests
+// override them instead of depending on real filesystem usage.
+var (
+	diskUsageFn = move.DiskUsage
+	dirSizeFn   = move.DirSize
+)
+
+// checkTempFillLimit blocks the rip (returns an error and publishes
+// rip_failed) when current temp_dir usage plus the estimated disc size would
+// push the temp filesystem above temp_fill_limit_percent. Unavailable usage
+// stats mean "unknown": the rip proceeds.
+func (s *Server) checkTempFillLimit(drivePath string, discSize int64) error {
+	s.mu.Lock()
+	limit := s.cfg.TempFillLimitPercent
+	tempDir := s.cfg.TempDir
+	s.mu.Unlock()
+	if limit <= 0 {
+		return nil
+	}
+	total, free, err := diskUsageFn(tempDir)
+	if err != nil {
+		logger.Debug("Temp-dir usage unavailable; skipping fill-limit check", "temp_dir", tempDir, "error", err)
+		return nil
+	}
+	used := total - free
+	if !move.OverLimit(used, uint64(discSize), total, limit) {
+		return nil
+	}
+	projected := (float64(used) + float64(discSize)) / float64(total) * 100
+	logger.Warn("Rip blocked: temp volume would exceed fill limit",
+		"temp_dir", tempDir, "limit_pct", limit, "projected_pct", int(projected), "disc_bytes", discSize)
+	s.sseMgr.Publish(sse.Event{
+		Type:    "rip_failed",
+		Drive:   drivePath,
+		Message: fmt.Sprintf("Rip blocked: temp volume would exceed %d%% fill limit (%.0f%% projected)", limit, projected),
+	})
+	return fmt.Errorf("temp dir would exceed %d%% fill limit (%.0f%% projected with this disc)", limit, projected)
+}
+
+// checkMoveFillLimit blocks the move (returns an error, logs, publishes
+// rip_failed) when moving ripDir into moviesDir would push the destination
+// filesystem above move_fill_limit_percent. Ripping is unaffected; only the
+// move is blocked. Unavailable stats mean "unknown": the move proceeds.
+func (s *Server) checkMoveFillLimit(drivePath, moviesDir, ripDir string) error {
+	s.mu.Lock()
+	limit := s.cfg.MoveFillLimitPercent
+	s.mu.Unlock()
+	if limit <= 0 {
+		return nil
+	}
+	total, free, err := diskUsageFn(moviesDir)
+	if err != nil {
+		logger.Debug("Movies-dir usage unavailable; skipping fill-limit check", "movies_dir", moviesDir, "error", err)
+		return nil
+	}
+	size, err := dirSizeFn(ripDir)
+	if err != nil {
+		logger.Debug("Rip dir size unavailable; skipping fill-limit check", "rip_dir", ripDir, "error", err)
+		return nil
+	}
+	used := total - free
+	if !move.OverLimit(used, size, total, limit) {
+		return nil
+	}
+	projected := (float64(used) + float64(size)) / float64(total) * 100
+	logger.Warn("Move blocked: destination volume would exceed fill limit",
+		"movies_dir", moviesDir, "limit_pct", limit, "projected_pct", int(projected), "rip_bytes", size)
+	s.sseMgr.Publish(sse.Event{
+		Type:    "rip_failed",
+		Drive:   drivePath,
+		Message: fmt.Sprintf("Move blocked: destination volume would exceed %d%% fill limit (%.0f%% projected)", limit, projected),
+	})
+	return fmt.Errorf("destination would exceed %d%% fill limit (%.0f%% projected)", limit, projected)
 }
 
 // statusResponse is the GET /api/status body: whether MakeMKV is usable.

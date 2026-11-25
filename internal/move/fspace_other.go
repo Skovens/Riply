@@ -9,3 +9,9 @@ import "errors"
 func realGetFreeSpace(string) (uint64, error) {
 	return 0, errors.New("free space query unsupported on this platform")
 }
+
+// realDiskUsage is unsupported outside Linux; callers treat the error as
+// "unknown" and proceed.
+func realDiskUsage(string) (uint64, uint64, error) {
+	return 0, 0, errUnsupportedUsage
+}

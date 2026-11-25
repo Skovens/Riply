@@ -862,6 +862,8 @@
       document.getElementById('temp_dir').value = cfg.temp_dir || '';
       document.getElementById('http_port').value = cfg.http_port || 3000;
       document.getElementById('auto_sequence').checked = cfg.auto_sequence !== false;
+      document.getElementById('temp_fill_limit_percent').value = cfg.temp_fill_limit_percent ?? 80;
+      document.getElementById('move_fill_limit_percent').value = cfg.move_fill_limit_percent ?? 95;
     } catch (err) {
       console.error('Failed to load settings:', err);
     }
@@ -874,6 +876,8 @@
       temp_dir: document.getElementById('temp_dir').value,
       http_port: parseInt(document.getElementById('http_port').value) || 3000,
       auto_sequence: document.getElementById('auto_sequence').checked,
+      temp_fill_limit_percent: parseInt(document.getElementById('temp_fill_limit_percent').value) || 0,
+      move_fill_limit_percent: parseInt(document.getElementById('move_fill_limit_percent').value) || 0,
     };
 
     const tmdbKey = document.getElementById('tmdb_api_key').value;
