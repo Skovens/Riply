@@ -151,6 +151,9 @@ func (m *makeMKV) probe() (available bool, version string) {
 
 func (m *makeMKV) check() {
 	avail, version := m.probe()
+	m.mu.RLock()
+	versionSeen := m.version != ""
+	m.mu.RUnlock()
 	m.mu.Lock()
 	m.avail = avail
 	m.lastCheck = time.Now()
@@ -159,7 +162,16 @@ func (m *makeMKV) check() {
 	}
 	m.mu.Unlock()
 	if !avail {
-		logger.Warn("MakeMKV probe failed", "path", m.path)
+		// A probe failure after a version was seen is almost always transient
+		// (makemkvcon busy, drive just ejected/tray open) — Debug keeps the
+		// signal without crying wolf every availability TTL (#99). Only a
+		// failure with no version ever seen is worth a Warn: the binary may
+		// genuinely be missing/broken.
+		if versionSeen {
+			logger.Debug("MakeMKV probe failed (transient; version seen earlier)", "path", m.path)
+		} else {
+			logger.Warn("MakeMKV probe failed", "path", m.path)
+		}
 	}
 }
 
