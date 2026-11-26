@@ -111,6 +111,7 @@ See `README.md` for the full architecture diagram. Key modules:
 - **CI must pass before a task is done.** Before pushing, run locally exactly what CI runs (`go build ./...`, `go vet ./...`, `go test -race ./...`) so the first push is expected green. After pushing, watch the run (`gh pr checks <N> --watch`) and fix any failure before reporting completion — a red run means the task is not finished. Never merge on a failing check.
 - Do not switch branches with uncommitted changes in the tree — commit or ask first; a switch would yank files out from under an in-progress session.
 - Push and open the PR with `gh pr create` once the change is verified; merge via PR, never by pushing to `main` directly.
+- **Branch hygiene: a merged branch is a dead branch.** After a PR merges (whether merged locally or via the API), delete both sides — `git branch -d <branch>` locally and `git push origin --delete <branch>` remotely (or merge with `gh pr merge --delete-branch`). Before deleting, confirm the branch is fully merged (`git branch -r --merged origin/main`); never delete unmerged work. A repo cluttered with merged `feat/*`/`fix/*` branches hides which work is actually in flight.
 
 ## Verification Philosophy
 
