@@ -12,6 +12,8 @@
   let searchDriveIndex = null;
   let searchSeq = 0;          // discards stale search responses
   let searchResultsList = [];
+  let dirModalTarget = null;  // settings field id the browser fills
+  let dirModalDir = null;     // directory currently listed
   let driveProgressMap = {}; // drivePath → {percent, speed_mbps, phase, title_index, title_total, rip_phase}
   let libraryData = { entries: [], series: [], movies: 0, episodes: 0, scanned_at: '' };
 
@@ -22,6 +24,9 @@
   const searchInput = document.getElementById('search-input');
   const searchResults = document.getElementById('search-results');
   const settingsForm = document.getElementById('settings-form');
+  const dirModal = document.getElementById('dir-modal');
+  const dirBreadcrumb = document.getElementById('dir-breadcrumb');
+  const dirList = document.getElementById('dir-list');
 
   function esc(s) {
     return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -854,6 +859,69 @@
       console.error('Failed to load path suggestions:', err);
     }
   }
+
+  // Directory browser modal
+  function openDirModal(targetId) {
+    dirModalTarget = targetId;
+    const field = document.getElementById(targetId);
+    browseDir(field.value.trim() || '');
+    dirModal.classList.add('active');
+  }
+
+  function closeDirModal() {
+    dirModal.classList.remove('active');
+    dirModalTarget = null;
+    dirModalDir = null;
+  }
+
+  async function browseDir(dir) {
+    try {
+      const data = await api(`/api/paths/browse?dir=${encodeURIComponent(dir)}`);
+      renderDirListing(data);
+    } catch (err) {
+      if (dir && dir !== '/' && dir !== '') {
+        toast('Directory not reachable, starting from /', 'error');
+        browseDir('/');
+      } else {
+        dirList.innerHTML = `<p style="color: var(--error);">Failed to list: ${esc(err.message)}</p>`;
+      }
+    }
+  }
+
+  function renderDirListing(data) {
+    dirModalDir = data.dir;
+    dirBreadcrumb.textContent = data.dir;
+    let html = '';
+    if (data.parent !== '') {
+      html += `<div class="dir-result dir-up" data-path="${esc(data.parent)}" role="button">.. ${esc(data.parent)}</div>`;
+    }
+    for (const d of data.dirs || []) {
+      html += `<div class="dir-result" data-path="${esc(d.path)}" role="button">${esc(d.name)}</div>`;
+    }
+    if (data.parent === '' && !(data.dirs || []).length) {
+      html = '<p style="color: var(--text-secondary);">No subdirectories</p>';
+    }
+    dirList.innerHTML = html;
+  }
+
+  dirList.addEventListener('click', (e) => {
+    const el = e.target.closest('.dir-result');
+    if (el) browseDir(el.dataset.path);
+  });
+
+  document.querySelectorAll('.dir-browse').forEach(btn =>
+    btn.addEventListener('click', () => openDirModal(btn.dataset.target)));
+  document.getElementById('dir-modal-close').addEventListener('click', closeDirModal);
+  document.getElementById('dir-cancel').addEventListener('click', closeDirModal);
+  dirModal.addEventListener('click', (e) => {
+    if (e.target === dirModal) closeDirModal();
+  });
+  document.getElementById('dir-use').addEventListener('click', () => {
+    if (dirModalTarget && dirModalDir) {
+      document.getElementById(dirModalTarget).value = dirModalDir;
+    }
+    closeDirModal();
+  });
 
   async function loadSettings() {
     try {

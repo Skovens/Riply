@@ -220,6 +220,7 @@ On a failed rip, `Rip` also logs the tail of the captured MakeMKV output alongsi
 
 - **Rip history** covers accepted rips and scanned files; rips still in progress are not persisted across restarts
 - **No authentication** — keep the bind address on loopback unless you protect it yourself; the default is `127.0.0.1`
+- **Settings directory browser** lists every directory on the filesystem (no restriction); acceptable because Riply is a localhost, single-user service
 - **Movie/TV classification** is the file-size heuristic in `classifyRip` (median size plus min/max ratio)
 - **Library scans** run on Riply's single SQLite connection, so a scan briefly delays the drive and library views until it finishes
 
