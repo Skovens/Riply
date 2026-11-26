@@ -2,11 +2,14 @@ package api
 
 import (
 	"bufio"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"riply/internal/logger"
 )
 
 // candidatePaths returns suggested directories for the settings path
@@ -78,4 +81,70 @@ func isVirtualFS(fstype string) bool {
 // path dropdowns.
 func (s *Server) handlePaths(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"paths": candidatePaths()})
+}
+
+// handlePathsBrowse serves GET /api/paths/browse?dir=<path>: the real
+// subdirectories of dir for the settings directory browser. Hidden
+// (dot-prefixed) directories are skipped; symlinks to directories resolve.
+// Any filesystem path is listable — Riply is a localhost, single-user service.
+// Missing, non-directory, and unreadable paths all return 404 with no detail,
+// so the endpoint cannot be probed for what exists.
+func (s *Server) handlePathsBrowse(w http.ResponseWriter, r *http.Request) {
+	dir := r.URL.Query().Get("dir")
+	if dir == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			dir = home
+		} else {
+			dir = "/"
+		}
+	}
+	dir = filepath.Clean(dir)
+	if !filepath.IsAbs(dir) {
+		dir = "/" + dir
+	}
+
+	fi, err := os.Stat(dir)
+	if err != nil || !fi.IsDir() {
+		w.WriteHeader(http.StatusNotFound)
+		writeJSON(w, map[string]any{"error": "not found"})
+		return
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		logger.Debug("browse failed", "dir", dir, "error", err)
+		w.WriteHeader(http.StatusNotFound)
+		writeJSON(w, map[string]any{"error": "not found"})
+		return
+	}
+
+	type dirEntry struct {
+		Name string `json:"name"`
+		Path string `json:"path"`
+	}
+	var dirs []dirEntry
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		if !e.IsDir() {
+			if e.Type()&fs.ModeSymlink == 0 {
+				continue
+			}
+			if fi, err := os.Stat(filepath.Join(dir, name)); err != nil || !fi.IsDir() {
+				continue
+			}
+		}
+		dirs = append(dirs, dirEntry{Name: name, Path: filepath.Join(dir, name)})
+	}
+	sort.Slice(dirs, func(i, j int) bool {
+		return strings.ToLower(dirs[i].Name) < strings.ToLower(dirs[j].Name)
+	})
+
+	parent := ""
+	if dir != "/" {
+		parent = filepath.Clean(filepath.Dir(dir))
+	}
+	logger.Debug("browse", "dir", dir, "found", len(dirs))
+	writeJSON(w, map[string]any{"dir": dir, "parent": parent, "dirs": dirs})
 }

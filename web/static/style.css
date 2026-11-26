@@ -496,6 +496,49 @@ h2 {
   gap: 0.5rem;
 }
 
+/* Directory browser modal */
+.dir-breadcrumb {
+  font-family: monospace;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  word-break: break-all;
+  margin-bottom: 0.75rem;
+}
+
+.dir-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 45vh;
+  overflow-y: auto;
+}
+
+.dir-result {
+  padding: 0.6rem 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.dir-result:hover {
+  border-color: var(--primary);
+  background: var(--surface-hover);
+}
+
+.dir-result.dir-up {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.dir-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
 .search-result {
   display: flex;
   align-items: center;

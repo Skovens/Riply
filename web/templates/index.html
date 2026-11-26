@@ -48,6 +48,7 @@
           <div class="input-row">
             <input type="text" id="movies_dir" name="movies_dir" placeholder="/path/to/movies" list="path-options">
             <button type="button" id="scan-library" class="btn btn-secondary">Scan</button>
+            <button type="button" class="btn btn-secondary dir-browse" data-target="movies_dir">Browse</button>
           </div>
         </div>
         <div class="form-group library-db">
@@ -62,7 +63,10 @@
         </div>
         <div class="form-group">
           <label for="temp_dir">Temp Directory</label>
-          <input type="text" id="temp_dir" name="temp_dir" placeholder="/tmp/riply" list="path-options">
+          <div class="input-row">
+            <input type="text" id="temp_dir" name="temp_dir" placeholder="/tmp/riply" list="path-options">
+            <button type="button" class="btn btn-secondary dir-browse" data-target="temp_dir">Browse</button>
+          </div>
         </div>
         <div class="form-group">
           <label for="temp_fill_limit_percent">Temp Fill Limit %</label>
@@ -103,6 +107,23 @@
       <div class="modal-body">
         <input type="text" id="search-input" placeholder="Search for a movie...">
         <div id="search-results" class="search-results"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Directory Browser Modal -->
+  <div id="dir-modal" class="modal">
+    <div class="modal-content">
+      <span class="modal-close" id="dir-modal-close">&times;</span>
+      <h3>Choose directory</h3>
+      <div class="modal-body">
+        <input type="hidden" id="dir-modal-target">
+        <div id="dir-breadcrumb" class="dir-breadcrumb"></div>
+        <div id="dir-list" class="dir-list"></div>
+        <div class="dir-modal-footer">
+          <button type="button" id="dir-cancel" class="btn btn-secondary">Cancel</button>
+          <button type="button" id="dir-use" class="btn btn-primary">Use this directory</button>
+        </div>
       </div>
     </div>
   </div>
