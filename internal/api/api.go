@@ -109,7 +109,7 @@ type RipSession struct {
 	ID            int                `json:"id"`
 	DrivePath     string             `json:"drive_path"`
 	DiscName      string             `json:"disc_name"`
-	DiscHash      string             `json:"-"` // disc fingerprint; empty when unknown
+	DiscHash      string             `json:"-"`     // disc fingerprint; empty when unknown
 	State         string             `json:"state"` // "ripping", "queued", "complete", "accepted", "error"
 	OutputDir     string             `json:"-"`     // internal: path to rip output directory
 	OutputPath    string             `json:"output_path,omitempty"`
@@ -658,6 +658,7 @@ func (s *Server) startRipForPath(drivePath string) (*RipSession, error) {
 		}
 		// Snapshot MoviesDir and session fields under lock to avoid races with concurrent PUT/accept
 		moviesDir := s.cfg.MoviesDir
+		tvDir := s.cfg.TVDir()
 		sessionTMDB := session.TMDB
 		sessionMediaType := session.MediaType
 		sessionDiscName := session.DiscName
@@ -674,7 +675,11 @@ func (s *Server) startRipForPath(drivePath string) (*RipSession, error) {
 		season, episode := s.autofillTV(sessionDiscName, sessionTMDB, effectiveType)
 
 		// Populate per-title list
-		titles := populateTitles(outDir, moviesDir, sessionTMDB, effectiveType, season, episode)
+		destRoot := moviesDir
+		if effectiveType == "tv" {
+			destRoot = tvDir
+		}
+		titles := populateTitles(outDir, destRoot, sessionTMDB, effectiveType, season, episode)
 		s.mu.Lock()
 		session.Titles = titles
 		session.SeasonNumber = season
@@ -694,6 +699,7 @@ func (s *Server) startRipForPath(drivePath string) (*RipSession, error) {
 			ripDir := session.OutputDir
 			// Snapshot MoviesDir under lock to avoid race with concurrent PUT
 			moviesDir := s.cfg.MoviesDir
+			tvDir := s.cfg.TVDir()
 			tvSeason, tvEpisode := session.SeasonNumber, session.EpisodeNumber
 			// N1: an explicit season/episode on the accept request (a
 			// drive-level accept that knew the TV position) overrides the
@@ -722,14 +728,18 @@ func (s *Server) startRipForPath(drivePath string) (*RipSession, error) {
 			s.mu.Unlock()
 
 			session.acceptLock().Lock()
-			if err := s.checkMoveFillLimit(drivePath, moviesDir, ripDir); err != nil {
+			destRoot := moviesDir
+			if tvSeason > 0 {
+				destRoot = tvDir
+			}
+			if err := s.checkMoveFillLimit(drivePath, destRoot, ripDir); err != nil {
 				s.mu.Lock()
 				session.State = string(StateError)
 				session.Error = err.Error()
 				s.mu.Unlock()
 				return
 			}
-			result, err := move.Move(ripDir, moviesDir, title, strconv.Itoa(year), tvSeason, tvEpisode)
+			result, err := move.Move(ripDir, moviesDir, tvDir, title, strconv.Itoa(year), tvSeason, tvEpisode)
 			if err != nil {
 				failed := 0
 				if result != nil {
@@ -1510,6 +1520,7 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 	session.PendingAccept = nil // clear any pending accept
 	// Snapshot MoviesDir under lock to avoid race with concurrent PUT
 	moviesDir := s.cfg.MoviesDir
+	tvDir := s.cfg.TVDir()
 	discName := session.DiscName
 	tvSeason := session.SeasonNumber
 	tvEpisode := session.EpisodeNumber
@@ -1547,11 +1558,15 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 	defer mu.Unlock()
 
 	// Move to library
-	if err := s.checkMoveFillLimit(drivePath, moviesDir, ripDir); err != nil {
+	destRoot := moviesDir
+	if tvSeason > 0 {
+		destRoot = tvDir
+	}
+	if err := s.checkMoveFillLimit(drivePath, destRoot, ripDir); err != nil {
 		http.Error(w, err.Error(), http.StatusInsufficientStorage)
 		return
 	}
-	result, err := move.Move(ripDir, moviesDir, title, strconv.Itoa(year), tvSeason, tvEpisode)
+	result, err := move.Move(ripDir, moviesDir, tvDir, title, strconv.Itoa(year), tvSeason, tvEpisode)
 	if err != nil {
 		failed := 0
 		if result != nil {
@@ -1702,6 +1717,7 @@ func (s *Server) handleAcceptTitle(w http.ResponseWriter, r *http.Request) {
 	session.Titles[titleIdx].State = "accepting"
 	// Snapshot MoviesDir under lock to avoid race with concurrent PUT
 	moviesDir := s.cfg.MoviesDir
+	tvDir := s.cfg.TVDir()
 	discName := session.DiscName
 	var titleTMDBID, sessionTMDBID int
 	if title.TMDB != nil {
@@ -1721,11 +1737,15 @@ func (s *Server) handleAcceptTitle(w http.ResponseWriter, r *http.Request) {
 
 	// Move exactly the selected title's source file; MoveTitleFile never
 	// re-picks by name/size heuristics.
-	if err := s.checkMoveFillLimit(session.DrivePath, moviesDir, ripDir); err != nil {
+	titleDestRoot := moviesDir
+	if body.TvSeason > 0 {
+		titleDestRoot = tvDir
+	}
+	if err := s.checkMoveFillLimit(session.DrivePath, titleDestRoot, ripDir); err != nil {
 		http.Error(w, err.Error(), http.StatusInsufficientStorage)
 		return
 	}
-	result, err := move.MoveTitleFile(ripDir, moviesDir, title.AcceptedName, body.Year, title.SourceFile, title.IsMainFile, body.TvSeason, body.TvEpisode)
+	result, err := move.MoveTitleFile(ripDir, moviesDir, tvDir, title.AcceptedName, body.Year, title.SourceFile, title.IsMainFile, body.TvSeason, body.TvEpisode)
 	if err != nil {
 		logger.Error("Move failed", "title", body.TitleName, "error", err)
 		s.mu.Lock()
@@ -1912,9 +1932,29 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// tv_shows_dir may be empty (falls back to movies_dir), but a non-empty
+	// value must survive the same writability probe as movies_dir/temp_dir.
+	if raw, ok := updates["tv_shows_dir"]; ok {
+		v, isStr := raw.(string)
+		if !isStr {
+			http.Error(w, fmt.Sprintf("tv_shows_dir must be a string, got %v", raw), http.StatusBadRequest)
+			return
+		}
+		if v != "" {
+			v = config.ExpandHome(v)
+			if err := checkDirWritable(v); err != nil {
+				http.Error(w, fmt.Sprintf("tv_shows_dir %q is not usable: %v", v, err), http.StatusBadRequest)
+				return
+			}
+			updates["tv_shows_dir"] = v
+		}
+	}
 	s.mu.Lock()
 	if v, ok := updates["movies_dir"].(string); ok && v != "" {
 		s.cfg.MoviesDir = v
+	}
+	if v, ok := updates["tv_shows_dir"].(string); ok {
+		s.cfg.TVShowsDir = v
 	}
 	if v, ok := updates["temp_dir"].(string); ok && v != "" {
 		s.cfg.TempDir = v

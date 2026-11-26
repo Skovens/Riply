@@ -222,6 +222,7 @@ func (s *Server) handleScanLibrary(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	moviesDir := s.cfg.MoviesDir
+	tvDir := s.cfg.TVDir()
 	s.mu.Unlock()
 	if strings.TrimSpace(moviesDir) == "" {
 		http.Error(w, "movies_dir is not configured", http.StatusBadRequest)
@@ -241,7 +242,7 @@ func (s *Server) handleScanLibrary(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		defer s.scanMu.Unlock()
-		res, err := s.lib.Scan(s.baseCtx, moviesDir)
+		res, err := s.lib.Scan(s.baseCtx, moviesDir, tvDir)
 		if err != nil {
 			logger.Error("Library scan failed", "dir", moviesDir, "error", err)
 			s.sseMgr.Publish(sse.Event{

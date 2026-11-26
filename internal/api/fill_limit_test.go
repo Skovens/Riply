@@ -16,16 +16,16 @@ func TestOverLimit(t *testing.T) {
 		limit             int
 		want              bool
 	}{
-		{0, 0, 1000, 80, false},          // nothing used
-		{700, 0, 1000, 80, false},        // at 70%
-		{700, 100, 1000, 80, false},      // exactly 80%: not over
-		{700, 101, 1000, 80, true},       // 80.1%: over
-		{0, 801, 1000, 80, true},         // need alone pushes over
-		{900, 500, 1000, 80, true},       // far over
-		{999, 999, 1000, 0, false},       // 0 disables
-		{999, 999, 1000, -5, false},      // negative disables
-		{0, 0, 0, 80, false},             // unknown total: never block
-		{999, 999, 1000, 100, true},      // 199% even vs 100
+		{0, 0, 1000, 80, false},     // nothing used
+		{700, 0, 1000, 80, false},   // at 70%
+		{700, 100, 1000, 80, false}, // exactly 80%: not over
+		{700, 101, 1000, 80, true},  // 80.1%: over
+		{0, 801, 1000, 80, true},    // need alone pushes over
+		{900, 500, 1000, 80, true},  // far over
+		{999, 999, 1000, 0, false},  // 0 disables
+		{999, 999, 1000, -5, false}, // negative disables
+		{0, 0, 0, 80, false},        // unknown total: never block
+		{999, 999, 1000, 100, true}, // 199% even vs 100
 	}
 	for i, c := range cases {
 		if got := move.OverLimit(c.used, c.need, c.total, c.limit); got != c.want {
@@ -132,4 +132,3 @@ func TestFillLimitUnknownUsageProceeds(t *testing.T) {
 	}
 	waitRipsIdle(s, 5*time.Second) // goroutine must finish before TempDir cleanup
 }
-

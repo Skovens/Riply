@@ -31,12 +31,13 @@ type MoveResult struct {
 }
 
 // Move moves a ripped folder to the library with Jellyfin-compliant naming.
-// season > 0 selects the TV layout (see moveTV); season == 0 is the movie
-// layout: {Title} ({Year})/{Title} ({Year}).mkv with remaining MKVs under Extras/.
-func Move(ripDir, moviesDir, title, year string, season, episode int) (*MoveResult, error) {
+// season > 0 selects the TV layout (see moveTV), rooted at tvDir; season == 0
+// is the movie layout rooted at moviesDir: {Title} ({Year})/{Title} ({Year}).mkv
+// with remaining MKVs under Extras/.
+func Move(ripDir, moviesDir, tvDir, title, year string, season, episode int) (*MoveResult, error) {
 	title = SanitizeName(title)
 	if season > 0 {
-		return moveTV(ripDir, moviesDir, title, year, season, episode)
+		return moveTV(ripDir, tvDir, title, year, season, episode)
 	}
 	logger.Info("Moving to library", "title", title, "year", year, "rip_dir", ripDir)
 
@@ -249,7 +250,7 @@ type MoveTitlesResult struct {
 // re-picks a file by name/size heuristics — the caller already knows which
 // file the user selected, and guessing moved the wrong MKV when titles
 // shared base names or sizes.
-func MoveTitleFile(ripDir, moviesDir, title string, year int, sourceBase string, isMainFile bool, season, episode int) (*MoveTitlesResult, error) {
+func MoveTitleFile(ripDir, moviesDir, tvDir, title string, year int, sourceBase string, isMainFile bool, season, episode int) (*MoveTitlesResult, error) {
 	title = SanitizeName(title)
 	yearStr := ""
 	if year > 0 {
@@ -265,7 +266,7 @@ func MoveTitleFile(ripDir, moviesDir, title string, year int, sourceBase string,
 	base := sourceBase
 	var dest string
 	if season > 0 {
-		dest = filepath.Join(moviesDir, folderName(title, yearStr), fmt.Sprintf("Season %d", season),
+		dest = filepath.Join(tvDir, folderName(title, yearStr), fmt.Sprintf("Season %d", season),
 			fmt.Sprintf("%s - S%02dE%02d - %s.mkv", title, season, episode, base))
 	} else if isMainFile {
 		dest = filepath.Join(moviesDir, folderName(title, yearStr), fmt.Sprintf("%s.mkv", folderName(title, yearStr)))

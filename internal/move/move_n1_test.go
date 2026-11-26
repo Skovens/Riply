@@ -25,7 +25,7 @@ func TestMoveTVSeasonLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := Move(ripDir, moviesDir, "The Test", "2015", 2, 3)
+	result, err := Move(ripDir, moviesDir, moviesDir, "The Test", "2015", 2, 3)
 	if err != nil {
 		t.Fatalf("Move TV = %v", err)
 	}
@@ -70,7 +70,7 @@ func TestMoveTVCollisionKeepsBoth(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(rip1, "title_t00.mkv"), []byte("first"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Move(rip1, moviesDir, "Show", "2020", 1, 1); err != nil {
+	if _, err := Move(rip1, moviesDir, moviesDir, "Show", "2020", 1, 1); err != nil {
 		t.Fatal(err)
 	}
 
@@ -81,7 +81,7 @@ func TestMoveTVCollisionKeepsBoth(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(rip2, "title_t00.mkv"), []byte("second"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Move(rip2, moviesDir, "Show", "2020", 1, 1); err != nil {
+	if _, err := Move(rip2, moviesDir, moviesDir, "Show", "2020", 1, 1); err != nil {
 		t.Fatal(err)
 	}
 
@@ -130,7 +130,7 @@ func TestMoveTVPartialFailureKeepsRipDir(t *testing.T) {
 		return safeMove(src, dst)
 	}
 
-	result, err := Move(ripDir, moviesDir, "Show", "2020", 1, 1)
+	result, err := Move(ripDir, moviesDir, moviesDir, "Show", "2020", 1, 1)
 	if err == nil {
 		t.Fatal("expected error for failed episode move")
 	}
@@ -163,7 +163,7 @@ func TestMoveTVMergesIntoExistingShowFolder(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(rip1, "a.mkv"), []byte("a"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Move(rip1, moviesDir, "Show", "2020", 1, 1); err != nil {
+	if _, err := Move(rip1, moviesDir, moviesDir, "Show", "2020", 1, 1); err != nil {
 		t.Fatal(err)
 	}
 
@@ -174,7 +174,7 @@ func TestMoveTVMergesIntoExistingShowFolder(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(rip2, "b.mkv"), []byte("b"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Move(rip2, moviesDir, "Show", "2020", 2, 1); err != nil {
+	if _, err := Move(rip2, moviesDir, moviesDir, "Show", "2020", 2, 1); err != nil {
 		t.Fatal(err)
 	}
 

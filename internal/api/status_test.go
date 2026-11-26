@@ -20,8 +20,8 @@ func (r *noRipper) Rip(context.Context, string, string, int64) <-chan rip.RipPro
 	return nil
 }
 func (r *noRipper) Eject(context.Context, string) error { return nil }
-func (r *noRipper) Version() string                    { return "" }
-func (r *noRipper) IsAvailable() bool                  { return false }
+func (r *noRipper) Version() string                     { return "" }
+func (r *noRipper) IsAvailable() bool                   { return false }
 
 func TestStatusMakemkvAvailable(t *testing.T) {
 	s, _ := newRipServer(t, &instantRipper{outName: "movie.mkv"})
@@ -59,4 +59,3 @@ func TestStatusMakemkvMissing(t *testing.T) {
 		t.Errorf("body should not include makemkv_version when unavailable — %s", body)
 	}
 }
-

@@ -864,7 +864,6 @@ echo 'MSG:5004,1,0,"1 title saved, 0 failed"'`)
 	}
 }
 
-
 // #99: a probe failure after a version was seen is transient noise (busy
 // binary, ejected drive) and must log at DEBUG; only a failure with no
 // version ever seen justifies the WARN.
@@ -895,7 +894,7 @@ func TestProbeFailureLogLevelAfterVersionSeen(t *testing.T) {
 	}
 	tmp.Sync()
 	data, _ := os.ReadFile(tmp.Name())
-	if !bytes.Contains(data, []byte("level=WARN msg=" + `"MakeMKV probe failed"`)) {
+	if !bytes.Contains(data, []byte("level=WARN msg="+`"MakeMKV probe failed"`)) {
 		t.Errorf("first failure should WARN, output:\n%s", data)
 	}
 
@@ -908,7 +907,7 @@ func TestProbeFailureLogLevelAfterVersionSeen(t *testing.T) {
 	m.check()
 	tmp.Sync()
 	data, _ = os.ReadFile(tmp.Name())
-	if bytes.Contains(data, []byte("MakeMKV probe failed")) && !bytes.Contains(data, []byte("level=DEBUG msg=" + `"MakeMKV probe failed (transient; version seen earlier)"`)) {
+	if bytes.Contains(data, []byte("MakeMKV probe failed")) && !bytes.Contains(data, []byte("level=DEBUG msg="+`"MakeMKV probe failed (transient; version seen earlier)"`)) {
 		t.Errorf("transient failure should not WARN, output:\n%s", data)
 	}
 }

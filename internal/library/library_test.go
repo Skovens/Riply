@@ -19,6 +19,63 @@ func mkFile(t *testing.T, path string) {
 	}
 }
 
+// tv_shows_dir (#122): Scan must cover both roots in one pass — entries from
+// each root are indexed, and a file deleted from either root is flagged
+// missing while entries under the other root stay untouched.
+func TestScanTwoRoots(t *testing.T) {
+	dir := t.TempDir()
+	movies := filepath.Join(dir, "movies")
+	tv := filepath.Join(dir, "tvshows")
+	mkFile(t, filepath.Join(movies, "Inception (2010)", "Inception.mkv"))
+	s01e01 := filepath.Join(tv, "KLOVN (2010)", "Season 1", "KLOVN - S01E01 - Pilot.mkv")
+	mkFile(t, s01e01)
+
+	st := openStore(t, filepath.Join(dir, "library.db"))
+	ctx := context.Background()
+
+	res, err := st.Scan(ctx, movies, tv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Added != 2 || res.Missing != 0 {
+		t.Fatalf("two-root scan = %+v, want added 2", res)
+	}
+	snap, err := st.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Movies != 1 || snap.Episodes != 1 {
+		t.Errorf("counters: movies=%d episodes=%d, want 1/1", snap.Movies, snap.Episodes)
+	}
+
+	// Delete from the TV root: that entry goes missing, the movie entry
+	// (other root) is untouched.
+	if err := os.Remove(s01e01); err != nil {
+		t.Fatal(err)
+	}
+	res, err = st.Scan(ctx, movies, tv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Missing != 1 {
+		t.Errorf("two-root missing scan = %+v, want missing 1", res)
+	}
+	snap, err = st.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range snap.Entries {
+		if e.Title == "Inception" && e.Missing {
+			t.Error("movie entry flagged missing while its root was scanned and file present")
+		}
+	}
+
+	// A nonexistent optional root (tv_shows_dir not created yet) is skipped.
+	if _, err := st.Scan(ctx, movies, filepath.Join(dir, "not-created")); err != nil {
+		t.Errorf("scan with nonexistent optional root: %v", err)
+	}
+}
+
 func TestScanAndSnapshot(t *testing.T) {
 	dir := t.TempDir()
 	movies := filepath.Join(dir, "movies")

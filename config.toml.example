@@ -5,6 +5,10 @@
 # Directory where ripped movies will be stored (Jellyfin-compliant structure)
 movies_dir = "/media/movies"
 
+# Directory where ripped TV shows will be stored ("Show (Year)/Season N/…").
+# Empty = TV shows are stored under movies_dir.
+tv_shows_dir = ""
+
 # Temporary directory for rip operations
 temp_dir = "/tmp/riply"
 

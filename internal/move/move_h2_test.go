@@ -34,7 +34,7 @@ func TestMoveKeepsRipDirWhenExtraFails(t *testing.T) {
 		return safeMove(src, dst)
 	}
 
-	result, err := Move(ripDir, moviesDir, "Title", "2020", 0, 0)
+	result, err := Move(ripDir, moviesDir, moviesDir, "Title", "2020", 0, 0)
 	if err == nil {
 		t.Fatal("Move reported success despite failed extra")
 	}
@@ -79,7 +79,7 @@ func TestMoveRemovesRipDirWhenAllSucceed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := Move(ripDir, moviesDir, "Title", "2020", 0, 0)
+	result, err := Move(ripDir, moviesDir, moviesDir, "Title", "2020", 0, 0)
 	if err != nil {
 		t.Fatalf("Move failed: %v", err)
 	}

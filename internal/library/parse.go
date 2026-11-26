@@ -120,61 +120,84 @@ func ParsePath(rel string) (Entry, bool) {
 	}, true
 }
 
-// Scan walks moviesDir and upserts every parseable media file into the index.
-// Files that previously existed but are gone now are flagged missing; entries
-// outside the scanned root are left untouched. The scan never deletes files.
-func (s *Store) Scan(ctx context.Context, moviesDir string) (ScanResult, error) {
-	root, err := filepath.Abs(moviesDir)
-	if err != nil {
-		return ScanResult{}, fmt.Errorf("library: resolve %s: %w", moviesDir, err)
+// Scan walks each root (movies_dir, tv_shows_dir) and upserts every parseable
+// media file into the index. Files that previously existed but are gone now
+// are flagged missing; entries outside the scanned roots are left untouched.
+// The scan never deletes files.
+func (s *Store) Scan(ctx context.Context, roots ...string) (ScanResult, error) {
+	if len(roots) == 0 {
+		return ScanResult{}, fmt.Errorf("library: no scan roots given")
 	}
-	info, err := os.Stat(root)
-	if err != nil || !info.IsDir() {
-		return ScanResult{}, fmt.Errorf("library: %s is not a directory", moviesDir)
+	absRoots := make([]string, 0, len(roots))
+	seen := map[string]bool{}
+	for _, r := range roots {
+		if strings.TrimSpace(r) == "" {
+			continue
+		}
+		root, err := filepath.Abs(r)
+		if err != nil {
+			return ScanResult{}, fmt.Errorf("library: resolve %s: %w", r, err)
+		}
+		info, err := os.Stat(root)
+		if err != nil || !info.IsDir() {
+			// Optional roots (e.g. tv_shows_dir not created yet) are skipped;
+			// the handler has already validated the primary root.
+			logger.Warn("Library scan root skipped", "dir", r, "error", "not a directory")
+			continue
+		}
+		if !seen[root] {
+			seen[root] = true
+			absRoots = append(absRoots, root)
+		}
+	}
+	if len(absRoots) == 0 {
+		return ScanResult{}, fmt.Errorf("library: no scan roots given")
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	found := make(map[string]Entry)
-	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	for _, root := range absRoots {
+		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				if path == root {
+					return err
+				}
+				logger.Warn("Library scan walk error", "path", path, "error", err)
+				if d != nil && d.IsDir() {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			name := d.Name()
+			if d.IsDir() {
+				if path != root && (name == ".git" || name == ".trash" || strings.HasPrefix(name, ".")) {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if strings.HasPrefix(name, ".") {
+				return nil
+			}
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				return nil
+			}
+			e, ok := ParsePath(filepath.ToSlash(rel))
+			if !ok {
+				return nil
+			}
+			e.OutputPath = path
+			found[path] = e
+			return nil
+		})
 		if err != nil {
-			if path == root {
-				return err
-			}
-			logger.Warn("Library scan walk error", "path", path, "error", err)
-			if d != nil && d.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
+			return ScanResult{}, fmt.Errorf("library: scan %s: %w", root, err)
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		name := d.Name()
-		if d.IsDir() {
-			if path != root && (name == ".git" || name == ".trash" || strings.HasPrefix(name, ".")) {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if strings.HasPrefix(name, ".") {
-			return nil
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return nil
-		}
-		e, ok := ParsePath(filepath.ToSlash(rel))
-		if !ok {
-			return nil
-		}
-		e.OutputPath = path
-		found[path] = e
-		return nil
-	})
-	if err != nil {
-		return ScanResult{}, fmt.Errorf("library: scan %s: %w", root, err)
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -227,7 +250,10 @@ func (s *Store) Scan(ctx context.Context, moviesDir string) (ScanResult, error) 
 		}
 	}
 
-	prefix := root + string(os.PathSeparator)
+	prefixes := make([]string, 0, len(absRoots))
+	for _, r := range absRoots {
+		prefixes = append(prefixes, r+string(os.PathSeparator))
+	}
 	type stale struct {
 		id   int64
 		path string
@@ -243,9 +269,12 @@ func (s *Store) Scan(ctx context.Context, moviesDir string) (ScanResult, error) 
 			rows.Close()
 			return ScanResult{}, fmt.Errorf("library: scan entries for missing check: %w", err)
 		}
-		if strings.HasPrefix(st.path, prefix) {
-			if _, ok := found[st.path]; !ok {
-				toFlag = append(toFlag, st)
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(st.path, prefix) {
+				if _, ok := found[st.path]; !ok {
+					toFlag = append(toFlag, st)
+				}
+				break
 			}
 		}
 	}
@@ -272,7 +301,7 @@ func (s *Store) Scan(ctx context.Context, moviesDir string) (ScanResult, error) 
 	}
 	commitFailed = false
 
-	logger.Info("Library scanned", "dir", root, "found", len(found),
+	logger.Info("Library scanned", "dirs", absRoots, "found", len(found),
 		"added", res.Added, "updated", res.Updated, "missing", res.Missing)
 	return res, nil
 }

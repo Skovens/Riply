@@ -138,3 +138,64 @@ func TestPutConfigExpandsTildeDirs(t *testing.T) {
 		t.Errorf("expanded directory not created: %v", err)
 	}
 }
+
+// tv_shows_dir (#122): empty value is allowed (falls back to movies_dir),
+// a valid value is assigned as-is, a non-string is rejected, and an
+// unwritable directory is rejected without mutating the live config.
+func TestPutConfigTVShowsDir(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: read-only directories are still writable")
+	}
+	s, _, _, _ := newSeqServer(t)
+	mux := http.NewServeMux()
+	s.RegisterRoutes(mux)
+
+	// Empty clears to the fallback (MoviesDir) — allowed.
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/api/config", strings.NewReader(`{"tv_shows_dir":""}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT empty tv_shows_dir = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if s.cfg.TVShowsDir != "" {
+		t.Errorf("TVShowsDir = %q, want empty", s.cfg.TVShowsDir)
+	}
+
+	// Valid value (lazy-created like movies_dir) is assigned.
+	tvDir := filepath.Join(t.TempDir(), "sub", "tv")
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/api/config", strings.NewReader(`{"tv_shows_dir":"`+tvDir+`"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT valid tv_shows_dir = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if s.cfg.TVShowsDir != tvDir {
+		t.Errorf("TVShowsDir = %q, want %q", s.cfg.TVShowsDir, tvDir)
+	}
+
+	// Non-string is rejected.
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/api/config", strings.NewReader(`{"tv_shows_dir":17}`)))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("PUT numeric tv_shows_dir = %d, want 400", rec.Code)
+	}
+	if s.cfg.TVShowsDir != tvDir {
+		t.Errorf("TVShowsDir mutated to %q on rejected PUT", s.cfg.TVShowsDir)
+	}
+
+	// Unwritable directory is rejected without mutation.
+	ro := filepath.Join(t.TempDir(), "readonly")
+	if err := os.MkdirAll(ro, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(ro, 0o700) })
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/api/config", strings.NewReader(`{"tv_shows_dir":"`+ro+`"}`)))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("PUT unwritable tv_shows_dir = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "tv_shows_dir") {
+		t.Errorf("400 body should name the offending key, got %q", rec.Body.String())
+	}
+	if s.cfg.TVShowsDir != tvDir {
+		t.Errorf("TVShowsDir mutated to %q despite rejection", s.cfg.TVShowsDir)
+	}
+}
