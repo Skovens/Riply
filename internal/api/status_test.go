@@ -38,7 +38,7 @@ func TestStatusMakemkvAvailable(t *testing.T) {
 	if !strings.Contains(body, `"makemkv_version":"test"`) {
 		t.Errorf("body missing makemkv_version — %s", body)
 	}
-	if !strings.Contains(body, `"version":"0.0.1"`) {
+	if !strings.Contains(body, `"version":"0.0.1-dev"`) {
 		t.Errorf("body missing version — %s", body)
 	}
 }
