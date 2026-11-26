@@ -99,6 +99,7 @@ The library database is an index of ripped and scanned media, lives next to the 
 
 ```toml
 movies_dir = "/media/movies"
+tv_shows_dir = ""
 temp_dir = "/tmp/riply"
 tmdb_api_key = ""
 http_host = "127.0.0.1"
@@ -111,6 +112,7 @@ min_title_length = 300
 | Field | Description |
 |-------|-------------|
 | `movies_dir` | Destination directory for ripped movies (Jellyfin-compliant structure) |
+| `tv_shows_dir` | Destination directory for ripped TV shows — `Show (Year)/Season N/…` (empty = under `movies_dir`) |
 | `temp_dir` | Temporary directory for rip operations |
 | `tmdb_api_key` | TMDb API key for auto-naming (optional; naming disabled when empty) |
 | `http_host` | HTTP server bind address (restart required) |

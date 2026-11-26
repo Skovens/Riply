@@ -927,6 +927,7 @@
     try {
       const cfg = await api('/api/config');
       document.getElementById('movies_dir').value = cfg.movies_dir || '';
+      document.getElementById('tv_shows_dir').value = cfg.tv_shows_dir || '';
       document.getElementById('temp_dir').value = cfg.temp_dir || '';
       document.getElementById('http_port').value = cfg.http_port || 3000;
       document.getElementById('auto_sequence').checked = cfg.auto_sequence !== false;
@@ -941,6 +942,7 @@
     e.preventDefault();
     const updates = {
       movies_dir: document.getElementById('movies_dir').value,
+      tv_shows_dir: document.getElementById('tv_shows_dir').value,
       temp_dir: document.getElementById('temp_dir').value,
       http_port: parseInt(document.getElementById('http_port').value) || 3000,
       auto_sequence: document.getElementById('auto_sequence').checked,

@@ -13,7 +13,11 @@ import (
 
 // Config holds the application configuration.
 type Config struct {
-	MoviesDir      string `toml:"movies_dir" json:"movies_dir"`
+	MoviesDir string `toml:"movies_dir" json:"movies_dir"`
+	// TVShowsDir is the destination root for TV shows ("Show (Year)/Season N/…").
+	// Empty means "follow movies_dir" — the pre-tv_shows_dir behavior — so
+	// existing installs keep landing TV next to movies until they opt in.
+	TVShowsDir     string `toml:"tv_shows_dir" json:"tv_shows_dir"`
 	TempDir        string `toml:"temp_dir" json:"temp_dir"`
 	TMDBKey        string `toml:"tmdb_api_key" json:"tmdb_api_key"`
 	HTTPHost       string `toml:"http_host" json:"http_host"`
@@ -46,6 +50,15 @@ func Default() *Config {
 		TempFillLimitPercent: 80,
 		MoveFillLimitPercent: 95,
 	}
+}
+
+// TVDir returns the destination root for TV shows: TVShowsDir when set,
+// otherwise MoviesDir (the pre-tv_shows_dir behavior).
+func (c *Config) TVDir() string {
+	if c.TVShowsDir != "" {
+		return c.TVShowsDir
+	}
+	return c.MoviesDir
 }
 
 // DefaultConfigPath returns the XDG-compliant config path.
@@ -93,6 +106,7 @@ func Load(path string) (*Config, error) {
 	// unexpanded "~/Movies" would otherwise create a literal "~" directory
 	// under the server's working directory.
 	cfg.MoviesDir = ExpandHome(cfg.MoviesDir)
+	cfg.TVShowsDir = ExpandHome(cfg.TVShowsDir)
 	cfg.TempDir = ExpandHome(cfg.TempDir)
 
 	logger.Info("Config loaded", "path", path)
