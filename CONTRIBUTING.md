@@ -61,13 +61,14 @@ Releases are automated via GoReleaser (`.goreleaser.yaml`,
 1. Ensure `main` is green and `CHANGELOG.md` has an entry for the new
    version (format: `## v0.x.y — YYYY-MM-DD` with `### Added` / `### Fixed`
    subsections).
-2. Bump the version in `internal/version/version.go` (currently `0.0.1`).
-3. Tag and push:
+2. Tag and push — the tag **is** the version; GoReleaser injects it into the
+   binary via ldflags (no code change needed). Use SemVer: MAJOR.MINOR.PATCH,
+   `-rc.N` suffix for release candidates.
    ```bash
    git tag v0.0.2
    git push origin v0.0.2
    ```
-4. The release workflow runs tests, builds linux/amd64 + arm64 binaries,
+3. The release workflow runs tests, builds linux/amd64 + arm64 binaries,
    generates `checksums.txt`, and publishes a GitHub Release with the
    changelog (commits prefixed `docs:`, `test:`, `chore:` are excluded from
    the generated notes).

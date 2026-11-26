@@ -152,9 +152,10 @@ logger.Debug("classifyRip", "type", mediaType, "median_mb", medianMB)
 
 ## Versioning
 
-- The project version is hard-coded in `internal/version/version.go` as `0.0.1`.
-- **Do not bump this version number** (or add a `version` subcommand/CI-driven
-  bump) unless explicitly asked to by the user.
+- The version is tag-driven: `internal/version/version.go` declares `var Version = "0.0.1-dev"`, overridden at release build time by GoReleaser ldflags (`-X riply/internal/version.Version={{.Version}}`) with the git tag. A plain `go build` reports the dev default.
+- **Do not change the default in `internal/version/version.go`** (or add a `version` subcommand/CI-driven bump) unless explicitly asked to by the user.
+- Tags follow Semantic Versioning (semver.org): MAJOR.MINOR.PATCH — MINOR for features, PATCH for fixes, MAJOR only for breaking changes; `0.x` makes no stability promise; `-rc.N` for release candidates.
+- Tags are release events: merging PRs to `main` does not bump the version.
 
 ## Cross-References
 
