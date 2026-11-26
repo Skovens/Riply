@@ -17,15 +17,15 @@ type Event struct {
 
 // Progress represents rip progress information.
 type Progress struct {
-	Title      int     `json:"title"`
-	Percent    float64 `json:"percent"`
-	SpeedMBPS  float64 `json:"speed_mbps"`
-	TotalBytes int64   `json:"total_bytes,omitempty"` // bytes written so far; lets the client estimate remaining time
-	EstimatedTotal int64 `json:"estimated_total,omitempty"` // estimated total bytes to write; more accurate than total/pct
-	Phase      string  `json:"phase,omitempty"`
-	TitleIndex int     `json:"title_index,omitempty"` // N3: MSG:5017 index of the last saved title
-	TitleTotal int     `json:"title_total,omitempty"` // N3: total titles in this rip
-	RipPhase   string  `json:"rip_phase,omitempty"`   // "scanning" | "saving" | "complete"
+	Title          int     `json:"title"`
+	Percent        float64 `json:"percent"`
+	SpeedMBPS      float64 `json:"speed_mbps"`
+	TotalBytes     int64   `json:"total_bytes,omitempty"`     // bytes written so far; lets the client estimate remaining time
+	EstimatedTotal int64   `json:"estimated_total,omitempty"` // estimated total bytes to write; more accurate than total/pct
+	Phase          string  `json:"phase,omitempty"`
+	TitleIndex     int     `json:"title_index,omitempty"` // N3: MSG:5017 index of the last saved title
+	TitleTotal     int     `json:"title_total,omitempty"` // N3: total titles in this rip
+	RipPhase       string  `json:"rip_phase,omitempty"`   // "scanning" | "saving" | "complete"
 }
 
 // Subscriber represents an SSE client connection.

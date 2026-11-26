@@ -1,7 +1,6 @@
 package move
 
 import (
-
 	"os"
 	"path/filepath"
 	"sync"
@@ -101,4 +100,3 @@ func TestConcurrentSafeMoveDistinctDests(t *testing.T) {
 		}
 	}
 }
-

@@ -43,8 +43,8 @@ func (r *tvRipper) Rip(ctx context.Context, _ string, outDir string, _ int64) <-
 }
 
 func (r *tvRipper) Eject(_ context.Context, _ string) error { return nil }
-func (r *tvRipper) Version() string                       { return "test" }
-func (r *tvRipper) IsAvailable() bool                     { return true }
+func (r *tvRipper) Version() string                         { return "test" }
+func (r *tvRipper) IsAvailable() bool                       { return true }
 
 func newTVServer(t *testing.T, ripper rip.Ripper, lib *library.Store) (*Server, *drive.Scanner) {
 	t.Helper()

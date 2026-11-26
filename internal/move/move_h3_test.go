@@ -26,11 +26,11 @@ func TestMoveTitleFileCollisionCopySuffix(t *testing.T) {
 	r1 := mkRip("rip1", "first")
 	r2 := mkRip("rip2", "second")
 
-	res1, err := MoveTitleFile(r1, moviesDir, "Inception", 2010, "title.mkv", true, 0, 0)
+	res1, err := MoveTitleFile(r1, moviesDir, moviesDir, "Inception", 2010, "title.mkv", true, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	res2, err := MoveTitleFile(r2, moviesDir, "Inception", 2010, "title.mkv", true, 0, 0)
+	res2, err := MoveTitleFile(r2, moviesDir, moviesDir, "Inception", 2010, "title.mkv", true, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,11 +66,11 @@ func TestMoveTitleFileExtrasCoexist(t *testing.T) {
 	r1 := mkRip("rip1", "disc-a-extra")
 	r2 := mkRip("rip2", "disc-b-extra")
 
-	res1, err := MoveTitleFile(r1, moviesDir, "Inception", 2010, "behindthescenes.mkv", false, 0, 0)
+	res1, err := MoveTitleFile(r1, moviesDir, moviesDir, "Inception", 2010, "behindthescenes.mkv", false, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	res2, err := MoveTitleFile(r2, moviesDir, "Inception", 2010, "behindthescenes.mkv", false, 0, 0)
+	res2, err := MoveTitleFile(r2, moviesDir, moviesDir, "Inception", 2010, "behindthescenes.mkv", false, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,11 +103,11 @@ func TestMoveTitleFileTVReAcceptDistinct(t *testing.T) {
 	r1 := mkRip("rip1", "s1e1")
 	r2 := mkRip("rip2", "s1e1-take2")
 
-	res1, err := MoveTitleFile(r1, moviesDir, "KLOVN", 0, "ep.mkv", false, 1, 1)
+	res1, err := MoveTitleFile(r1, moviesDir, moviesDir, "KLOVN", 0, "ep.mkv", false, 1, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	res2, err := MoveTitleFile(r2, moviesDir, "KLOVN", 0, "ep.mkv", false, 1, 1)
+	res2, err := MoveTitleFile(r2, moviesDir, moviesDir, "KLOVN", 0, "ep.mkv", false, 1, 1)
 	if err != nil {
 		t.Fatal(err)
 	}

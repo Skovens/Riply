@@ -1005,6 +1005,7 @@ func mediaCapacityBytes(devPath string) int64 {
 	}
 	return sectors * 512
 }
+
 // extractVersion parses the MakeMKV version from the MSG:1005 output line.
 // Example: MSG:1005,0,1,"MakeMKV v2.0.0 linux(x64-release) started",...
 func extractVersion(output string) string {

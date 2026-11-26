@@ -16,21 +16,21 @@ type DiscInfo struct {
 
 // RipProgress represents the progress of a rip operation.
 type RipProgress struct {
-	Title      int     // completed .mkv file count at emit time
-	Percent    float64 // byte-driven when total known; PRGV fallback otherwise
-	SpeedMBPS  float64 // MB/s, smoothed over a ~10s window (EMA)
-	TotalBytes int64   // bytes written so far across all .mkv files (0 when unknown)
-	EstimatedTotal int64 // estimated total bytes to write (0 when unknown); drives ETA
-	Phase      string  // human-readable MakeMKV phase
-	Saved      int     // MSG:5004 saved count
-	Failed     int     // MSG:5004 failed count
-	Current    int     // PRGV current value
-	Max        int     // PRGV max value
-	Status     string  // "ripping", "phase", "subphase", "title", "saving", "save_result", "makemkv_complete", "complete", "error", "prgv", "title_saved"
-	RipPhase   string  // "scanning" | "saving" | "complete" — which stage of the rip operation
-	Message    string
-	TitleIndex int // MSG:5017: 1-based index of the just-saved title (0 when unknown)
-	TitleTotal int // MSG:5017: total titles in this rip (0 when unknown)
+	Title          int     // completed .mkv file count at emit time
+	Percent        float64 // byte-driven when total known; PRGV fallback otherwise
+	SpeedMBPS      float64 // MB/s, smoothed over a ~10s window (EMA)
+	TotalBytes     int64   // bytes written so far across all .mkv files (0 when unknown)
+	EstimatedTotal int64   // estimated total bytes to write (0 when unknown); drives ETA
+	Phase          string  // human-readable MakeMKV phase
+	Saved          int     // MSG:5004 saved count
+	Failed         int     // MSG:5004 failed count
+	Current        int     // PRGV current value
+	Max            int     // PRGV max value
+	Status         string  // "ripping", "phase", "subphase", "title", "saving", "save_result", "makemkv_complete", "complete", "error", "prgv", "title_saved"
+	RipPhase       string  // "scanning" | "saving" | "complete" — which stage of the rip operation
+	Message        string
+	TitleIndex     int // MSG:5017: 1-based index of the just-saved title (0 when unknown)
+	TitleTotal     int // MSG:5017: total titles in this rip (0 when unknown)
 }
 
 // Ripper is the interface that MakeMKV implementations must satisfy.
