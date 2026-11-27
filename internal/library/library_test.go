@@ -588,3 +588,6 @@ func TestScanUnreadableRootAndUnreadableSubdir(t *testing.T) {
 	if _, err := raw.Exec(`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := raw.Exec(`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
