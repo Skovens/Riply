@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,24 +29,24 @@ func ripMediaType(season int, mediaType string) string {
 // autofillTV returns the season and starting episode for a TV rip. An explicit
 // episode marker on the disc wins; otherwise the library's highest existing
 // episode in the hinted (or highest) season determines the next one.
-func (s *Server) autofillTV(discName string, tmdb *naming.Result, mediaType string) (season, episode int) {
-	isTV := mediaType == "tv" || (tmdb != nil && tmdb.IsTV)
+func (s *Server) autofillTV(discName string, match *naming.Result, mediaType string) (season, episode int) {
+	isTV := mediaType == "tv" || (match != nil && match.IsTV)
 	if !isTV {
 		return 0, 0
 	}
 
 	seasonHint, episodeHint := naming.ParseSeasonEpisode(discName)
 
-	title, tmdbID := "", 0
-	if tmdb != nil {
-		title, tmdbID = tmdb.Title, tmdb.ID
+	title, matchProvider, matchID := "", "", ""
+	if match != nil {
+		title, matchProvider, matchID = match.Title, match.Provider, match.MatchID()
 	} else {
 		title = naming.ParseSeriesTitle(discName)
 	}
 
 	libSeason, libEpisode := 0, 0
 	if s.lib != nil && searchableName(title) {
-		libSeason, libEpisode, _ = s.lib.NextUp(s.baseCtx, title, tmdbID, seasonHint)
+		libSeason, libEpisode, _ = s.lib.NextUp(s.baseCtx, title, matchProvider, matchID, seasonHint)
 	}
 
 	season = seasonHint
@@ -150,21 +151,21 @@ func (s *Server) duplicateWarning(ctx context.Context, drivePath, discName, disc
 // suggestTV returns a season/episode suggestion for the search modal: an
 // explicit episode marker wins; a season-only marker (or none) continues
 // after the highest stored episode.
-func (s *Server) suggestTV(discName string, tmdb *naming.Result) (season, episode int, ok bool) {
+func (s *Server) suggestTV(discName string, match *naming.Result) (season, episode int, ok bool) {
 	seasonHint, episodeHint := naming.ParseSeasonEpisode(discName)
 	if episodeHint > 0 {
 		return seasonHint, episodeHint, true
 	}
-	title, tmdbID := "", 0
-	if tmdb != nil {
-		title, tmdbID = tmdb.Title, tmdb.ID
+	title, matchProvider, matchID := "", "", ""
+	if match != nil {
+		title, matchProvider, matchID = match.Title, match.Provider, match.MatchID()
 	} else {
 		title = naming.ParseSeriesTitle(discName)
 	}
 	if s.lib == nil || !searchableName(title) {
 		return 0, 0, false
 	}
-	season, episode, ok = s.lib.NextUp(s.baseCtx, title, tmdbID, seasonHint)
+	season, episode, ok = s.lib.NextUp(s.baseCtx, title, matchProvider, matchID, seasonHint)
 	return season, episode, ok
 }
 
@@ -182,7 +183,20 @@ type lastRipInfo struct {
 	MediaType string `json:"media_type"`
 	Season    int    `json:"season"`
 	Episode   int    `json:"episode"`
-	TMDBID    int    `json:"tmdb_id"`
+	Provider  string `json:"provider,omitempty"`
+	MatchID   string `json:"match_id,omitempty"`
+}
+
+// matchIDOrLegacy returns lr.ProviderID, falling back to the legacy numeric
+// tmdb_id for entries stored before the provider columns existed.
+func matchIDOrLegacy(lr library.LastRip) string {
+	if lr.ProviderID != "" {
+		return lr.ProviderID
+	}
+	if lr.TMDBID > 0 {
+		return strconv.Itoa(lr.TMDBID)
+	}
+	return ""
 }
 
 type suggestInfo struct {

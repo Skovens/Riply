@@ -76,7 +76,7 @@ func TestBodyLimitsAndDecodeErrors(t *testing.T) {
 	// without a body); required endpoints reject with 400.
 	t.Run("empty optional accept works", func(t *testing.T) {
 		s.mu.Lock()
-		sess.TMDB = &naming.Result{ID: 1, Title: "Inception", Year: 2010}
+		sess.Match = &naming.Result{ID: 1, Title: "Inception", Year: 2010}
 		s.mu.Unlock()
 		rec := doRaw(t, s, http.MethodPost, "/api/rips/"+itoa(id)+"/accept", nil)
 		// Not 400: empty body is legal here. The move may fail deeper for

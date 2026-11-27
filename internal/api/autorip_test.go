@@ -40,7 +40,7 @@ func TestAutoEjectAfterQueuedAccept(t *testing.T) {
 	scanner.UpdateState("/dev/sr0", drive.StateReady, "Inception")
 
 	s.mu.Lock()
-	s.namingMatches["/dev/sr0"] = naming.Result{Title: "Inception", Year: 2010, IsTV: false}
+	s.providerMatches["/dev/sr0"] = naming.Result{Title: "Inception", Year: 2010, IsTV: false}
 	s.mu.Unlock()
 
 	rec := doJSON(t, s, http.MethodPost, "/api/drives/0/accept", map[string]any{})
@@ -73,7 +73,7 @@ func TestAutoRipDisabledSkipsEject(t *testing.T) {
 	scanner.SetAutoRip("/dev/sr0", false)
 
 	s.mu.Lock()
-	s.namingMatches["/dev/sr0"] = naming.Result{Title: "Inception", Year: 2010, IsTV: false}
+	s.providerMatches["/dev/sr0"] = naming.Result{Title: "Inception", Year: 2010, IsTV: false}
 	s.mu.Unlock()
 
 	rec := doJSON(t, s, http.MethodPost, "/api/drives/0/accept", map[string]any{})

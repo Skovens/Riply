@@ -20,16 +20,16 @@ func TestSearchRetriesOnceOn429(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"results":[{"id":1,"title":"Inception","media_type":"movie","release_date":"2010-07-16"}]}`))
+		w.Write([]byte(`{"results":[{"id":1,"title":"Inception","release_date":"2010-07-16"}]}`))
 	}))
 	defer srv.Close()
 
-	c := NewClient("k")
-	c.cooldown = 0
-	c.baseURL = srv.URL
+	p := newTMDBProvider("k")
+	p.rl.cooldown = 0
+	p.baseURL = srv.URL
 
 	start := time.Now()
-	results, err := c.Search(context.Background(), "Inception")
+	results, err := p.Search(context.Background(), "Inception", Movie)
 	if err != nil {
 		t.Fatalf("Search after 429 retry = %v", err)
 	}
@@ -55,11 +55,11 @@ func TestSearch429TwiceGivesUp(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient("k")
-	c.cooldown = 0
-	c.baseURL = srv.URL
+	p := newTMDBProvider("k")
+	p.rl.cooldown = 0
+	p.baseURL = srv.URL
 
-	_, err := c.Search(context.Background(), "Inception")
+	_, err := p.Search(context.Background(), "Inception", Movie)
 	if err == nil {
 		t.Fatal("expected error on persistent 429")
 	}
@@ -80,11 +80,11 @@ func TestSearchNoRetryOn500(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient("k")
-	c.cooldown = 0
-	c.baseURL = srv.URL
+	p := newTMDBProvider("k")
+	p.rl.cooldown = 0
+	p.baseURL = srv.URL
 
-	_, err := c.Search(context.Background(), "Inception")
+	_, err := p.Search(context.Background(), "Inception", Movie)
 	if err == nil {
 		t.Fatal("expected error on 500")
 	}
@@ -95,23 +95,22 @@ func TestSearchNoRetryOn500(t *testing.T) {
 
 // retryAfter parsing: delta-seconds, HTTP-date, missing/garbage → fallback.
 func TestRetryAfterParsing(t *testing.T) {
-	c := NewClient("k")
-	c.cooldown = 1 * time.Second
+	rl := &rateLimiter{cooldown: 1 * time.Second}
 
-	if got := c.retryAfter("2"); got != 2*time.Second {
+	if got := rl.retryAfter("2"); got != 2*time.Second {
 		t.Errorf("retryAfter(\"2\") = %v", got)
 	}
-	if got := c.retryAfter("3600"); got != 30*time.Second {
+	if got := rl.retryAfter("3600"); got != 30*time.Second {
 		t.Errorf("retryAfter(\"3600\") = %v, want clamp to 30s", got)
 	}
-	if got := c.retryAfter(""); got != time.Second {
+	if got := rl.retryAfter(""); got != time.Second {
 		t.Errorf("retryAfter(\"\") = %v, want cooldown", got)
 	}
-	if got := c.retryAfter("garbage"); got != time.Second {
+	if got := rl.retryAfter("garbage"); got != time.Second {
 		t.Errorf("retryAfter(garbage) = %v, want cooldown", got)
 	}
 	future := time.Now().Add(5 * time.Second).UTC().Format(http.TimeFormat)
-	if got := c.retryAfter(future); got < 2*time.Second || got > 5*time.Second {
+	if got := rl.retryAfter(future); got < 2*time.Second || got > 5*time.Second {
 		t.Errorf("retryAfter(HTTP-date) = %v, want ~4-5s", got)
 	}
 }
@@ -127,9 +126,10 @@ func TestSearchSetsRiplyUserAgent(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient("key")
-	c.baseURL = srv.URL
-	if _, err := c.Search(context.Background(), "x"); err != nil {
+	p := newTMDBProvider("key")
+	p.rl.cooldown = 0
+	p.baseURL = srv.URL
+	if _, err := p.Search(context.Background(), "x", Movie); err != nil {
 		t.Fatalf("Search = %v", err)
 	}
 	if !strings.HasPrefix(gotUA, "riply/") || !strings.Contains(gotUA, "+https://github.com/Skovens/Riply") {

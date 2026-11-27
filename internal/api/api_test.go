@@ -73,32 +73,32 @@ func TestPopulateTitles(t *testing.T) {
 	os.WriteFile(filepath.Join(ripDir, "A1_t00.mkv"), make([]byte, 10*1024*1024), 0644)
 	os.WriteFile(filepath.Join(ripDir, "A1_t01.mkv"), make([]byte, 2*1024*1024), 0644)
 
-	// Test 1: No TMDB match, movie type
+	// Test 1: No match, movie type
 	titles := populateTitles(ripDir, moviesDir, nil, "movie", 0, 0)
 	if len(titles) != 2 {
-		t.Errorf("populateTitles(no tmdb) count = %d, want 2", len(titles))
+		t.Errorf("populateTitles(no match) count = %d, want 2", len(titles))
 	}
 	if !titles[0].IsMainFile {
 		t.Error("populateTitles(no tmdb) first title should be main")
 	}
 
-	// Test 2: With TMDB match, movie type
-	tmdb := &naming.Result{Title: "A", Year: 2020}
-	titles2 := populateTitles(ripDir, moviesDir, tmdb, "movie", 0, 0)
+	// Test 2: With match, movie type
+	match := &naming.Result{Title: "A", Year: 2020}
+	titles2 := populateTitles(ripDir, moviesDir, match, "movie", 0, 0)
 	if len(titles2) != 2 {
-		t.Errorf("populateTitles(tmdb) count = %d, want 2", len(titles2))
+		t.Errorf("populateTitles(match) count = %d, want 2", len(titles2))
 	}
 
 	// Main file should have destination like /moviesDir/A (2020)/A (2020).mkv
 	expectedMain := filepath.Join(moviesDir, "A (2020)", "A (2020).mkv")
 	if titles2[0].ProposedDestination != expectedMain {
-		t.Errorf("populateTitles(tmdb) main destination = %q, want %q", titles2[0].ProposedDestination, expectedMain)
+		t.Errorf("populateTitles(match) main destination = %q, want %q", titles2[0].ProposedDestination, expectedMain)
 	}
 
 	// Extra file should go to Extras/
 	expectedExtra := filepath.Join(moviesDir, "A (2020)", "Extras", "A1_t01.mkv")
 	if titles2[1].ProposedDestination != expectedExtra {
-		t.Errorf("populateTitles(tmdb) extra destination = %q, want %q", titles2[1].ProposedDestination, expectedExtra)
+		t.Errorf("populateTitles(match) extra destination = %q, want %q", titles2[1].ProposedDestination, expectedExtra)
 	}
 }
 
@@ -106,7 +106,7 @@ func TestResolveMediaType(t *testing.T) {
 	tests := []struct {
 		name       string
 		classified string
-		tmdb       *naming.Result
+		match      *naming.Result
 		want       string
 	}{
 		{"tv classification, movie match", "tv", &naming.Result{IsTV: false}, "movie"},
@@ -117,8 +117,8 @@ func TestResolveMediaType(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := resolveMediaType(tt.classified, tt.tmdb); got != tt.want {
-				t.Errorf("resolveMediaType(%q, %+v) = %q, want %q", tt.classified, tt.tmdb, got, tt.want)
+			if got := resolveMediaType(tt.classified, tt.match); got != tt.want {
+				t.Errorf("resolveMediaType(%q, %+v) = %q, want %q", tt.classified, tt.match, got, tt.want)
 			}
 		})
 	}

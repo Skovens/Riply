@@ -66,7 +66,7 @@ type RipTitle struct {
 	IsMainFile          bool           `json:"is_main_file"`
 	AcceptedName        string         `json:"accepted_name"`
 	Year                int            `json:"year"`
-	TMDB                *naming.Result `json:"tmdb,omitempty"`
+	Match               *naming.Result `json:"match,omitempty"`
 	ProposedDestination string         `json:"proposed_destination"` // target path when accepted
 	Destination         string         `json:"destination,omitempty"`
 	TvSeason            int            `json:"tv_season,omitempty"`
@@ -77,7 +77,7 @@ type RipTitle struct {
 
 // PendingAccept stores a queued accept request to execute when rip completes.
 type PendingAccept struct {
-	TMDB   *naming.Result `json:"tmdb"`
+	Match  *naming.Result `json:"match"`
 	Source string         `json:"source"` // "auto" or "manual"
 	// Season/Episode are explicit overrides from the accept request (N1).
 	// 0 means "not specified" — the value from autofillTV is used.
@@ -113,7 +113,7 @@ type RipSession struct {
 	State         string             `json:"state"` // "ripping", "queued", "complete", "accepted", "error"
 	OutputDir     string             `json:"-"`     // internal: path to rip output directory
 	OutputPath    string             `json:"output_path,omitempty"`
-	TMDB          *naming.Result     `json:"tmdb,omitempty"`
+	Match         *naming.Result     `json:"match,omitempty"`
 	Progress      *sse.Progress      `json:"progress,omitempty"`
 	DiscSizeBytes int64              `json:"-"` // media capacity in bytes; drives progress total estimate
 	Error         string             `json:"error,omitempty"`
@@ -139,7 +139,7 @@ type Server struct {
 	cfgPath string // path to config file for persistence
 	scanner *drive.Scanner
 	ripper  rip.Ripper
-	namer   *naming.Client
+	namer   *naming.Chain
 	sseMgr  *sse.Manager
 	metrics *metrics.Metrics
 	lib     *library.Store
@@ -147,9 +147,9 @@ type Server struct {
 	// scanMu serialises library scans; reset refuses to overlap a running scan.
 	scanMu sync.Mutex
 
-	// namingMatches maps drivePath → best TMDb match found by auto-naming.
+	// providerMatches maps drivePath → best TMDb match found by auto-naming.
 	// Populated when a disc is inserted and TMDb search completes.
-	namingMatches map[string]naming.Result
+	providerMatches map[string]naming.Result
 	// driveAccepts maps drivePath → name the user accepted before/without a rip.
 	// Cleared on disc insert/eject and on manual rename; consumed when a rip starts.
 	driveAccepts map[string]driveAccept
@@ -182,7 +182,7 @@ type driveAccept struct {
 }
 
 // New creates a new Server.
-func New(cfg *config.Config, cfgPath string, scanner *drive.Scanner, ripper rip.Ripper, namer *naming.Client, sseMgr *sse.Manager, m *metrics.Metrics, lib *library.Store) *Server {
+func New(cfg *config.Config, cfgPath string, scanner *drive.Scanner, ripper rip.Ripper, namer *naming.Chain, sseMgr *sse.Manager, m *metrics.Metrics, lib *library.Store) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
 		cfg:                 cfg,
@@ -196,7 +196,7 @@ func New(cfg *config.Config, cfgPath string, scanner *drive.Scanner, ripper rip.
 		rips:                make(map[int]*RipSession),
 		driveAccepts:        make(map[string]driveAccept),
 		lastAutoEjectedDisc: make(map[string]string),
-		namingMatches:       make(map[string]naming.Result),
+		providerMatches:       make(map[string]naming.Result),
 		baseCtx:             ctx,
 		cancelBase:          cancel,
 	}
@@ -322,7 +322,7 @@ func (s *Server) MaybeStartAutoRip(drivePath, discName string) {
 // ClearNamingMatch removes any stored TMDb match for the drive.
 func (s *Server) ClearNamingMatch(drivePath string) {
 	s.mu.Lock()
-	delete(s.namingMatches, drivePath)
+	delete(s.providerMatches, drivePath)
 	delete(s.driveAccepts, drivePath)
 	s.mu.Unlock()
 }
@@ -379,13 +379,14 @@ func (s *Server) handleDrives(w http.ResponseWriter, r *http.Request) {
 	outMediaTypes := make([]string, len(drives))
 	s.mu.Lock()
 	for i := range drives {
-		if match, ok := s.namingMatches[drives[i].Path]; ok {
+		if match, ok := s.providerMatches[drives[i].Path]; ok {
 			drives[i].CanonicalName = match.Title
 			drives[i].CanonicalYear = match.Year
-			drives[i].CanonicalID = match.ID
+			drives[i].CanonicalProvider = match.Provider
+			drives[i].CanonicalExtID = match.MatchID()
 			drives[i].Poster = match.Poster
 			// Snapshot the resolved type under lock; the out loop below runs
-			// without s.mu and must not touch namingMatches again.
+			// without s.mu and must not touch providerMatches again.
 			outMediaTypes[i] = resolveMediaType("movie", &match)
 		}
 	}
@@ -405,7 +406,7 @@ func (s *Server) handleDrives(w http.ResponseWriter, r *http.Request) {
 	var lastRip *lastRipInfo
 	if autoSeq && s.lib != nil {
 		if lr, ok := s.lib.LastRip(r.Context()); ok {
-			lastRip = &lastRipInfo{Title: lr.Title, Year: lr.Year, MediaType: lr.MediaType, Season: lr.Season, Episode: lr.Episode, TMDBID: lr.TMDBID}
+			lastRip = &lastRipInfo{Title: lr.Title, Year: lr.Year, MediaType: lr.MediaType, Season: lr.Season, Episode: lr.Episode, Provider: lr.Provider, MatchID: matchIDOrLegacy(lr)}
 		}
 	}
 
@@ -422,7 +423,7 @@ func (s *Server) handleDrives(w http.ResponseWriter, r *http.Request) {
 			}
 			if searchableName(series) {
 				hint, _ := naming.ParseSeasonEpisode(d.DiscName)
-				if season, episode, ok := s.lib.NextUp(r.Context(), series, d.CanonicalID, hint); ok {
+				if season, episode, ok := s.lib.NextUp(r.Context(), series, d.CanonicalProvider, d.CanonicalExtID, hint); ok {
 					resp.NextUp = &nextUpInfo{Series: series, Season: season, Episode: episode}
 				}
 			}
@@ -431,7 +432,7 @@ func (s *Server) handleDrives(w http.ResponseWriter, r *http.Request) {
 			resp.LastRip = lastRip
 			if d.HasDisc {
 				s.mu.Lock()
-				match, haveMatch := s.namingMatches[d.Path]
+				match, haveMatch := s.providerMatches[d.Path]
 				s.mu.Unlock()
 				var matchPtr *naming.Result
 				if haveMatch {
@@ -447,6 +448,16 @@ func (s *Server) handleDrives(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, out)
+}
+
+// matchProvider returns the provider name and provider-neutral match id of
+// a naming result ("" when it carries none). MatchID falls back to the TMDb
+// numeric id for results that predate the adapter fields.
+func matchProvider(r *naming.Result) (string, string) {
+	if r == nil {
+		return "", ""
+	}
+	return r.Provider, r.MatchID()
 }
 
 // startRipForPath starts a rip on a drive that is already verified Ready.
@@ -492,7 +503,7 @@ func (s *Server) startRipForPath(drivePath string) (*RipSession, error) {
 	timestamp := time.Now().Unix()
 	dirName := discName
 	s.mu.Lock()
-	if match, ok := s.namingMatches[drivePath]; ok && match.Title != "" {
+	if match, ok := s.providerMatches[drivePath]; ok && match.Title != "" {
 		dirName = match.Title
 	}
 	// Snapshot TempDir under lock to avoid race with concurrent PUT
@@ -534,15 +545,15 @@ func (s *Server) startRipForPath(drivePath string) (*RipSession, error) {
 		DiscSizeBytes: discSize,
 		acceptMu:      &sync.Mutex{},
 	}
-	if match, ok := s.namingMatches[drivePath]; ok {
-		session.TMDB = &match
+	if match, ok := s.providerMatches[drivePath]; ok {
+		session.Match = &match
 	}
 	// Consume pre-accept if present (wins over auto-match). N1: carry the
 	// explicit TV position through PendingAccept so the move lands Season N/.
 	if acc, ok := s.driveAccepts[drivePath]; ok {
 		a := acc.result
-		session.TMDB = &a
-		session.PendingAccept = &PendingAccept{TMDB: &a, Source: a.Title, Season: acc.season, Episode: acc.episode}
+		session.Match = &a
+		session.PendingAccept = &PendingAccept{Match: &a, Source: a.Title, Season: acc.season, Episode: acc.episode}
 		session.State = string(StateQueued)
 		delete(s.driveAccepts, drivePath)
 	}
@@ -635,31 +646,41 @@ func (s *Server) startRipForPath(drivePath string) (*RipSession, error) {
 		s.mu.Lock()
 		session.MediaType = mediaType
 		session.ParsedTitle = parsedTitle
-		if match, ok := s.namingMatches[drivePath]; ok {
-			session.TMDB = &match
+		if match, ok := s.providerMatches[drivePath]; ok {
+			session.Match = &match
 			logger.Info("Auto-naming match available", "title", match.Title, "year", match.Year)
-		} else if s.namer != nil && s.namer.APIKey() != "" {
+		} else if s.namer != nil && s.namer.Enabled() {
 			// Fallback: search after rip if no auto-match was found
 			cleanName := parsedTitle
 			if cleanName == "" {
 				cleanName = discName
 			}
 			if !searchableName(cleanName) {
-				logger.Info("Skipping post-rip TMDb search", "drive", drivePath, "parsed", parsedTitle, "disc", discName)
-			} else {
-				results, err := s.namer.Search(s.baseCtx, cleanName)
+				logger.Info("Skipping post-rip metadata search", "drive", drivePath, "parsed", parsedTitle, "disc", discName)
+			} else if mt, ok := naming.MediaTypeOf(session.MediaType); ok {
+				// Classification exists post-rip; run exactly that type's order.
+				results, err := s.namer.Search(s.baseCtx, cleanName, mt)
 				if err == nil && len(results) > 0 {
-					session.TMDB = &results[0]
+					session.Match = &results[0]
 					logger.Info("Naming suggestion", "title", results[0].Title, "year", results[0].Year, "disc", discName)
 				} else if err != nil {
-					logger.Error("TMDb search after rip failed", "error", err)
+					logger.Error("Metadata search after rip failed", "error", err)
+				}
+			} else {
+				// Unclassified: movie pass, then immediate TV pass.
+				results, err := s.namer.SearchAuto(s.baseCtx, cleanName)
+				if err == nil && len(results) > 0 {
+					session.Match = &results[0]
+					logger.Info("Naming suggestion", "title", results[0].Title, "year", results[0].Year, "disc", discName)
+				} else if err != nil {
+					logger.Error("Metadata search after rip failed", "error", err)
 				}
 			}
 		}
 		// Snapshot MoviesDir and session fields under lock to avoid races with concurrent PUT/accept
 		moviesDir := s.cfg.MoviesDir
 		tvDir := s.cfg.TVDir()
-		sessionTMDB := session.TMDB
+		sessionMatch := session.Match
 		sessionMediaType := session.MediaType
 		sessionDiscName := session.DiscName
 		s.mu.Unlock()
@@ -667,19 +688,19 @@ func (s *Server) startRipForPath(drivePath string) (*RipSession, error) {
 		// The TMDb match is authoritative over the file-size heuristic: a movie
 		// match forces the movie layout (extras to Extras/), a TV match forces
 		// the TV layout, so a misclassified disc still lands correctly.
-		effectiveType := resolveMediaType(sessionMediaType, sessionTMDB)
-		logger.Info("Resolved media type", "classified", sessionMediaType, "tmdb_is_tv", sessionTMDB != nil && sessionTMDB.IsTV, "effective", effectiveType)
+		effectiveType := resolveMediaType(sessionMediaType, sessionMatch)
+		logger.Info("Resolved media type", "classified", sessionMediaType, "tmdb_is_tv", sessionMatch != nil && sessionMatch.IsTV, "effective", effectiveType)
 
 		// Autofill the TV position from library history: an explicit marker on
 		// the disc wins, otherwise continue after the highest stored episode.
-		season, episode := s.autofillTV(sessionDiscName, sessionTMDB, effectiveType)
+		season, episode := s.autofillTV(sessionDiscName, sessionMatch, effectiveType)
 
 		// Populate per-title list
 		destRoot := moviesDir
 		if effectiveType == "tv" {
 			destRoot = tvDir
 		}
-		titles := populateTitles(outDir, destRoot, sessionTMDB, effectiveType, season, episode)
+		titles := populateTitles(outDir, destRoot, sessionMatch, effectiveType, season, episode)
 		s.mu.Lock()
 		session.Titles = titles
 		session.SeasonNumber = season
@@ -690,12 +711,12 @@ func (s *Server) startRipForPath(drivePath string) (*RipSession, error) {
 		// Auto-execute queued accept if one was pending
 		s.mu.Lock()
 		var records []library.Entry
-		if queuedAccept && session.PendingAccept != nil && session.TMDB != nil {
+		if queuedAccept && session.PendingAccept != nil && session.Match != nil {
 			pa := session.PendingAccept
 			session.PendingAccept = nil
-			session.TMDB = pa.TMDB
-			title := pa.TMDB.Title
-			year := pa.TMDB.Year
+			session.Match = pa.Match
+			title := pa.Match.Title
+			year := pa.Match.Year
 			ripDir := session.OutputDir
 			// Snapshot MoviesDir under lock to avoid race with concurrent PUT
 			moviesDir := s.cfg.MoviesDir
@@ -706,7 +727,7 @@ func (s *Server) startRipForPath(drivePath string) (*RipSession, error) {
 			// autofilled value. Without one, a TV naming match still forces
 			// the TV layout — a single-episode disc fools classifyRip's
 			// size heuristic into "movie".
-			if pa.TMDB.IsTV || pa.Season > 0 {
+			if pa.Match.IsTV || pa.Season > 0 {
 				if tvSeason <= 0 {
 					tvSeason = 1
 				}
@@ -769,7 +790,9 @@ func (s *Server) startRipForPath(drivePath string) (*RipSession, error) {
 							MediaType:  "tv",
 							Season:     tvSeason,
 							Episode:    me.Episode,
-							TMDBID:     pa.TMDB.ID,
+							Provider:   pa.Match.Provider,
+							ProviderID: pa.Match.MatchID(),
+							TMDBID:     pa.Match.ID,
 							MovedAt:    movedAt,
 						})
 					}
@@ -780,10 +803,12 @@ func (s *Server) startRipForPath(drivePath string) (*RipSession, error) {
 						DiscHash:   sessHash,
 						Title:      title,
 						Year:       year,
-						MediaType:  ripMediaType(tvSeason, resolveMediaType(mt, pa.TMDB)),
+						MediaType:  ripMediaType(tvSeason, resolveMediaType(mt, pa.Match)),
 						Season:     tvSeason,
 						Episode:    tvEpisode,
-						TMDBID:     pa.TMDB.ID,
+						Provider:   pa.Match.Provider,
+						ProviderID: pa.Match.MatchID(),
+						TMDBID:     pa.Match.ID,
 						MovedAt:    movedAt,
 					})
 				}
@@ -848,10 +873,10 @@ func (s *Server) handleStartRip(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]int{"rip_id": session.ID})
 }
 
-// startAutoNaming kicks off a TMDb search when a disc is inserted.
-// It checks the auto-naming toggle for the drive before proceeding.
+// startAutoNaming kicks off a metadata-provider search when a disc is
+// inserted. It checks the auto-naming toggle for the drive before proceeding.
 func (s *Server) startAutoNaming(drivePath, discName string) {
-	if s.namer == nil || s.namer.APIKey() == "" {
+	if s.namer == nil || !s.namer.Enabled() {
 		return
 	}
 
@@ -873,11 +898,13 @@ func (s *Server) startAutoNaming(drivePath, discName string) {
 	s.sseMgr.Publish(sse.Event{
 		Type:    "naming_started",
 		Drive:   drivePath,
-		Message: fmt.Sprintf("Searching TMDb for %q...", cleanName),
+		Message: fmt.Sprintf("Searching metadata providers for %q...", cleanName),
 	})
 
 	go func() {
-		results, err := s.namer.Search(s.baseCtx, cleanName)
+		// Movie pass first; when it comes up short, the TV pass runs
+		// immediately — naming never waits for the rip.
+		results, err := s.namer.SearchAuto(s.baseCtx, cleanName)
 		if err != nil {
 			s.sseMgr.Publish(sse.Event{
 				Type:    "naming_failed",
@@ -890,19 +917,19 @@ func (s *Server) startAutoNaming(drivePath, discName string) {
 			s.sseMgr.Publish(sse.Event{
 				Type:    "naming_failed",
 				Drive:   drivePath,
-				Message: "Auto-naming: no TMDb match found",
+				Message: "Auto-naming: no metadata match found",
 			})
 			return
 		}
 
 		// Store the top match on the drive for later use
 		s.mu.Lock()
-		s.namingMatches[drivePath] = results[0]
+		s.providerMatches[drivePath] = results[0]
 		for _, sess := range s.rips {
-			if sess.DrivePath == drivePath && sess.TMDB == nil &&
+			if sess.DrivePath == drivePath && sess.Match == nil &&
 				(sess.State == string(StateRipping) || sess.State == string(StateQueued)) {
 				m := results[0]
-				sess.TMDB = &m
+				sess.Match = &m
 			}
 		}
 		s.mu.Unlock()
@@ -912,7 +939,7 @@ func (s *Server) startAutoNaming(drivePath, discName string) {
 		s.sseMgr.Publish(sse.Event{
 			Type:    "naming_match",
 			Drive:   drivePath,
-			Message: fmt.Sprintf("Found TMDb match: %s (%d)", results[0].Title, results[0].Year),
+			Message: fmt.Sprintf("Found match: %s (%d)", results[0].Title, results[0].Year),
 		})
 	}()
 }
@@ -965,11 +992,11 @@ func classifyRip(outDir string) (string, float64) {
 // match is authoritative when present: a TV match forces the "tv" layout, a
 // movie match forces the "movie" layout (extras go to Extras/). Without a
 // match, the file-size heuristic from classifyRip is used as-is.
-func resolveMediaType(classified string, tmdb *naming.Result) string {
-	if tmdb == nil {
+func resolveMediaType(classified string, match *naming.Result) string {
+	if match == nil {
 		return classified
 	}
-	if tmdb.IsTV {
+	if match.IsTV {
 		return "tv"
 	}
 	return "movie"
@@ -1044,7 +1071,8 @@ func (s *Server) handleSetName(w http.ResponseWriter, r *http.Request) {
 
 	var body struct {
 		CanonicalName string `json:"canonical_name"`
-		TMDBID        int    `json:"tmdb_id"`
+		Provider      string `json:"provider"`
+		ExtID         string `json:"ext_id"`
 		Title         string `json:"title"`
 		Year          int    `json:"year"`
 		Poster        string `json:"poster"`
@@ -1064,12 +1092,13 @@ func (s *Server) handleSetName(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
-	s.namingMatches[drivePath] = naming.Result{
-		ID:     body.TMDBID,
-		Title:  name,
-		Year:   body.Year,
-		Poster: body.Poster,
-		IsTV:   body.IsTV,
+	s.providerMatches[drivePath] = naming.Result{
+		Provider: body.Provider,
+		ExtID:    body.ExtID,
+		Title:    name,
+		Year:     body.Year,
+		Poster:   body.Poster,
+		IsTV:     body.IsTV,
 	}
 	delete(s.driveAccepts, drivePath)
 	s.mu.Unlock()
@@ -1093,7 +1122,8 @@ func (s *Server) handleDriveAccept(w http.ResponseWriter, r *http.Request) {
 
 	// Parse optional request body
 	var body struct {
-		TMDBID    int    `json:"tmdb_id"`
+		Provider  string `json:"provider"`
+		ExtID     string `json:"ext_id"`
 		Title     string `json:"title"`
 		Year      int    `json:"year"`
 		Poster    string `json:"poster"`
@@ -1126,7 +1156,7 @@ func (s *Server) handleDriveAccept(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Resolve name: body.Title > namingMatches. N1: on fallback inherit the
+	// Resolve name: body.Title > providerMatches. N1: on fallback inherit the
 	// stored match's TV flag so a bodyless Accept of a TMDb-matched TV disc
 	// still lands the Season N/ layout even if classifyRip guesses "movie"
 	// (single-episode discs fool the size heuristic). Adopt the whole stored
@@ -1135,8 +1165,9 @@ func (s *Server) handleDriveAccept(w http.ResponseWriter, r *http.Request) {
 	// of "The Mask (1994)/" (issue #98).
 	name := body.Title
 	if name == "" {
-		if match, ok := s.namingMatches[drivePath]; ok && match.Title != "" {
-			body.TMDBID = match.ID
+		if match, ok := s.providerMatches[drivePath]; ok && match.Title != "" {
+			body.Provider = match.Provider
+			body.ExtID = match.MatchID()
 			body.Title = match.Title
 			body.Year = match.Year
 			body.Poster = match.Poster
@@ -1152,11 +1183,12 @@ func (s *Server) handleDriveAccept(w http.ResponseWriter, r *http.Request) {
 
 	s.driveAccepts[drivePath] = driveAccept{
 		result: naming.Result{
-			ID:     body.TMDBID,
-			Title:  name,
-			Year:   body.Year,
-			Poster: body.Poster,
-			IsTV:   body.IsTV,
+			Provider: body.Provider,
+			ExtID:    body.ExtID,
+			Title:    name,
+			Year:     body.Year,
+			Poster:   body.Poster,
+			IsTV:     body.IsTV,
 		},
 		season:  body.TvSeason,
 		episode: body.TvEpisode,
@@ -1419,7 +1451,8 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 
 	// Parse optional search body (from manual TMDb search via selectSearchResult)
 	var body struct {
-		TMDBID    int    `json:"tmdb_id"`
+		Provider  string `json:"provider"`
+		ExtID     string `json:"ext_id"`
 		Title     string `json:"title"`
 		Year      int    `json:"year"`
 		Poster    string `json:"poster"`
@@ -1449,16 +1482,17 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 
 	// If body contains a title, use it as the naming match
 	if body.Title != "" {
-		session.TMDB = &naming.Result{
-			ID:     body.TMDBID,
-			Title:  body.Title,
-			Year:   body.Year,
-			Poster: body.Poster,
-			IsTV:   body.IsTV,
+		session.Match = &naming.Result{
+			Provider: body.Provider,
+			ExtID:    body.ExtID,
+			Title:    body.Title,
+			Year:     body.Year,
+			Poster:   body.Poster,
+			IsTV:     body.IsTV,
 		}
 	}
 
-	if session.TMDB == nil {
+	if session.Match == nil {
 		s.mu.Unlock()
 		http.Error(w, "no naming suggestion available", http.StatusBadRequest)
 		return
@@ -1479,7 +1513,7 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 		// queued request, not move files out from under the ripper.
 		if body.Title != "" {
 			session.PendingAccept = &PendingAccept{
-				TMDB:    session.TMDB,
+				Match:    session.Match,
 				Source:  body.Title,
 				Season:  body.TvSeason,
 				Episode: body.TvEpisode,
@@ -1495,7 +1529,7 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 	case string(StateRipping):
 		// Queue the accept for deferred execution
 		session.PendingAccept = &PendingAccept{
-			TMDB:    session.TMDB,
+			Match:    session.Match,
 			Source:  body.Title,
 			Season:  body.TvSeason,
 			Episode: body.TvEpisode,
@@ -1511,10 +1545,10 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// session.State == "complete" — execute immediately
-	tmdbResult := session.TMDB
-	title := tmdbResult.Title
-	year := tmdbResult.Year
-	tmdbID := tmdbResult.ID
+	matchResult := session.Match
+	title := matchResult.Title
+	year := matchResult.Year
+	entryProvider, entryMatchID := matchProvider(matchResult)
 	ripDir := session.OutputDir
 	drivePath := session.DrivePath
 	session.PendingAccept = nil // clear any pending accept
@@ -1529,7 +1563,7 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 	// classified/filled during the rip. Without one, a TV match (TMDb or
 	// request) still forces the TV layout — a single-episode disc fools
 	// classifyRip's size heuristic into "movie".
-	effectiveTV := body.IsTV || body.TvSeason > 0 || (tmdbResult != nil && tmdbResult.IsTV)
+	effectiveTV := body.IsTV || body.TvSeason > 0 || (matchResult != nil && matchResult.IsTV)
 	if effectiveTV {
 		if tvSeason <= 0 {
 			tvSeason = 1
@@ -1600,7 +1634,9 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 				MediaType:  "tv",
 				Season:     tvSeason,
 				Episode:    me.Episode,
-				TMDBID:     tmdbID,
+				Provider:   entryProvider,
+				ProviderID: entryMatchID,
+				TMDBID:     matchResult.ID,
 				MovedAt:    movedAt,
 			})
 		}
@@ -1611,10 +1647,12 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 			DiscHash:   sessHash,
 			Title:      title,
 			Year:       year,
-			MediaType:  ripMediaType(tvSeason, resolveMediaType(mt, tmdbResult)),
+			MediaType:  ripMediaType(tvSeason, resolveMediaType(mt, matchResult)),
 			Season:     tvSeason,
 			Episode:    tvEpisode,
-			TMDBID:     tmdbID,
+			Provider:   entryProvider,
+			ProviderID: entryMatchID,
+			TMDBID:     matchResult.ID,
 			MovedAt:    movedAt,
 		})
 	}
@@ -1646,7 +1684,7 @@ func (s *Server) handleAcceptTitle(w http.ResponseWriter, r *http.Request) {
 		IsMain    bool           `json:"is_main"`
 		TvSeason  int            `json:"tv_season,omitempty"`
 		TvEpisode int            `json:"tv_episode,omitempty"`
-		TMDB      *naming.Result `json:"tmdb,omitempty"`
+		Match    *naming.Result `json:"match,omitempty"`
 	}
 	if !decodeJSON(w, r, &body, true) {
 		return
@@ -1708,9 +1746,9 @@ func (s *Server) handleAcceptTitle(w http.ResponseWriter, r *http.Request) {
 	if body.Year == 0 {
 		body.Year = title.Year
 	}
-	if body.TMDB != nil {
-		title.TMDB = body.TMDB
-		session.TMDB = body.TMDB
+	if body.Match != nil {
+		title.Match = body.Match
+		session.Match = body.Match
 	}
 
 	ripDir := session.OutputDir
@@ -1719,12 +1757,17 @@ func (s *Server) handleAcceptTitle(w http.ResponseWriter, r *http.Request) {
 	moviesDir := s.cfg.MoviesDir
 	tvDir := s.cfg.TVDir()
 	discName := session.DiscName
-	var titleTMDBID, sessionTMDBID int
-	if title.TMDB != nil {
-		titleTMDBID = title.TMDB.ID
+	var entryProvider, entryMatchID string
+	var entryTMDBID int
+	if title.Match != nil {
+		entryProvider = title.Match.Provider
+		entryMatchID = title.Match.MatchID()
+		entryTMDBID = title.Match.ID
 	}
-	if session.TMDB != nil {
-		sessionTMDBID = session.TMDB.ID
+	if entryMatchID == "" && session.Match != nil {
+		entryProvider = session.Match.Provider
+		entryMatchID = session.Match.MatchID()
+		entryTMDBID = session.Match.ID
 	}
 	s.mu.Unlock()
 
@@ -1776,10 +1819,7 @@ func (s *Server) handleAcceptTitle(w http.ResponseWriter, r *http.Request) {
 	if recordTitle == "" {
 		recordTitle = body.TitleName
 	}
-	tmdbID := titleTMDBID
-	if tmdbID == 0 {
-		tmdbID = sessionTMDBID
-	}
+	tmdbID := entryTMDBID
 	mediaType := "movie"
 	if body.TvSeason > 0 {
 		mediaType = "tv"
@@ -1793,6 +1833,8 @@ func (s *Server) handleAcceptTitle(w http.ResponseWriter, r *http.Request) {
 		MediaType:  mediaType,
 		Season:     body.TvSeason,
 		Episode:    body.TvEpisode,
+		Provider:   entryProvider,
+		ProviderID: entryMatchID,
 		TMDBID:     tmdbID,
 		MovedAt:    time.Now().UTC().Format(time.RFC3339),
 	})
@@ -1833,7 +1875,9 @@ func (s *Server) handleUndoAccept(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"status": "ok", "message": "Accept cancelled, rip will continue"})
 }
 
-// handleSearch allows manual TMDb search.
+// handleSearch allows manual metadata search. The optional `type` query
+// parameter ("movie" or "tv") selects that type's provider order; anything
+// else runs the auto path (movie pass, then immediate TV pass on shortfall).
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	if s.namer == nil {
 		http.Error(w, "naming not configured", http.StatusServiceUnavailable)
@@ -1846,10 +1890,19 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing query parameter 'q'", http.StatusBadRequest)
 		return
 	}
+	searchType := r.URL.Query().Get("type")
 
-	logger.Debug("Manual search", "query", query)
+	logger.Debug("Manual search", "query", query, "type", searchType)
 
-	results, err := s.namer.Search(r.Context(), query)
+	var (
+		results []naming.Result
+		err     error
+	)
+	if mt, ok := naming.MediaTypeOf(searchType); ok {
+		results, err = s.namer.Search(r.Context(), query, mt)
+	} else {
+		results, err = s.namer.SearchAuto(r.Context(), query)
+	}
 	if err != nil {
 		logger.Error("Manual search failed", "error", err)
 		// Upstream failure text (wrapped URLs, status bodies) must never reach
@@ -1864,9 +1917,15 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 // handleGetConfig returns the current config.
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
-	// Don't expose the API key
+	// Don't expose the provider API keys
 	cfg := *s.cfg
-	cfg.TMDBKey = ""
+	if cfg.Providers != nil {
+		providers := make(map[string]config.ProviderConfig, len(cfg.Providers))
+		for name := range cfg.Providers {
+			providers[name] = config.ProviderConfig{}
+		}
+		cfg.Providers = providers
+	}
 	s.mu.Unlock()
 	writeJSON(w, cfg)
 }
@@ -1961,7 +2020,56 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	newKey, keyPresent := updates["tmdb_api_key"].(string)
 	if keyPresent {
-		s.cfg.TMDBKey = newKey
+		// Legacy flat key: map onto the TMDb provider so old clients keep
+		// working until they adopt the nested form.
+		if s.cfg.Providers == nil {
+			s.cfg.Providers = map[string]config.ProviderConfig{"tmdb": {}, "omdb": {}}
+		}
+		pc := s.cfg.Providers["tmdb"]
+		pc.APIKey = newKey
+		s.cfg.Providers["tmdb"] = pc
+	}
+	// Nested provider keys: {"providers": {"tmdb": {"api_key": "..."},
+	// "omdb": {"api_key": "..."}}} — empty string disables a provider.
+	if rawProviders, ok := updates["providers"].(map[string]interface{}); ok {
+		if s.cfg.Providers == nil {
+			s.cfg.Providers = map[string]config.ProviderConfig{"tmdb": {}, "omdb": {}}
+		}
+		for name, raw := range rawProviders {
+			pcMap, ok := raw.(map[string]interface{})
+			if !ok {
+				http.Error(w, fmt.Sprintf("providers.%s must be an object", name), http.StatusBadRequest)
+				s.mu.Unlock()
+				return
+			}
+			newProviderKey, _ := pcMap["api_key"].(string)
+			pc := s.cfg.Providers[name]
+			pc.APIKey = newProviderKey
+			s.cfg.Providers[name] = pc
+		}
+	}
+	// Per-media-type provider try-orders: {"metadata": {"movies": [...],
+	// "tv": [...]}} — first entry is the primary provider.
+	if rawMeta, ok := updates["metadata"].(map[string]interface{}); ok {
+		for key, target := range map[string]*[]string{"movies": &s.cfg.Metadata.Movies, "tv": &s.cfg.Metadata.TV} {
+			rawList, ok := rawMeta[key].([]interface{})
+			if !ok {
+				continue
+			}
+			order := make([]string, 0, len(rawList))
+			for _, raw := range rawList {
+				name, ok := raw.(string)
+				if !ok || name == "" {
+					http.Error(w, fmt.Sprintf("metadata.%s entries must be non-empty provider names", key), http.StatusBadRequest)
+					s.mu.Unlock()
+					return
+				}
+				order = append(order, name)
+			}
+			if len(order) > 0 {
+				*target = order
+			}
+		}
 	}
 	if v, ok := updates["http_port"].(float64); ok && v > 0 {
 		s.cfg.HTTPPort = int(v)
@@ -2007,11 +2115,30 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Unlock()
 
-	// Propagate a present key (including an empty one, which disables naming)
-	// to the live client so Settings takes effect without a restart.
-	if keyPresent && s.namer != nil {
-		s.namer.SetAPIKey(newKey)
-		logger.Info("TMDb API key updated", "enabled", newKey != "")
+	// Propagate provider keys and orders to the live chain so Settings takes
+	// effect without a restart.
+	if s.namer != nil {
+		if keyPresent {
+			s.namer.SetAPIKey("tmdb", newKey)
+			logger.Info("TMDb API key updated", "enabled", newKey != "")
+		}
+		if rawProviders, ok := updates["providers"].(map[string]interface{}); ok {
+			for name, raw := range rawProviders {
+				if pcMap, ok := raw.(map[string]interface{}); ok {
+					key, _ := pcMap["api_key"].(string)
+					// Chain.SetAPIKey logs the change; no duplicate line here.
+					s.namer.SetAPIKey(name, key)
+				}
+			}
+		}
+		if rawMeta, ok := updates["metadata"].(map[string]interface{}); ok {
+			movies, _ := rawMeta["movies"].([]interface{})
+			tv, _ := rawMeta["tv"].([]interface{})
+			if len(movies) > 0 || len(tv) > 0 {
+				s.namer.SetOrders(toStringList(movies), toStringList(tv))
+				logger.Info("Metadata provider orders updated")
+			}
+		}
 	}
 
 	// Propagate the min-title-length change to the live ripper so Settings
@@ -2029,8 +2156,11 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Never echo the API key back.
-	cfgCopy.TMDBKey = ""
+	// Never echo the provider API keys back.
+	cfgCopy.Providers = make(map[string]config.ProviderConfig, len(cfgCopy.Providers))
+	for name := range cfgCopy.Providers {
+		cfgCopy.Providers[name] = config.ProviderConfig{}
+	}
 	writeJSON(w, cfgCopy)
 }
 
@@ -2202,19 +2332,19 @@ func writeJSON(w http.ResponseWriter, v interface{}) {
 }
 
 // populateTitles builds the per-title list with proposed destinations.
-func populateTitles(ripDir, moviesDir string, tmdb *naming.Result, mediaType string, season, episode int) []*RipTitle {
-	if tmdb == nil {
+func populateTitles(ripDir, moviesDir string, match *naming.Result, mediaType string, season, episode int) []*RipTitle {
+	if match == nil {
 		// No naming match — just list files, named after the file itself.
 		return listFilesAsTitles(ripDir, mediaType, season, episode, "", 0, nil)
 	}
 
-	title := tmdb.Title
-	year := tmdb.Year
+	title := match.Title
+	year := match.Year
 
 	previews, err := move.PreviewTitles(ripDir, moviesDir, title, strconv.Itoa(year), mediaType, season, episode)
 	if err != nil {
 		// Fallback: just list files, named after the naming match.
-		return listFilesAsTitles(ripDir, mediaType, season, episode, title, year, tmdb)
+		return listFilesAsTitles(ripDir, mediaType, season, episode, title, year, match)
 	}
 
 	var titles []*RipTitle
@@ -2225,7 +2355,7 @@ func populateTitles(ripDir, moviesDir string, tmdb *naming.Result, mediaType str
 			IsMainFile:          p.IsMainFile,
 			AcceptedName:        title,
 			Year:                year,
-			TMDB:                tmdb,
+			Match:                match,
 			ProposedDestination: p.ProposedDestination,
 			TvSeason:            p.TvSeason,
 			TvEpisode:           p.TvEpisode,
@@ -2239,7 +2369,7 @@ func populateTitles(ripDir, moviesDir string, tmdb *naming.Result, mediaType str
 // listFilesAsTitles lists the MKVs in ripDir as pending RipTitles. acceptedName/
 // year/tmdb come from a naming match when one exists; without one each title is
 // named after its own file.
-func listFilesAsTitles(ripDir, mediaType string, season, episode int, acceptedName string, year int, tmdb *naming.Result) []*RipTitle {
+func listFilesAsTitles(ripDir, mediaType string, season, episode int, acceptedName string, year int, match *naming.Result) []*RipTitle {
 	var titles []*RipTitle
 	files, err := move.FindMKVs(ripDir)
 	if err != nil || len(files) == 0 {
@@ -2272,11 +2402,23 @@ func listFilesAsTitles(ripDir, mediaType string, season, episode int, acceptedNa
 			IsMainFile:   isMain,
 			AcceptedName: name,
 			Year:         year,
-			TMDB:         tmdb,
+			Match:         match,
 			State:        "pending",
 			TvSeason:     tvSeason,
 			TvEpisode:    tvEpisode,
 		})
 	}
 	return titles
+}
+
+// toStringList converts an interface{} list to a string list.
+func toStringList(raw []interface{}) []string {
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		s, ok := v.(string)
+		if ok && s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }

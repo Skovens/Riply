@@ -12,9 +12,24 @@ tv_shows_dir = ""
 # Temporary directory for rip operations
 temp_dir = "/tmp/riply"
 
-# TMDb API key for auto-naming (optional)
-# Get one at https://www.themoviedb.org/settings/api
-tmdb_api_key = ""
+# Metadata providers ([metadata]/[providers] take effect without a restart).
+# The per-media-type lists give the try-order: the first entry is the primary
+# provider; on error or empty results the next one is tried. Providers with a
+# key but absent from a list are appended after it.
+[metadata]
+movies = ["tmdb", "omdb"]
+tv = ["tmdb", "omdb"]
+
+[providers.tmdb]
+# TMDb API key for auto-naming — get one at https://www.themoviedb.org/settings/api
+api_key = ""
+
+[providers.omdb]
+# OMDb API key — get one at https://www.omdbapi.com/apikey.aspx
+api_key = ""
+
+# A legacy flat "tmdb_api_key = ..." is migrated into [providers.tmdb]
+# automatically on load and no longer needs to be set here.
 
 # HTTP server settings (http_host/http_port/makemkv_path take effect on restart)
 http_host = "127.0.0.1"

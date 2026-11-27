@@ -62,7 +62,8 @@ func TestMovieTMDBMatchLandsMovieLayout(t *testing.T) {
 	s, _ := newTVServer(t, &movieRipper{}, st)
 
 	rec := doJSON(t, s, http.MethodPost, "/api/drives/0/accept", map[string]any{
-		"tmdb_id": 12345,
+		"provider": "tmdb",
+		"ext_id":  "12345",
 		"title":   "The Mask",
 		"year":    1994,
 		"is_tv":   false,
@@ -180,7 +181,7 @@ func TestDriveAcceptEmptyBodyPreservesYear(t *testing.T) {
 
 	// Seed a TMDb match but send an empty-body accept, mirroring the UI.
 	s.mu.Lock()
-	s.namingMatches["/dev/sr0"] = naming.Result{ID: 12345, Title: "The Mask", Year: 1994, IsTV: false}
+	s.providerMatches["/dev/sr0"] = naming.Result{ID: 12345, Title: "The Mask", Year: 1994, IsTV: false}
 	s.mu.Unlock()
 
 	rec := doJSON(t, s, http.MethodPost, "/api/drives/0/accept", map[string]any{})

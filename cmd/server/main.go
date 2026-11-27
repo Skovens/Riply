@@ -65,13 +65,19 @@ func main() {
 		logger.Info("MakeMKV available", "version", ripper.Version())
 	}
 
-	// TMDb — always construct the client so a key saved later via Settings
-	// takes effect without a restart; empty key means naming is disabled.
-	namer := naming.NewClient(cfg.TMDBKey)
-	if cfg.TMDBKey != "" {
-		logger.Info("TMDb client configured")
+	// Metadata providers — always construct the chain so keys saved later
+	// via Settings take effect without a restart; a chain with no keys means
+	// naming is disabled.
+	namer := naming.New(
+		[]naming.ConfiguredProvider{
+			{Name: "tmdb", APIKey: cfg.ProviderKey("tmdb")},
+			{Name: "omdb", APIKey: cfg.ProviderKey("omdb")},
+		},
+		cfg.Metadata.Movies, cfg.Metadata.TV)
+	if namer.Enabled() {
+		logger.Info("Metadata providers configured", "providers", namer.ProviderNames())
 	} else {
-		logger.Info("TMDb naming disabled", "reason", "no tmdb_api_key configured")
+		logger.Info("Auto-naming disabled", "reason", "no provider API key configured")
 	}
 
 	// Library history — SQLite index of ripped and scanned media. A broken

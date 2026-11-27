@@ -91,6 +91,32 @@
           <input type="password" id="tmdb_api_key" name="tmdb_api_key" placeholder="Enter TMDb API key">
         </div>
         <div class="form-group">
+          <label for="omdb_api_key">OMDb API Key</label>
+          <input type="password" id="omdb_api_key" name="omdb_api_key" placeholder="Enter OMDb API key (omdbapi.com)">
+        </div>
+        <div class="form-group">
+          <label for="metadata_primary_movies">Primary metadata provider — Movies</label>
+          <select id="metadata_primary_movies" name="metadata_primary_movies">
+            <option value="tmdb">TMDb</option>
+            <option value="omdb">OMDb</option>
+          </select>
+          <label for="metadata_fallback_movies" class="form-hint">
+            <input type="checkbox" id="metadata_fallback_movies" name="metadata_fallback_movies">
+            Fall back to other configured providers when the primary comes up short
+          </label>
+        </div>
+        <div class="form-group">
+          <label for="metadata_primary_tv">Primary metadata provider — TV</label>
+          <select id="metadata_primary_tv" name="metadata_primary_tv">
+            <option value="tmdb">TMDb</option>
+            <option value="omdb">OMDb</option>
+          </select>
+          <label for="metadata_fallback_tv" class="form-hint">
+            <input type="checkbox" id="metadata_fallback_tv" name="metadata_fallback_tv">
+            Fall back to other configured providers when the primary comes up short
+          </label>
+        </div>
+        <div class="form-group">
           <label for="http_port">HTTP Port</label>
           <input type="number" id="http_port" name="http_port" placeholder="3000">
         </div>
@@ -103,17 +129,22 @@
       <footer class="attribution">
         <img src="/static/tmdb-logo.svg" alt="The Movie Database (TMDB)" class="tmdb-logo" loading="lazy">
         <p>This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.</p>
+        <p>This product uses the OMDb API but is not endorsed or certified by OMDb.</p>
       </footer>
     </section>
   </main>
 
-  <!-- TMDb Search Modal -->
+  <!-- Metadata Search Modal -->
   <div id="modal" class="modal">
     <div class="modal-content">
       <span class="modal-close">&times;</span>
-      <h3 id="modal-title">Search TMDb</h3>
+      <h3 id="modal-title">Search metadata</h3>
       <div class="modal-body">
-        <input type="text" id="search-input" placeholder="Search for a movie...">
+        <div class="search-type-toggle" role="group" aria-label="Media type">
+          <button type="button" id="search-type-movie" class="btn btn-small btn-primary" onclick="setSearchType('movie')">Movie</button>
+          <button type="button" id="search-type-tv" class="btn btn-small btn-secondary" onclick="setSearchType('tv')">TV</button>
+        </div>
+        <input type="text" id="search-input" placeholder="Search for a movie or TV show...">
         <div id="search-results" class="search-results"></div>
       </div>
     </div>

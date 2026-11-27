@@ -30,7 +30,9 @@ type Entry struct {
 	MediaType  string `json:"media_type"` // "movie" | "tv"
 	Season     int    `json:"season,omitempty"`
 	Episode    int    `json:"episode,omitempty"`
-	TMDBID     int    `json:"tmdb_id,omitempty"`
+	TMDBID     int    `json:"tmdb_id,omitempty"` // legacy TMDb numeric id, still written for TMDb matches
+	Provider   string `json:"provider,omitempty"`
+	ProviderID string `json:"provider_id,omitempty"`
 	OutputPath string `json:"output_path"`
 	Source     string `json:"source"` // "rip" | "scan"
 	Missing    bool   `json:"missing"`
@@ -79,20 +81,22 @@ type Store struct {
 }
 
 const upsertEntrySQL = `INSERT INTO library
-  (disc_name, disc_hash, title, year, media_type, season, episode, tmdb_id, output_path, source, missing, moved_at, created_at)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+  (disc_name, disc_hash, title, year, media_type, season, episode, tmdb_id, provider, provider_id, output_path, source, missing, moved_at, created_at)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(output_path) DO UPDATE SET
-  disc_name  = CASE WHEN excluded.disc_name <> '' THEN excluded.disc_name ELSE library.disc_name END,
-  disc_hash  = CASE WHEN excluded.disc_hash <> '' THEN excluded.disc_hash ELSE library.disc_hash END,
-  title      = excluded.title,
-  year       = CASE WHEN excluded.year > 0 THEN excluded.year ELSE library.year END,
-  media_type = excluded.media_type,
-  season     = excluded.season,
-  episode    = excluded.episode,
-  tmdb_id    = CASE WHEN excluded.tmdb_id > 0 THEN excluded.tmdb_id ELSE library.tmdb_id END,
-  source     = CASE WHEN excluded.source = 'rip' THEN 'rip' ELSE library.source END,
-  missing    = 0,
-  moved_at   = CASE WHEN excluded.moved_at <> '' THEN excluded.moved_at ELSE library.moved_at END`
+  disc_name   = CASE WHEN excluded.disc_name <> '' THEN excluded.disc_name ELSE library.disc_name END,
+  disc_hash   = CASE WHEN excluded.disc_hash <> '' THEN excluded.disc_hash ELSE library.disc_hash END,
+  title       = excluded.title,
+  year        = CASE WHEN excluded.year > 0 THEN excluded.year ELSE library.year END,
+  media_type  = excluded.media_type,
+  season      = excluded.season,
+  episode     = excluded.episode,
+  tmdb_id     = CASE WHEN excluded.tmdb_id > 0 THEN excluded.tmdb_id ELSE library.tmdb_id END,
+  provider    = CASE WHEN excluded.provider <> '' THEN excluded.provider ELSE library.provider END,
+  provider_id = CASE WHEN excluded.provider_id <> '' THEN excluded.provider_id ELSE library.provider_id END,
+  source      = CASE WHEN excluded.source = 'rip' THEN 'rip' ELSE library.source END,
+  missing     = 0,
+  moved_at    = CASE WHEN excluded.moved_at <> '' THEN excluded.moved_at ELSE library.moved_at END`
 
 // Open opens (creating when necessary) the SQLite database at path.
 func Open(path string) (*Store, error) {
@@ -118,7 +122,7 @@ func Open(path string) (*Store, error) {
 // N-1 to N. Append one entry per schema change — never edit or renumber an
 // existing entry, and never delete one: an installed library.db may be at
 // any earlier version.
-const schemaVersion = 2
+const schemaVersion = 3
 
 type migration struct {
 	version int
@@ -129,6 +133,7 @@ func migrations() []migration {
 	return []migration{
 		{1, migrateV1},
 		{2, migrateV2},
+		{3, migrateV3},
 	}
 }
 
@@ -175,6 +180,26 @@ func migrateV2(db *sql.DB) error {
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("migrate v2: %w", err)
+		}
+	}
+	return nil
+}
+
+// migrateV3 adds the provider-neutral match-ID columns (issue #124):
+// provider ("tmdb" | "omdb" | …) and provider_id (the provider's native id,
+// e.g. TMDb "27205" or OMDb "tt1375666"). Existing tmdb_id rows are
+// backfilled; the legacy numeric column stays so older consumers keep
+// working.
+func migrateV3(db *sql.DB) error {
+	stmts := []string{
+		`ALTER TABLE library ADD COLUMN provider TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE library ADD COLUMN provider_id TEXT NOT NULL DEFAULT ''`,
+		`UPDATE library SET provider = 'tmdb', provider_id = CAST(tmdb_id AS TEXT) WHERE tmdb_id > 0`,
+		`CREATE INDEX IF NOT EXISTS idx_library_provider ON library(provider_id)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("migrate v3: %w", err)
 		}
 	}
 	return nil
@@ -235,7 +260,7 @@ func (s *Store) Add(ctx context.Context, e Entry) error {
 	}
 	_, err := s.db.ExecContext(ctx, upsertEntrySQL,
 		e.DiscName, e.DiscHash, e.Title, e.Year, e.MediaType, e.Season, e.Episode,
-		e.TMDBID, e.OutputPath, e.Source, 0, e.MovedAt, e.CreatedAt)
+		e.TMDBID, e.Provider, e.ProviderID, e.OutputPath, e.Source, 0, e.MovedAt, e.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("library: upsert entry %q: %w", e.OutputPath, err)
 	}
@@ -246,7 +271,7 @@ func (s *Store) Add(ctx context.Context, e Entry) error {
 func (s *Store) Snapshot(ctx context.Context) (Snapshot, error) {
 	snap := Snapshot{Entries: make([]Entry, 0)}
 
-	rows, err := s.db.QueryContext(ctx, `SELECT id, disc_name, disc_hash, title, year, media_type, season, episode, tmdb_id, output_path, source, missing, moved_at, created_at FROM library ORDER BY title COLLATE NOCASE, season, episode`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, disc_name, disc_hash, title, year, media_type, season, episode, tmdb_id, provider, provider_id, output_path, source, missing, moved_at, created_at FROM library ORDER BY title COLLATE NOCASE, season, episode`)
 	if err != nil {
 		return snap, fmt.Errorf("library: query entries: %w", err)
 	}
@@ -259,7 +284,7 @@ func (s *Store) Snapshot(ctx context.Context) (Snapshot, error) {
 			missing int
 		)
 		if err := rows.Scan(&e.ID, &e.DiscName, &e.DiscHash, &e.Title, &e.Year, &e.MediaType,
-			&e.Season, &e.Episode, &e.TMDBID, &e.OutputPath, &e.Source,
+			&e.Season, &e.Episode, &e.TMDBID, &e.Provider, &e.ProviderID, &e.OutputPath, &e.Source,
 			&missing, &e.MovedAt, &e.CreatedAt); err != nil {
 			return snap, fmt.Errorf("library: scan entry: %w", err)
 		}
@@ -384,24 +409,27 @@ func buildSeries(entries []Entry) []Series {
 }
 
 // NextUp returns the next season/episode to rip for a title. ok is false when
-// no stored episode carries a season number > 0 for that title.
-func (s *Store) NextUp(ctx context.Context, title string, tmdbID, seasonHint int) (season, episode int, ok bool) {
-	rows, err := s.db.QueryContext(ctx, `SELECT title, tmdb_id, season, episode FROM library WHERE media_type='tv' AND missing=0`)
+// no stored episode carries a season number > 0 for that title. providerID
+// (with its provider) is the provider-neutral match id; rows match on
+// provider+provider_id when both sides know one, else by title.
+func (s *Store) NextUp(ctx context.Context, title, provider, providerID string, seasonHint int) (season, episode int, ok bool) {
+	rows, err := s.db.QueryContext(ctx, `SELECT title, provider, provider_id, season, episode FROM library WHERE media_type='tv' AND missing=0`)
 	if err != nil {
 		return 0, 0, false
 	}
 	defer rows.Close()
 
 	type row struct {
-		title   string
-		tmdbID  int
-		season  int
-		episode int
+		title      string
+		provider   string
+		providerID string
+		season     int
+		episode    int
 	}
 	var matched []row
 	for rows.Next() {
 		var r row
-		if err := rows.Scan(&r.title, &r.tmdbID, &r.season, &r.episode); err != nil {
+		if err := rows.Scan(&r.title, &r.provider, &r.providerID, &r.season, &r.episode); err != nil {
 			return 0, 0, false
 		}
 		matched = append(matched, r)
@@ -413,8 +441,8 @@ func (s *Store) NextUp(ctx context.Context, title string, tmdbID, seasonHint int
 	want := strings.TrimSpace(title)
 	var filtered []row
 	for _, r := range matched {
-		if tmdbID > 0 && r.tmdbID > 0 {
-			if r.tmdbID == tmdbID {
+		if providerID != "" && r.providerID != "" {
+			if r.providerID == providerID && (provider == "" || r.provider == "" || r.provider == provider) {
 				filtered = append(filtered, r)
 			}
 			continue
@@ -459,20 +487,22 @@ func (s *Store) NextUp(ctx context.Context, title string, tmdbID, seasonHint int
 
 // LastRip is the most recently moved/recorded library entry.
 type LastRip struct {
-	Title     string `json:"title"`
-	Year      int    `json:"year"`
-	MediaType string `json:"media_type"`
-	Season    int    `json:"season"`
-	Episode   int    `json:"episode"`
-	TMDBID    int    `json:"tmdb_id"`
+	Title      string `json:"title"`
+	Year       int    `json:"year"`
+	MediaType  string `json:"media_type"`
+	Season     int    `json:"season"`
+	Episode    int    `json:"episode"`
+	TMDBID     int    `json:"tmdb_id"`
+	Provider   string `json:"provider,omitempty"`
+	ProviderID string `json:"provider_id,omitempty"`
 }
 
 // LastRip returns the most recently recorded library entry (by moved_at, then
 // created_at). ok is false when the index holds no entries.
 func (s *Store) LastRip(ctx context.Context) (LastRip, bool) {
 	var lr LastRip
-	row := s.db.QueryRowContext(ctx, `SELECT title, year, media_type, season, episode, tmdb_id FROM library ORDER BY moved_at DESC, created_at DESC LIMIT 1`)
-	if err := row.Scan(&lr.Title, &lr.Year, &lr.MediaType, &lr.Season, &lr.Episode, &lr.TMDBID); err != nil {
+	row := s.db.QueryRowContext(ctx, `SELECT title, year, media_type, season, episode, tmdb_id, provider, provider_id FROM library ORDER BY moved_at DESC, created_at DESC LIMIT 1`)
+	if err := row.Scan(&lr.Title, &lr.Year, &lr.MediaType, &lr.Season, &lr.Episode, &lr.TMDBID, &lr.Provider, &lr.ProviderID); err != nil {
 		return LastRip{}, false
 	}
 	return lr, true
@@ -486,7 +516,7 @@ func (s *Store) RipMatches(ctx context.Context, name string) ([]Entry, error) {
 	if name == "" {
 		return nil, nil
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, disc_name, disc_hash, title, year, media_type, season, episode, tmdb_id, output_path, source, missing, moved_at, created_at FROM library WHERE disc_name LIKE ? ESCAPE '\' AND missing = 0 ORDER BY moved_at DESC, created_at DESC`, escapeLike(name))
+	rows, err := s.db.QueryContext(ctx, `SELECT id, disc_name, disc_hash, title, year, media_type, season, episode, tmdb_id, provider, provider_id, output_path, source, missing, moved_at, created_at FROM library WHERE disc_name LIKE ? ESCAPE '\' AND missing = 0 ORDER BY moved_at DESC, created_at DESC`, escapeLike(name))
 	if err != nil {
 		return nil, fmt.Errorf("library: rip matches: %w", err)
 	}
@@ -498,7 +528,7 @@ func (s *Store) RipMatches(ctx context.Context, name string) ([]Entry, error) {
 			e       Entry
 			missing int
 		)
-		if err := rows.Scan(&e.ID, &e.DiscName, &e.DiscHash, &e.Title, &e.Year, &e.MediaType, &e.Season, &e.Episode, &e.TMDBID, &e.OutputPath, &e.Source, &missing, &e.MovedAt, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.DiscName, &e.DiscHash, &e.Title, &e.Year, &e.MediaType, &e.Season, &e.Episode, &e.TMDBID, &e.Provider, &e.ProviderID, &e.OutputPath, &e.Source, &missing, &e.MovedAt, &e.CreatedAt); err != nil {
 			return nil, fmt.Errorf("library: scan rip matches: %w", err)
 		}
 		e.Missing = missing != 0
@@ -522,7 +552,7 @@ func (s *Store) HashMatches(ctx context.Context, hash string) ([]Entry, error) {
 	if hash == "" {
 		return nil, nil
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, disc_name, disc_hash, title, year, media_type, season, episode, tmdb_id, output_path, source, missing, moved_at, created_at FROM library WHERE disc_hash = ? AND missing = 0 ORDER BY moved_at DESC, created_at DESC`, hash)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, disc_name, disc_hash, title, year, media_type, season, episode, tmdb_id, provider, provider_id, output_path, source, missing, moved_at, created_at FROM library WHERE disc_hash = ? AND missing = 0 ORDER BY moved_at DESC, created_at DESC`, hash)
 	if err != nil {
 		return nil, fmt.Errorf("library: hash matches: %w", err)
 	}
@@ -534,7 +564,7 @@ func (s *Store) HashMatches(ctx context.Context, hash string) ([]Entry, error) {
 			e       Entry
 			missing int
 		)
-		if err := rows.Scan(&e.ID, &e.DiscName, &e.DiscHash, &e.Title, &e.Year, &e.MediaType, &e.Season, &e.Episode, &e.TMDBID, &e.OutputPath, &e.Source, &missing, &e.MovedAt, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.DiscName, &e.DiscHash, &e.Title, &e.Year, &e.MediaType, &e.Season, &e.Episode, &e.TMDBID, &e.Provider, &e.ProviderID, &e.OutputPath, &e.Source, &missing, &e.MovedAt, &e.CreatedAt); err != nil {
 			return nil, fmt.Errorf("library: scan hash matches: %w", err)
 		}
 		e.Missing = missing != 0

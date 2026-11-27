@@ -7,45 +7,66 @@ import (
 	"time"
 )
 
-// NewClient must never return nil, even with an empty key: the client exists so
-// a later SetAPIKey enables naming without a restart.
-func TestNewClientAlwaysNonNil(t *testing.T) {
-	if c := NewClient(""); c == nil {
-		t.Fatal("NewClient(\"\") returned nil")
-	} else if c.APIKey() != "" {
-		t.Errorf("empty-key client reports key %q", c.APIKey())
+// New must always return a usable chain, even with no keys: a key saved
+// later via Settings enables naming without a restart.
+func TestNewAlwaysNonNil(t *testing.T) {
+	c := New(nil, nil, nil)
+	if c == nil {
+		t.Fatal("New(nil, nil, nil) returned nil")
 	}
-	if c := NewClient("abc"); c == nil || c.APIKey() != "abc" {
-		t.Fatalf("NewClient(\"abc\") = %v with key %q", c, c.APIKey())
-	}
-}
-
-// Search must short-circuit on an empty/nil client without any HTTP request.
-func TestSearchDisabledWithoutKey(t *testing.T) {
-	c := NewClient("")
-	if got, err := c.Search(context.Background(), "Inception"); err == nil || got != nil {
-		t.Errorf("empty-key Search = (%v, %v); want error", got, err)
-	}
-	var nilClient *Client
-	if got, err := nilClient.Search(context.Background(), "Inception"); err == nil || got != nil {
-		t.Errorf("nil-client Search = (%v, %v); want error", got, err)
+	if c.Enabled() {
+		t.Error("keyless chain reports Enabled")
 	}
 }
 
-// SetAPIKey toggles the enabled state live.
+// Providers without keys are skipped at search time; with a key the
+// provider is enabled and SetAPIKey toggles the state live.
 func TestSetAPIKeyTogglesState(t *testing.T) {
-	c := NewClient("")
-	if _, err := c.Search(context.Background(), "Inception"); err == nil {
-		t.Fatal("Search succeeded before SetAPIKey")
+	c := New([]ConfiguredProvider{{Name: "tmdb", APIKey: ""}}, nil, nil)
+	if c.Enabled() {
+		t.Fatal("empty-key chain reports Enabled")
 	}
-	c.SetAPIKey("k")
-	if c.APIKey() != "k" {
-		t.Fatalf("APIKey after SetAPIKey = %q", c.APIKey())
+	if _, err := c.SearchAuto(context.Background(), "Inception"); err == nil {
+		t.Fatal("SearchAuto succeeded without any key")
 	}
-	c.SetAPIKey("")
-	if _, err := c.Search(context.Background(), "Inception"); err == nil {
-		t.Fatal("Search succeeded after key cleared")
+	c.SetAPIKey("tmdb", "k")
+	if !c.Enabled() {
+		t.Fatal("chain still disabled after SetAPIKey")
 	}
+	c.SetAPIKey("tmdb", "")
+	if c.Enabled() {
+		t.Fatal("chain still enabled after key cleared")
+	}
+}
+
+// SetOrders replaces the try-orders live; empty lists leave them unchanged.
+func TestSetOrders(t *testing.T) {
+	c := New(
+		[]ConfiguredProvider{{Name: "tmdb", APIKey: "k"}, {Name: "omdb", APIKey: "k"}},
+		[]string{"tmdb"}, []string{"tmdb"})
+	if got := c.orderFor(Movie); got[0].Name() != "tmdb" {
+		t.Fatalf("movie order head = %s, want tmdb", got[0].Name())
+	}
+	c.SetOrders([]string{"omdb"}, []string{"omdb", "tmdb"})
+	if got := c.orderFor(Movie); got[0].Name() != "omdb" {
+		t.Errorf("movie order head after SetOrders = %s, want omdb", got[0].Name())
+	}
+	if got := c.orderFor(TV); len(got) != 2 || got[0].Name() != "omdb" || got[1].Name() != "tmdb" {
+		t.Errorf("tv order after SetOrders = %v", names(got))
+	}
+	// Empty lists leave the previous orders in place.
+	c.SetOrders(nil, nil)
+	if got := c.orderFor(Movie); got[0].Name() != "omdb" {
+		t.Errorf("movie order changed by empty SetOrders: %v", names(got))
+	}
+}
+
+func names(ps []Provider) []string {
+	out := make([]string, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, p.Name())
+	}
+	return out
 }
 
 // Concurrent callers must never wait a serialized multiple of the cooldown.
@@ -54,9 +75,9 @@ func TestSetAPIKeyTogglesState(t *testing.T) {
 // reservation, caller N waited ~(N-1)×cooldown.
 func TestRateLimitConcurrentWaitBounded(t *testing.T) {
 	const cooldown = 150 * time.Millisecond
-	c := NewClient("k")
-	c.cooldown = cooldown
-	c.rateLimit(context.Background()) // establish a fresh slot
+	p := newTMDBProvider("k")
+	p.rl.cooldown = cooldown
+	p.rl.wait(context.Background()) // establish a fresh slot
 
 	const n = 3
 	var wg sync.WaitGroup
@@ -66,7 +87,7 @@ func TestRateLimitConcurrentWaitBounded(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			start := time.Now()
-			c.rateLimit(context.Background())
+			p.rl.wait(context.Background())
 			waited[i] = time.Since(start)
 		}(i)
 	}
@@ -79,27 +100,25 @@ func TestRateLimitConcurrentWaitBounded(t *testing.T) {
 	}
 }
 
-// rateLimit must not hold its mutex while sleeping. With the old held-lock
-// sleep, any concurrent APIKey()/SetAPIKey() call blocked behind the sleeper;
-// here a second goroutine's APIKey() must return in milliseconds while the
-// first is mid-cooldown. (Callers legitimately still serialize on the cooldown
-// itself — that is rate limiting; only the lock-hold is the bug.)
+// The rate limiter must not hold its mutex while sleeping: a second
+// goroutine reading the key must return in milliseconds while the first is
+// mid-cooldown.
 func TestRateLimitDoesNotHoldLockWhileSleeping(t *testing.T) {
 	const cooldown = 200 * time.Millisecond
-	c := NewClient("k")
-	c.cooldown = cooldown
-	c.rateLimit(context.Background()) // establish a fresh slot
+	p := newTMDBProvider("k")
+	p.rl.cooldown = cooldown
+	p.rl.wait(context.Background()) // establish a fresh slot
 
-	go c.rateLimit(context.Background()) // sleeps ~cooldown, must not hold c.mu
+	go p.rl.wait(context.Background()) // sleeps ~cooldown, must not hold p.mu
 
 	done := make(chan struct{})
 	go func() {
-		c.APIKey()
+		p.key()
 		close(done)
 	}()
 	select {
 	case <-done:
 	case <-time.After(cooldown / 2):
-		t.Fatal("APIKey blocked behind rateLimit's sleep; mutex held across sleep")
+		t.Fatal("key read blocked behind rateLimiter's sleep; mutex held across sleep")
 	}
 }
