@@ -28,9 +28,10 @@ type Drive struct {
 	Path                string `json:"path"`
 	State               State  `json:"state"`
 	DiscName            string `json:"disc_name,omitempty"`      // Raw MakeMKV disc title
-	CanonicalName       string `json:"canonical_name,omitempty"` // TMDb/manual canonical name
-	CanonicalYear       int    `json:"canonical_year,omitempty"` // TMDb/year
-	CanonicalID         int    `json:"canonical_id,omitempty"`   // TMDb ID of the canonical match
+	CanonicalName       string `json:"canonical_name,omitempty"`   // provider/manual canonical name
+	CanonicalYear       int    `json:"canonical_year,omitempty"`   // canonical-match year
+	CanonicalProvider   string `json:"canonical_provider,omitempty"` // provider of the canonical match ("tmdb", "omdb", …)
+	CanonicalExtID      string `json:"canonical_ext_id,omitempty"` // provider-native id of the canonical match
 	AutoNamingEnabled   bool   `json:"auto_naming_enabled"`      // toggle for auto-naming on disc insert
 	AutoSequenceEnabled bool   `json:"auto_sequence_enabled"`    // global default true; per-drive override
 	AutoRipEnabled      bool   `json:"autorip_enabled"`          // global default true; per-drive override
@@ -108,7 +109,8 @@ func (s *Scanner) handleEvent(event DiscEvent) {
 				d.DiscHash = ""
 				d.CanonicalName = ""
 				d.CanonicalYear = 0
-				d.CanonicalID = 0
+				d.CanonicalProvider = ""
+				d.CanonicalExtID = ""
 				d.Poster = ""
 				d.HasDisc = true
 				d.State = StateReady

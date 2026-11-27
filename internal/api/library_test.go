@@ -199,7 +199,7 @@ func TestAcceptRecordsHistory(t *testing.T) {
 		ID:        1,
 		State:     "complete",
 		OutputDir: ripDir,
-		TMDB:      &naming.Result{ID: 27205, Title: "Inception", Year: 2010},
+		Match:     &naming.Result{ID: 27205, ExtID: "27205", Provider: "tmdb", Title: "Inception", Year: 2010},
 		MediaType: "movie",
 		DiscName:  "INCEPTION",
 	}

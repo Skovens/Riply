@@ -118,16 +118,16 @@ func TestHandleSetName(t *testing.T) {
 	}
 
 	rec := doJSON(t, s, http.MethodPut, "/api/drives/0/name", map[string]any{
-		"title": "The Mask", "year": 1994, "tmdb_id": 27205,
+		"title": "The Mask", "year": 1994, "provider": "tmdb", "ext_id": "27205",
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("set name = %d %s", rec.Code, rec.Body.String())
 	}
 	s.mu.Lock()
-	match := s.namingMatches["/dev/sr0"]
+	match := s.providerMatches["/dev/sr0"]
 	s.mu.Unlock()
-	if match.Title != "The Mask" || match.Year != 1994 || match.ID != 27205 {
-		t.Errorf("namingMatches = %+v, want The Mask/1994/27205", match)
+	if match.Title != "The Mask" || match.Year != 1994 || match.MatchID() != "27205" {
+		t.Errorf("providerMatches = %+v, want The Mask/1994/27205", match)
 	}
 }
 
@@ -243,7 +243,7 @@ func TestHandleListRipsShape(t *testing.T) {
 
 func TestHandleGetConfigRedactsAPIKey(t *testing.T) {
 	s, _ := newRipServer(t, &instantRipper{outName: "movie.mkv"})
-	s.cfg.TMDBKey = "secret-key"
+	s.cfg.Providers["tmdb"] = config.ProviderConfig{APIKey: "secret-key"}
 
 	rec := doJSON(t, s, http.MethodGet, "/api/config", nil)
 	if rec.Code != http.StatusOK {

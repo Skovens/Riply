@@ -35,7 +35,7 @@ func TestConcurrentAcceptsProduceDistinctDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 	sess.OutputDir = outDir
-	sess.TMDB = &naming.Result{ID: 27205, Title: "Inception", Year: 2010}
+	sess.Match = &naming.Result{ID: 27205, Title: "Inception", Year: 2010}
 	s.mu.Unlock()
 
 	var wg sync.WaitGroup

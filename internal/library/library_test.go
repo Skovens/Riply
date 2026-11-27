@@ -163,16 +163,16 @@ func TestNextUp(t *testing.T) {
 	}
 	add("KLOVN", 2, 1)
 
-	if season, episode, ok := st.NextUp(ctx, "KLOVN", 0, 2); !ok || season != 2 || episode != 2 {
+	if season, episode, ok := st.NextUp(ctx, "KLOVN", "", "", 2); !ok || season != 2 || episode != 2 {
 		t.Errorf("NextUp hint 2 = (%d,%d,%v), want (2,2,true)", season, episode, ok)
 	}
-	if season, episode, ok := st.NextUp(ctx, "KLOVN", 0, 0); !ok || season != 2 || episode != 2 {
+	if season, episode, ok := st.NextUp(ctx, "KLOVN", "", "", 0); !ok || season != 2 || episode != 2 {
 		t.Errorf("NextUp hint 0 = (%d,%d,%v), want (2,2,true)", season, episode, ok)
 	}
-	if season, episode, ok := st.NextUp(ctx, "Unknown", 0, 3); !ok || season != 3 || episode != 1 {
+	if season, episode, ok := st.NextUp(ctx, "Unknown", "", "", 3); !ok || season != 3 || episode != 1 {
 		t.Errorf("NextUp unknown hint 3 = (%d,%d,%v), want (3,1,true)", season, episode, ok)
 	}
-	if _, _, ok := st.NextUp(ctx, "Unknown", 0, 0); ok {
+	if _, _, ok := st.NextUp(ctx, "Unknown", "", "", 0); ok {
 		t.Error("NextUp unknown hint 0 ok = true, want false")
 	}
 }
@@ -585,9 +585,111 @@ func TestScanUnreadableRootAndUnreadableSubdir(t *testing.T) {
 	}
 }
 
-	if _, err := raw.Exec(`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`); err != nil {
+// Migration v3: provider/provider_id columns exist and tmdb_id rows are
+// backfilled (provider='tmdb', provider_id=decimal id).
+func TestMigrateV3BackfillsProviderID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "library.db")
+	// Build a v2-shaped DB with raw SQL (pre-provider columns).
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE library (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  disc_name TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL,
+  year INTEGER NOT NULL DEFAULT 0,
+  media_type TEXT NOT NULL,
+  season INTEGER NOT NULL DEFAULT 0,
+  episode INTEGER NOT NULL DEFAULT 0,
+  tmdb_id INTEGER NOT NULL DEFAULT 0,
+  disc_hash TEXT NOT NULL DEFAULT '',
+  output_path TEXT NOT NULL UNIQUE,
+  source TEXT NOT NULL,
+  missing INTEGER NOT NULL DEFAULT 0,
+  moved_at TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`INSERT INTO library (title, media_type, tmdb_id, output_path, source, season, episode, created_at) VALUES ('KLOVN', 'tv', 42, '/m/KLOVN/Season 1/KLOVN S01E01.mkv', 'rip', 1, 1, '2026-01-01')`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := raw.Exec(`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := raw.Exec(`PRAGMA user_version=2`); err != nil {
+		t.Fatal(err)
+	}
+	raw.Close()
+
+	st, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open with v2 db: %v", err)
+	}
+	defer st.Close()
+
+	var v int
+	if err := st.db.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+		t.Fatal(err)
+	}
+	if v != schemaVersion {
+		t.Errorf("user_version after Open = %d, want %d", v, schemaVersion)
+	}
+	snap, err := st.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(snap.Entries))
+	}
+	e := snap.Entries[0]
+	if e.Provider != "tmdb" || e.ProviderID != "42" || e.TMDBID != 42 {
+		t.Errorf("backfill mismatch: provider=%q provider_id=%q tmdb_id=%d", e.Provider, e.ProviderID, e.TMDBID)
+	}
+}
+
+// NextUp matches rows on provider+provider_id when the hint carries a match
+// id, and by title otherwise.
+func TestNextUpWithProviderID(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t, filepath.Join(t.TempDir(), "library.db"))
+	e1 := Entry{Title: "KLOVN", MediaType: "tv", Season: 2, Episode: 3, Provider: "tmdb", ProviderID: "42", OutputPath: "/m/KLOVN/Season 2/KLOVN S02E03.mkv", CreatedAt: "2026-01-01"}
+	if err := st.Add(ctx, e1); err != nil {
+		t.Fatal(err)
+	}
+	// Match by provider id.
+	if season, episode, ok := st.NextUp(ctx, "", "tmdb", "42", 0); !ok || season != 2 || episode != 4 {
+		t.Errorf("NextUp by id = (%d,%d,%v), want (2,4,true)", season, episode, ok)
+	}
+	// A different provider id does not match the same numeric value.
+	if _, _, ok := st.NextUp(ctx, "KLOVN", "omdb", "42", 0); ok {
+		t.Error("NextUp matched across providers with different provider values")
+	}
+	// Title fallback still works without any match id.
+	if season, episode, ok := st.NextUp(ctx, "KLOVN", "", "", 0); !ok || season != 2 || episode != 4 {
+		t.Errorf("NextUp by title = (%d,%d,%v), want (2,4,true)", season, episode, ok)
+	}
+}
+
+// Add persists provider/provider_id with the preserve-if-empty upsert rule.
+func TestAddPreservesProviderOnRescan(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t, filepath.Join(t.TempDir(), "library.db"))
+	p := "/m/KLOVN/Season 1/KLOVN S01E01.mkv"
+	e := Entry{Title: "KLOVN", MediaType: "tv", Season: 1, Episode: 1, Provider: "omdb", ProviderID: "tt0108778", OutputPath: p, CreatedAt: "2026-01-01"}
+	if err := st.Add(ctx, e); err != nil {
+		t.Fatal(err)
+	}
+	// A scan-derived upsert without provider fields must not wipe them.
+	if err := st.Add(ctx, Entry{Title: "KLOVN", MediaType: "tv", Season: 1, Episode: 1, OutputPath: p, CreatedAt: "2026-01-02"}); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := st.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Entries[0].Provider != "omdb" || snap.Entries[0].ProviderID != "tt0108778" {
+		t.Errorf("provider fields wiped by scan upsert: %+v", snap.Entries[0])
+	}
+}

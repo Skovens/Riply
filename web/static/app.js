@@ -11,6 +11,7 @@
   let searchMode = null;      // 'drive' | 'rip'
   let searchDriveIndex = null;
   let searchSeq = 0;          // discards stale search responses
+  let searchMediaType = 'movie'; // Movie/TV toggle; selects the provider order
   let searchResultsList = [];
   let dirModalTarget = null;  // settings field id the browser fills
   let dirModalDir = null;     // directory currently listed
@@ -53,7 +54,9 @@
   });
 
   function openModal(title) {
-    document.getElementById('modal-title').textContent = title || 'Search TMDb';
+    document.getElementById('modal-title').textContent = title || 'Search metadata';
+    searchMediaType = 'movie';
+    updateSearchTypeButtons();
     modal.classList.add('active');
     searchInput.value = '';
     searchResults.innerHTML = '';
@@ -275,9 +278,9 @@
       const isComplete = d.state === 'complete';
       const index = drives.indexOf(d);
       const activeRip = rips.find(r => r.drive_path === d.path && (r.state === 'ripping' || r.state === 'queued' || r.state === 'complete'));
-      const displayTitle = esc(d.canonical_name || activeRip?.tmdb?.title || '');
-      const displayYear = esc(d.canonical_year || (activeRip?.tmdb ? activeRip.tmdb.year : ''));
-      const poster = d.poster || activeRip?.tmdb?.poster || '';
+      const displayTitle = esc(d.canonical_name || activeRip?.match?.title || '');
+      const displayYear = esc(d.canonical_year || (activeRip?.match ? activeRip.match.year : ''));
+      const poster = d.poster || activeRip?.match?.poster || '';
       const autoNamingChecked = d.auto_naming_enabled ? 'checked' : '';
       const autoRipChecked = d.autorip_enabled ? 'checked' : '';
       const hasName = !!(d.disc_name && displayTitle);
@@ -324,7 +327,7 @@
 
       return `
         <div class="drive-card" data-drive="${esc(d.path)}">
-          <div class="drive-thumbnail clickable" role="button" aria-label="Search TMDb" onclick="openDriveSearch(${index})">
+          <div class="drive-thumbnail clickable" role="button" aria-label="Search metadata" onclick="openDriveSearch(${index})">
             ${poster ? `<img src="${esc(poster)}" class="poster" alt="">` : '<div class="poster placeholder"></div>'}
           </div>
           <div class="header">
@@ -441,9 +444,9 @@
     }
 
     ripList.innerHTML = finished.map(r => {
-      const poster = r.tmdb?.poster
-        ? `<img src="${esc(r.tmdb.poster)}" class="poster clickable" role="button" aria-label="Search TMDb" onclick="openSearch(${r.id})" alt="">`
-        : `<div class="poster placeholder clickable" role="button" aria-label="Search TMDb" onclick="openSearch(${r.id})"></div>`;
+      const poster = r.match?.poster
+        ? `<img src="${esc(r.match.poster)}" class="poster clickable" role="button" aria-label="Search metadata" onclick="openSearch(${r.id})" alt="">`
+        : `<div class="poster placeholder clickable" role="button" aria-label="Search metadata" onclick="openSearch(${r.id})"></div>`;
       const stateLabel = esc(r.state.replace('_', ' ').toUpperCase());
       const stateClass = `state-${esc(r.state)}`;
       const hasTitles = r.titles && r.titles.length > 0;
@@ -466,7 +469,7 @@
           const statusColor = isAccepted ? 'var(--success)' : isAccepting ? 'var(--warning)' : isError ? 'var(--error)' : 'var(--muted)';
           const statusText = isAccepted ? 'Moved' : isAccepting ? 'Moving...' : isError ? t.error || 'Error' : 'Pending';
 
-          const acceptedName = t.tmdb ? `${esc(t.tmdb.title)} (${esc(t.tmdb.year)})` : esc(t.accepted_name || t.source_file);
+          const acceptedName = t.match ? `${esc(t.match.title)} (${esc(t.match.year)})` : esc(t.accepted_name || t.source_file);
           const pathDisplay = t.proposed_destination ? `<div class="title-path">→ ${esc(t.proposed_destination)}</div>` : '';
           const pathAfter = t.destination ? `<div class="title-path">✓ ${esc(t.destination)}</div>` : '';
 
@@ -489,14 +492,14 @@
       }
 
       let actions = '';
-      if (r.state === 'complete' && !hasTitles && r.tmdb) {
+      if (r.state === 'complete' && !hasTitles && r.match) {
         actions = `<button class="btn btn-success" onclick="acceptRip(${r.id})">Accept & Move</button>`;
       } else if (r.state === 'complete' && hasTitles && allHaveTMDB(r.titles)) {
         const anyPending = r.titles.some(t => t.state === 'pending');
         if (anyPending) {
           actions = `<button class="btn btn-success" onclick="acceptAllTitles(${r.id})">Accept All & Move</button>`;
         }
-      } else if (r.state === 'complete' && !hasTitles && !r.tmdb) {
+      } else if (r.state === 'complete' && !hasTitles && !r.match) {
         actions = `<button class="btn btn-primary" onclick="openSearch(${r.id})">Search</button>`;
       } else if (r.state === 'error') {
         actions = `<button class="btn btn-primary" onclick="openSearch(${r.id})">Search</button>`;
@@ -510,7 +513,7 @@
         <div class="rip-item ${r.state === 'error' ? 'state-error' : ''}" data-rip-id="${r.id}">
           ${poster}
           <div class="info">
-            <div class="title">${esc(r.disc_name)}${r.tmdb ? ` → ${esc(r.tmdb.title)} (${esc(r.tmdb.year)})` : ''}</div>
+            <div class="title">${esc(r.disc_name)}${r.match ? ` → ${esc(r.match.title)} (${esc(r.match.year)})` : ''}</div>
             <div class="meta">
               <span class="state-badge ${stateClass}">${stateLabel}</span>
               ${r.media_type === 'tv' ? '<span class="media-badge media-tv">TV</span>' : r.media_type === 'movie' ? '<span class="media-badge media-movie">Movie</span>' : ''}
@@ -614,7 +617,7 @@
 
   window.acceptRip = async (id) => {
     const rip = rips.find(r => r.id === id);
-    if (rip && !rip.tmdb) {
+    if (rip && !rip.match) {
       openSearch(id);
       return;
     }
@@ -684,8 +687,8 @@
         tv_season: title.tv_season || 0,
         tv_episode: title.tv_episode || 0,
       };
-      if (title.tmdb) {
-        body.tmdb = title.tmdb;
+      if (title.match) {
+        body.match = title.match;
       }
 
       await api(`/api/rips/${ripId}/accept-title`, {
@@ -700,7 +703,7 @@
   };
 
   function allHaveTMDB(titles) {
-    return titles.every(t => t.tmdb);
+    return titles.every(t => t.match);
   }
 
   window.acceptAllTitles = async (ripId) => {
@@ -737,11 +740,11 @@
     if (activeRip) {
       searchMode = 'rip';
       searchRipId = activeRip.id;
-      const title = activeRip.tmdb?.title || drives[index]?.canonical_name || drives[index]?.disc_name || 'Movie';
+      const title = activeRip.match?.title || drives[index]?.canonical_name || drives[index]?.disc_name || 'Movie';
       openModal(`Search for ${title}`);
       searchInput.value = title;
-      if (activeRip.tmdb) {
-        renderSearchResults([activeRip.tmdb]);
+      if (activeRip.match) {
+        renderSearchResults([activeRip.match]);
       } else {
         runSearch(title);
       }
@@ -754,7 +757,7 @@
     openModal(`Search for ${title}`);
     searchInput.value = title;
     if (d?.canonical_name) {
-      renderSearchResults([{ id: d.canonical_id || 0, title: d.canonical_name, year: d.canonical_year || 0, poster: d.poster || '' }]);
+      renderSearchResults([{ provider: d.canonical_provider || '', ext_id: d.canonical_ext_id || '', title: d.canonical_name, year: d.canonical_year || 0, poster: d.poster || '' }]);
     } else {
       runSearch(title);
     }
@@ -764,11 +767,11 @@
     searchMode = 'rip';
     searchRipId = id;
     const rip = rips.find(r => r.id === id);
-    const title = rip?.tmdb?.title || rip?.parsed_title || rip?.disc_name || lastRipFor(drives.find(x => x.path === rip?.drive_path))?.title || 'Movie';
+    const title = rip?.match?.title || rip?.parsed_title || rip?.disc_name || lastRipFor(drives.find(x => x.path === rip?.drive_path))?.title || 'Movie';
     openModal(`Search for ${title}`);
     searchInput.value = title;
-    if (rip?.tmdb) {
-      renderSearchResults([rip.tmdb]);
+    if (rip?.match) {
+      renderSearchResults([rip.match]);
     } else {
       runSearch(title);
     }
@@ -781,6 +784,24 @@
     searchTimeout = setTimeout(() => runSearch(query), 500);
   });
 
+  // Movie/TV toggle: re-renders the active state and re-runs the current
+  // search against the selected media type's provider order.
+  window.setSearchType = (type) => {
+    if (searchMediaType === type) return;
+    searchMediaType = type;
+    updateSearchTypeButtons();
+    const q = searchInput.value.trim();
+    if (q.length >= 2) runSearch(q);
+  };
+
+  function updateSearchTypeButtons() {
+    const movieBtn = document.getElementById('search-type-movie');
+    const tvBtn = document.getElementById('search-type-tv');
+    if (!movieBtn || !tvBtn) return;
+    movieBtn.className = 'btn btn-small ' + (searchMediaType === 'movie' ? 'btn-primary' : 'btn-secondary');
+    tvBtn.className = 'btn btn-small ' + (searchMediaType === 'tv' ? 'btn-primary' : 'btn-secondary');
+  }
+
   async function runSearch(query) {
     const seq = ++searchSeq;
     const q = query.trim();
@@ -790,7 +811,7 @@
       return;
     }
     try {
-      const results = await api(`/api/search?q=${encodeURIComponent(q)}`);
+      const results = await api(`/api/search?q=${encodeURIComponent(q)}&type=${searchMediaType}`);
       if (seq !== searchSeq) return;
       renderSearchResults(results);
     } catch (err) {
@@ -825,7 +846,7 @@
   });
 
   async function selectSearchResult(r) {
-    const body = JSON.stringify({ tmdb_id: r.id, title: r.title, year: r.year, poster: r.poster || '', is_tv: !!r.is_tv });
+    const body = JSON.stringify({ provider: r.provider || '', ext_id: r.ext_id || (r.id ? String(r.id) : ''), title: r.title, year: r.year, poster: r.poster || '', is_tv: !!r.is_tv });
     try {
       if (searchMode === 'drive') {
         await api(`/api/drives/${searchDriveIndex}/name${driveQS(searchDriveIndex)}`, { method: 'PUT', body });
@@ -923,6 +944,8 @@
     closeDirModal();
   });
 
+  const cfgProviderKeys = new Set(); // provider names holding a configured key
+
   async function loadSettings() {
     try {
       const cfg = await api('/api/config');
@@ -933,6 +956,16 @@
       document.getElementById('auto_sequence').checked = cfg.auto_sequence !== false;
       document.getElementById('temp_fill_limit_percent').value = cfg.temp_fill_limit_percent ?? 80;
       document.getElementById('move_fill_limit_percent').value = cfg.move_fill_limit_percent ?? 95;
+      cfgProviderKeys.clear();
+      for (const [name, pc] of Object.entries(cfg.providers || {})) {
+        if (pc && pc.api_key !== undefined) cfgProviderKeys.add(name);
+      }
+      const movieOrder = (cfg.metadata && cfg.metadata.movies && cfg.metadata.movies.length) ? cfg.metadata.movies : ['tmdb'];
+      const tvOrder = (cfg.metadata && cfg.metadata.tv && cfg.metadata.tv.length) ? cfg.metadata.tv : ['tmdb'];
+      document.getElementById('metadata_primary_movies').value = movieOrder[0];
+      document.getElementById('metadata_primary_tv').value = tvOrder[0];
+      document.getElementById('metadata_fallback_movies').checked = movieOrder.length > 1;
+      document.getElementById('metadata_fallback_tv').checked = tvOrder.length > 1;
     } catch (err) {
       console.error('Failed to load settings:', err);
     }
@@ -950,10 +983,24 @@
       move_fill_limit_percent: parseInt(document.getElementById('move_fill_limit_percent').value) || 0,
     };
 
+    const providers = {};
     const tmdbKey = document.getElementById('tmdb_api_key').value;
-    if (tmdbKey) {
-      updates.tmdb_api_key = tmdbKey;
-    }
+    const omdbKey = document.getElementById('omdb_api_key').value;
+    if (tmdbKey) providers.tmdb = { api_key: tmdbKey };
+    if (omdbKey) providers.omdb = { api_key: omdbKey };
+    if (Object.keys(providers).length) updates.providers = providers;
+
+    const moviePrimary = document.getElementById('metadata_primary_movies').value;
+    const tvPrimary = document.getElementById('metadata_primary_tv').value;
+    // Providers that hold a key: typed this session, or configured earlier
+    // (GET /api/config redacts the values but still names the providers).
+    const known = ['tmdb', 'omdb'].filter(name => providers[name] || cfgProviderKeys.has(name));
+    const movieFallback = document.getElementById('metadata_fallback_movies').checked;
+    const tvFallback = document.getElementById('metadata_fallback_tv').checked;
+    updates.metadata = {
+      movies: [moviePrimary, ...(movieFallback ? known.filter(n => n !== moviePrimary) : [])],
+      tv: [tvPrimary, ...(tvFallback ? known.filter(n => n !== tvPrimary) : [])],
+    };
 
     try {
       await api('/api/config', {
@@ -962,6 +1009,7 @@
       });
       toast('Settings saved', 'success');
       document.getElementById('tmdb_api_key').value = '';
+      document.getElementById('omdb_api_key').value = '';
     } catch (err) {
       toast(`Failed to save: ${err.message}`, 'error');
     }

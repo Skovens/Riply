@@ -516,7 +516,7 @@ func (s *Store) RipMatches(ctx context.Context, name string) ([]Entry, error) {
 	if name == "" {
 		return nil, nil
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, disc_name, disc_hash, title, year, media_type, season, episode, tmdb_id, output_path, source, missing, moved_at, created_at FROM library WHERE disc_name LIKE ? ESCAPE '\' AND missing = 0 ORDER BY moved_at DESC, created_at DESC`, escapeLike(name))
+	rows, err := s.db.QueryContext(ctx, `SELECT id, disc_name, disc_hash, title, year, media_type, season, episode, tmdb_id, provider, provider_id, output_path, source, missing, moved_at, created_at FROM library WHERE disc_name LIKE ? ESCAPE '\' AND missing = 0 ORDER BY moved_at DESC, created_at DESC`, escapeLike(name))
 	if err != nil {
 		return nil, fmt.Errorf("library: rip matches: %w", err)
 	}
@@ -528,7 +528,7 @@ func (s *Store) RipMatches(ctx context.Context, name string) ([]Entry, error) {
 			e       Entry
 			missing int
 		)
-		if err := rows.Scan(&e.ID, &e.DiscName, &e.DiscHash, &e.Title, &e.Year, &e.MediaType, &e.Season, &e.Episode, &e.TMDBID, &e.OutputPath, &e.Source, &missing, &e.MovedAt, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.DiscName, &e.DiscHash, &e.Title, &e.Year, &e.MediaType, &e.Season, &e.Episode, &e.TMDBID, &e.Provider, &e.ProviderID, &e.OutputPath, &e.Source, &missing, &e.MovedAt, &e.CreatedAt); err != nil {
 			return nil, fmt.Errorf("library: scan rip matches: %w", err)
 		}
 		e.Missing = missing != 0
@@ -552,7 +552,7 @@ func (s *Store) HashMatches(ctx context.Context, hash string) ([]Entry, error) {
 	if hash == "" {
 		return nil, nil
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, disc_name, disc_hash, title, year, media_type, season, episode, tmdb_id, output_path, source, missing, moved_at, created_at FROM library WHERE disc_hash = ? AND missing = 0 ORDER BY moved_at DESC, created_at DESC`, hash)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, disc_name, disc_hash, title, year, media_type, season, episode, tmdb_id, provider, provider_id, output_path, source, missing, moved_at, created_at FROM library WHERE disc_hash = ? AND missing = 0 ORDER BY moved_at DESC, created_at DESC`, hash)
 	if err != nil {
 		return nil, fmt.Errorf("library: hash matches: %w", err)
 	}
@@ -564,7 +564,7 @@ func (s *Store) HashMatches(ctx context.Context, hash string) ([]Entry, error) {
 			e       Entry
 			missing int
 		)
-		if err := rows.Scan(&e.ID, &e.DiscName, &e.DiscHash, &e.Title, &e.Year, &e.MediaType, &e.Season, &e.Episode, &e.TMDBID, &e.OutputPath, &e.Source, &missing, &e.MovedAt, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.DiscName, &e.DiscHash, &e.Title, &e.Year, &e.MediaType, &e.Season, &e.Episode, &e.TMDBID, &e.Provider, &e.ProviderID, &e.OutputPath, &e.Source, &missing, &e.MovedAt, &e.CreatedAt); err != nil {
 			return nil, fmt.Errorf("library: scan hash matches: %w", err)
 		}
 		e.Missing = missing != 0

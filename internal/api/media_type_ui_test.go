@@ -21,8 +21,8 @@ func TestDriveResponseExposesMediaType(t *testing.T) {
 	s.scanner.ApplyEvent(drive.DiscEvent{EventType: drive.DriveDiscovered, Path: "/dev/sr1"})
 	s.scanner.ApplyEvent(drive.DiscEvent{EventType: drive.DiscInserted, Path: "/dev/sr1"})
 	s.mu.Lock()
-	s.namingMatches["/dev/sr0"] = naming.Result{ID: 1, Title: "Inception", Year: 2010, IsTV: false}
-	s.namingMatches["/dev/sr1"] = naming.Result{ID: 2, Title: "KLOVN", Year: 2010, IsTV: true}
+	s.providerMatches["/dev/sr0"] = naming.Result{ID: 1, Title: "Inception", Year: 2010, IsTV: false}
+	s.providerMatches["/dev/sr1"] = naming.Result{ID: 2, Title: "KLOVN", Year: 2010, IsTV: true}
 	s.mu.Unlock()
 
 	rec := doJSON(t, s, http.MethodGet, "/api/drives", nil)
@@ -65,7 +65,7 @@ func TestRipResponseCarriesResolvedMediaType(t *testing.T) {
 	s, _ := newRipServer(t, &instantRipper{outName: "title_t01.mkv"})
 	// A movie match is stored as the auto-naming result before the rip starts.
 	s.mu.Lock()
-	s.namingMatches["/dev/sr0"] = naming.Result{ID: 7, Title: "The Mask", Year: 1994, IsTV: false}
+	s.providerMatches["/dev/sr0"] = naming.Result{ID: 7, Title: "The Mask", Year: 1994, IsTV: false}
 	s.mu.Unlock()
 
 	id := startRipViaAPI(t, s)

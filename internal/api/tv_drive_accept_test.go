@@ -71,7 +71,8 @@ func TestDriveAcceptTVLandsSeasonLayout(t *testing.T) {
 	s, _ := newTVServer(t, &tvRipper{}, st)
 
 	rec := doJSON(t, s, http.MethodPost, "/api/drives/0/accept", map[string]any{
-		"tmdb_id":    42,
+		"provider":   "tmdb",
+		"ext_id":     "42",
 		"title":      "KLOVN",
 		"year":       2010,
 		"is_tv":      true,
