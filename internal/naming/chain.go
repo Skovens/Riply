@@ -29,7 +29,10 @@ const (
 // SearchAuto is the disc-insert path: movie order first, TV order
 // immediately on shortfall — the naming goroutine never waits for the rip.
 type Chain struct {
-	providers   []Provider
+	providers []Provider
+	// ordersMu guards the try-orders: SetOrders rewrites them live from
+	// PUT /api/config while orderFor reads them on every search.
+	ordersMu    sync.Mutex
 	moviesOrder []string
 	tvOrder     []string
 
@@ -78,14 +81,19 @@ func (c *Chain) Enabled() bool {
 }
 
 // SetOrders replaces the per-media-type try-orders live (Settings
-// PUT /api/config). Empty lists leave the current order unchanged.
+// PUT /api/config). Empty lists leave the current order unchanged. The
+// search cache is invalidated with the orders: cached results were resolved
+// under the old configuration.
 func (c *Chain) SetOrders(movies, tv []string) {
+	c.ordersMu.Lock()
 	if len(movies) > 0 {
 		c.moviesOrder = movies
 	}
 	if len(tv) > 0 {
 		c.tvOrder = tv
 	}
+	c.ordersMu.Unlock()
+	c.clearCache()
 }
 
 // SetAPIKey updates one provider's key live (Settings PUT /api/config) and
@@ -111,13 +119,16 @@ func (c *Chain) SetAPIKey(name, key string) {
 // so a key added via Settings puts its provider back into play without a
 // restart.
 func (c *Chain) orderFor(mediaType MediaType) []Provider {
+	c.ordersMu.Lock()
 	names := c.moviesOrder
 	if mediaType == TV {
 		names = c.tvOrder
 	}
+	listed := append([]string(nil), names...)
+	c.ordersMu.Unlock()
 	out := make([]Provider, 0, len(c.providers))
 	used := make(map[string]bool, len(c.providers))
-	for _, name := range names {
+	for _, name := range listed {
 		for _, p := range c.providers {
 			if p.Name() == name && !used[name] {
 				out = append(out, p)
