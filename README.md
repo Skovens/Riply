@@ -101,12 +101,21 @@ The library database is an index of ripped and scanned media, lives next to the 
 movies_dir = "/media/movies"
 tv_shows_dir = ""
 temp_dir = "/tmp/riply"
-tmdb_api_key = ""
 http_host = "127.0.0.1"
 http_port = 3000
 makemkv_path = ""
 auto_sequence = true
 min_title_length = 300
+
+[metadata]
+movies = ["tmdb", "omdb"] # try-order for movie discs; first entry is primary
+tv = ["tmdb", "omdb"]     # try-order for TV discs; may differ from movies
+
+[providers.tmdb]
+api_key = ""
+
+[providers.omdb]
+api_key = ""
 ```
 
 | Field | Description |
@@ -114,14 +123,15 @@ min_title_length = 300
 | `movies_dir` | Destination directory for ripped movies (Jellyfin-compliant structure) |
 | `tv_shows_dir` | Destination directory for ripped TV shows — `Show (Year)/Season N/…` (empty = under `movies_dir`) |
 | `temp_dir` | Temporary directory for rip operations |
-| `tmdb_api_key` | TMDb API key for auto-naming (optional; naming disabled when empty) |
+| `providers.<name>.api_key` | Per-provider API key (`tmdb`, `omdb`); a legacy flat `tmdb_api_key` is migrated into `[providers.tmdb]` automatically. Naming is disabled when no key is configured. |
+| `metadata.movies` / `metadata.tv` | Provider try-order per media type; on error or empty results the next provider in the list is tried (providers with keys but absent from a list are appended after it) |
 | `http_host` | HTTP server bind address (restart required) |
 | `http_port` | HTTP server bind port (restart required) |
 | `makemkv_path` | MakeMKV binary path, empty = PATH lookup (restart required) |
 | `auto_sequence` | Pre-fill the search modal from the last ripped title and warn about duplicate discs (default true; per-drive override on each drive card) |
 | `min_title_length` | Skip disc titles shorter than this many seconds — passed to MakeMKV as `--minlength` (default 300; 0 = rip every title) |
 
-`movies_dir`, `temp_dir`, `tmdb_api_key`, `auto_sequence` and `min_title_length` can also be changed at runtime via `PUT /api/config`; the bind address/port and MakeMKV path take effect on restart.
+`movies_dir`, `temp_dir`, `providers` and `metadata`, `auto_sequence` and `min_title_length` can also be changed at runtime via `PUT /api/config`; the bind address/port and MakeMKV path take effect on restart. Rate limits are per provider and hard-coded (TMDb ~1 req/s; OMDb 1,000 requests/day free tier) — not configurable.
 
 ## Usage
 

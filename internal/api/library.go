@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -182,7 +183,20 @@ type lastRipInfo struct {
 	MediaType string `json:"media_type"`
 	Season    int    `json:"season"`
 	Episode   int    `json:"episode"`
-	TMDBID    int    `json:"tmdb_id"`
+	Provider  string `json:"provider,omitempty"`
+	MatchID   string `json:"match_id,omitempty"`
+}
+
+// matchIDOrLegacy returns lr.ProviderID, falling back to the legacy numeric
+// tmdb_id for entries stored before the provider columns existed.
+func matchIDOrLegacy(lr library.LastRip) string {
+	if lr.ProviderID != "" {
+		return lr.ProviderID
+	}
+	if lr.TMDBID > 0 {
+		return strconv.Itoa(lr.TMDBID)
+	}
+	return ""
 }
 
 type suggestInfo struct {

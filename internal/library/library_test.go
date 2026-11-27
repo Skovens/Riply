@@ -584,3 +584,7 @@ func TestScanUnreadableRootAndUnreadableSubdir(t *testing.T) {
 		t.Errorf("Added = %d, want 1 (readable entry scanned, unreadable skipped)", res.Added)
 	}
 }
+
+	if _, err := raw.Exec(`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}

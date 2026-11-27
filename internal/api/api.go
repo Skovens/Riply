@@ -139,7 +139,7 @@ type Server struct {
 	cfgPath string // path to config file for persistence
 	scanner *drive.Scanner
 	ripper  rip.Ripper
-	namer   *naming.Client
+	namer   *naming.Chain
 	sseMgr  *sse.Manager
 	metrics *metrics.Metrics
 	lib     *library.Store
@@ -405,7 +405,7 @@ func (s *Server) handleDrives(w http.ResponseWriter, r *http.Request) {
 	var lastRip *lastRipInfo
 	if autoSeq && s.lib != nil {
 		if lr, ok := s.lib.LastRip(r.Context()); ok {
-			lastRip = &lastRipInfo{Title: lr.Title, Year: lr.Year, MediaType: lr.MediaType, Season: lr.Season, Episode: lr.Episode, TMDBID: lr.TMDBID}
+			lastRip = &lastRipInfo{Title: lr.Title, Year: lr.Year, MediaType: lr.MediaType, Season: lr.Season, Episode: lr.Episode, Provider: lr.Provider, MatchID: matchIDOrLegacy(lr)}
 		}
 	}
 
@@ -447,6 +447,16 @@ func (s *Server) handleDrives(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, out)
+}
+
+// matchProvider returns the provider name and provider-neutral match id of
+// a naming result ("" when it carries none). MatchID falls back to the TMDb
+// numeric id for results that predate the adapter fields.
+func matchProvider(r *naming.Result) (string, string) {
+	if r == nil {
+		return "", ""
+	}
+	return r.Provider, r.MatchID()
 }
 
 // startRipForPath starts a rip on a drive that is already verified Ready.
@@ -645,14 +655,24 @@ func (s *Server) startRipForPath(drivePath string) (*RipSession, error) {
 				cleanName = discName
 			}
 			if !searchableName(cleanName) {
-				logger.Info("Skipping post-rip TMDb search", "drive", drivePath, "parsed", parsedTitle, "disc", discName)
+				logger.Info("Skipping post-rip metadata search", "drive", drivePath, "parsed", parsedTitle, "disc", discName)
+			} else if mt, ok := naming.MediaTypeOf(session.MediaType); ok {
+				// Classification exists post-rip; run exactly that type's order.
+				results, err := s.namer.Search(s.baseCtx, cleanName, mt)
+				if err == nil && len(results) > 0 {
+					session.Match = &results[0]
+					logger.Info("Naming suggestion", "title", results[0].Title, "year", results[0].Year, "disc", discName)
+				} else if err != nil {
+					logger.Error("Metadata search after rip failed", "error", err)
+				}
 			} else {
-				results, err := s.namer.Search(s.baseCtx, cleanName)
+				// Unclassified: movie pass, then immediate TV pass.
+				results, err := s.namer.SearchAuto(s.baseCtx, cleanName)
 				if err == nil && len(results) > 0 {
 					session.TMDB = &results[0]
 					logger.Info("Naming suggestion", "title", results[0].Title, "year", results[0].Year, "disc", discName)
 				} else if err != nil {
-					logger.Error("TMDb search after rip failed", "error", err)
+					logger.Error("Metadata search after rip failed", "error", err)
 				}
 			}
 		}
@@ -770,6 +790,8 @@ func (s *Server) startRipForPath(drivePath string) (*RipSession, error) {
 							Season:     tvSeason,
 							Episode:    me.Episode,
 							TMDBID:     pa.TMDB.ID,
+							Provider:   pa.Match.Provider,
+							ProviderID: pa.Match.MatchID(),
 							MovedAt:    movedAt,
 						})
 					}
@@ -784,6 +806,8 @@ func (s *Server) startRipForPath(drivePath string) (*RipSession, error) {
 						Season:     tvSeason,
 						Episode:    tvEpisode,
 						TMDBID:     pa.TMDB.ID,
+						Provider:   pa.Match.Provider,
+						ProviderID: pa.Match.MatchID(),
 						MovedAt:    movedAt,
 					})
 				}
@@ -848,8 +872,8 @@ func (s *Server) handleStartRip(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]int{"rip_id": session.ID})
 }
 
-// startAutoNaming kicks off a TMDb search when a disc is inserted.
-// It checks the auto-naming toggle for the drive before proceeding.
+// startAutoNaming kicks off a metadata-provider search when a disc is
+// inserted. It checks the auto-naming toggle for the drive before proceeding.
 func (s *Server) startAutoNaming(drivePath, discName string) {
 	if s.namer == nil || s.namer.APIKey() == "" {
 		return
@@ -873,11 +897,13 @@ func (s *Server) startAutoNaming(drivePath, discName string) {
 	s.sseMgr.Publish(sse.Event{
 		Type:    "naming_started",
 		Drive:   drivePath,
-		Message: fmt.Sprintf("Searching TMDb for %q...", cleanName),
+		Message: fmt.Sprintf("Searching metadata providers for %q...", cleanName),
 	})
 
 	go func() {
-		results, err := s.namer.Search(s.baseCtx, cleanName)
+		// Movie pass first; when it comes up short, the TV pass runs
+		// immediately — naming never waits for the rip.
+		results, err := s.namer.SearchAuto(s.baseCtx, cleanName)
 		if err != nil {
 			s.sseMgr.Publish(sse.Event{
 				Type:    "naming_failed",
@@ -890,7 +916,7 @@ func (s *Server) startAutoNaming(drivePath, discName string) {
 			s.sseMgr.Publish(sse.Event{
 				Type:    "naming_failed",
 				Drive:   drivePath,
-				Message: "Auto-naming: no TMDb match found",
+				Message: "Auto-naming: no metadata match found",
 			})
 			return
 		}
@@ -912,7 +938,7 @@ func (s *Server) startAutoNaming(drivePath, discName string) {
 		s.sseMgr.Publish(sse.Event{
 			Type:    "naming_match",
 			Drive:   drivePath,
-			Message: fmt.Sprintf("Found TMDb match: %s (%d)", results[0].Title, results[0].Year),
+			Message: fmt.Sprintf("Found match: %s (%d)", results[0].Title, results[0].Year),
 		})
 	}()
 }
@@ -1776,10 +1802,7 @@ func (s *Server) handleAcceptTitle(w http.ResponseWriter, r *http.Request) {
 	if recordTitle == "" {
 		recordTitle = body.TitleName
 	}
-	tmdbID := titleTMDBID
-	if tmdbID == 0 {
-		tmdbID = sessionTMDBID
-	}
+	tmdbID := entryTMDBID
 	mediaType := "movie"
 	if body.TvSeason > 0 {
 		mediaType = "tv"
@@ -1833,7 +1856,9 @@ func (s *Server) handleUndoAccept(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"status": "ok", "message": "Accept cancelled, rip will continue"})
 }
 
-// handleSearch allows manual TMDb search.
+// handleSearch allows manual metadata search. The optional `type` query
+// parameter ("movie" or "tv") selects that type's provider order; anything
+// else runs the auto path (movie pass, then immediate TV pass on shortfall).
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	if s.namer == nil {
 		http.Error(w, "naming not configured", http.StatusServiceUnavailable)
@@ -1846,10 +1871,19 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing query parameter 'q'", http.StatusBadRequest)
 		return
 	}
+	searchType := r.URL.Query().Get("type")
 
-	logger.Debug("Manual search", "query", query)
+	logger.Debug("Manual search", "query", query, "type", searchType)
 
-	results, err := s.namer.Search(r.Context(), query)
+	var (
+		results []naming.Result
+		err     error
+	)
+	if mt, ok := naming.MediaTypeOf(searchType); ok {
+		results, err = s.namer.Search(r.Context(), query, mt)
+	} else {
+		results, err = s.namer.SearchAuto(r.Context(), query)
+	}
 	if err != nil {
 		logger.Error("Manual search failed", "error", err)
 		// Upstream failure text (wrapped URLs, status bodies) must never reach
@@ -1864,9 +1898,15 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 // handleGetConfig returns the current config.
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
-	// Don't expose the API key
+	// Don't expose the provider API keys
 	cfg := *s.cfg
-	cfg.TMDBKey = ""
+	if cfg.Providers != nil {
+		providers := make(map[string]config.ProviderConfig, len(cfg.Providers))
+		for name := range cfg.Providers {
+			providers[name] = config.ProviderConfig{}
+		}
+		cfg.Providers = providers
+	}
 	s.mu.Unlock()
 	writeJSON(w, cfg)
 }
@@ -1961,7 +2001,56 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	newKey, keyPresent := updates["tmdb_api_key"].(string)
 	if keyPresent {
-		s.cfg.TMDBKey = newKey
+		// Legacy flat key: map onto the TMDb provider so old clients keep
+		// working until they adopt the nested form.
+		if s.cfg.Providers == nil {
+			s.cfg.Providers = map[string]config.ProviderConfig{"tmdb": {}, "omdb": {}}
+		}
+		pc := s.cfg.Providers["tmdb"]
+		pc.APIKey = newKey
+		s.cfg.Providers["tmdb"] = pc
+	}
+	// Nested provider keys: {"providers": {"tmdb": {"api_key": "..."},
+	// "omdb": {"api_key": "..."}}} — empty string disables a provider.
+	if rawProviders, ok := updates["providers"].(map[string]interface{}); ok {
+		if s.cfg.Providers == nil {
+			s.cfg.Providers = map[string]config.ProviderConfig{"tmdb": {}, "omdb": {}}
+		}
+		for name, raw := range rawProviders {
+			pcMap, ok := raw.(map[string]interface{})
+			if !ok {
+				http.Error(w, fmt.Sprintf("providers.%s must be an object", name), http.StatusBadRequest)
+				s.mu.Unlock()
+				return
+			}
+			newProviderKey, _ := pcMap["api_key"].(string)
+			pc := s.cfg.Providers[name]
+			pc.APIKey = newProviderKey
+			s.cfg.Providers[name] = pc
+		}
+	}
+	// Per-media-type provider try-orders: {"metadata": {"movies": [...],
+	// "tv": [...]}} — first entry is the primary provider.
+	if rawMeta, ok := updates["metadata"].(map[string]interface{}); ok {
+		for key, target := range map[string]*[]string{"movies": &s.cfg.Metadata.Movies, "tv": &s.cfg.Metadata.TV} {
+			rawList, ok := rawMeta[key].([]interface{})
+			if !ok {
+				continue
+			}
+			order := make([]string, 0, len(rawList))
+			for _, raw := range rawList {
+				name, ok := raw.(string)
+				if !ok || name == "" {
+					http.Error(w, fmt.Sprintf("metadata.%s entries must be non-empty provider names", key), http.StatusBadRequest)
+					s.mu.Unlock()
+					return
+				}
+				order = append(order, name)
+			}
+			if len(order) > 0 {
+				*target = order
+			}
+		}
 	}
 	if v, ok := updates["http_port"].(float64); ok && v > 0 {
 		s.cfg.HTTPPort = int(v)
@@ -2007,11 +2096,30 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Unlock()
 
-	// Propagate a present key (including an empty one, which disables naming)
-	// to the live client so Settings takes effect without a restart.
-	if keyPresent && s.namer != nil {
-		s.namer.SetAPIKey(newKey)
-		logger.Info("TMDb API key updated", "enabled", newKey != "")
+	// Propagate provider keys and orders to the live chain so Settings takes
+	// effect without a restart.
+	if s.namer != nil {
+		if keyPresent {
+			s.namer.SetAPIKey("tmdb", newKey)
+			logger.Info("TMDb API key updated", "enabled", newKey != "")
+		}
+		if rawProviders, ok := updates["providers"].(map[string]interface{}); ok {
+			for name, raw := range rawProviders {
+				if pcMap, ok := raw.(map[string]interface{}); ok {
+					key, _ := pcMap["api_key"].(string)
+					// Chain.SetAPIKey logs the change; no duplicate line here.
+					s.namer.SetAPIKey(name, key)
+				}
+			}
+		}
+		if rawMeta, ok := updates["metadata"].(map[string]interface{}); ok {
+			movies, _ := rawMeta["movies"].([]interface{})
+			tv, _ := rawMeta["tv"].([]interface{})
+			if len(movies) > 0 || len(tv) > 0 {
+				s.namer.SetOrders(toStringList(movies), toStringList(tv))
+				logger.Info("Metadata provider orders updated")
+			}
+		}
 	}
 
 	// Propagate the min-title-length change to the live ripper so Settings
@@ -2029,8 +2137,11 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Never echo the API key back.
-	cfgCopy.TMDBKey = ""
+	// Never echo the provider API keys back.
+	cfgCopy.Providers = make(map[string]config.ProviderConfig, len(cfgCopy.Providers))
+	for name := range cfgCopy.Providers {
+		cfgCopy.Providers[name] = config.ProviderConfig{}
+	}
 	writeJSON(w, cfgCopy)
 }
 
