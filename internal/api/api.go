@@ -642,45 +642,72 @@ func (s *Server) startRipForPath(drivePath string) (*RipSession, error) {
 		// Parse title for display
 		parsedTitle := naming.ParseTitle(discName)
 
-		// Use pre-computed auto-naming match if available
+		// Snapshot classification under lock; if no auto-naming match exists,
+		// the fallback search runs OUTSIDE s.mu — SearchAuto may chain movie
+		// and TV passes across rate-limited providers and must never block
+		// every other HTTP handler and the drive poller for seconds (the
+		// pre-adapter client had the same shape but only ever made one call).
 		s.mu.Lock()
 		session.MediaType = mediaType
 		session.ParsedTitle = parsedTitle
 		if match, ok := s.providerMatches[drivePath]; ok {
 			session.Match = &match
 			logger.Info("Auto-naming match available", "title", match.Title, "year", match.Year)
-		} else if s.namer != nil && s.namer.Enabled() {
-			// Fallback: search after rip if no auto-match was found
-			cleanName := parsedTitle
-			if cleanName == "" {
-				cleanName = discName
-			}
-			if !searchableName(cleanName) {
-				logger.Info("Skipping post-rip metadata search", "drive", drivePath, "parsed", parsedTitle, "disc", discName)
-			} else if mt, ok := naming.MediaTypeOf(session.MediaType); ok {
-				// Classification exists post-rip; run exactly that type's order.
-				results, err := s.namer.Search(s.baseCtx, cleanName, mt)
-				if err == nil && len(results) > 0 {
-					session.Match = &results[0]
-					logger.Info("Naming suggestion", "title", results[0].Title, "year", results[0].Year, "disc", discName)
-				} else if err != nil {
-					logger.Error("Metadata search after rip failed", "error", err)
-				}
+		}
+		sessionMatch := session.Match
+		cleanName := parsedTitle
+		if cleanName == "" {
+			cleanName = discName
+		}
+		shouldSearch := sessionMatch == nil && s.namer != nil && s.namer.Enabled() &&
+			searchableName(cleanName)
+		classified := mediaType
+		s.mu.Unlock()
+
+		if !shouldSearch && sessionMatch == nil && s.namer != nil && s.namer.Enabled() {
+			logger.Info("Skipping post-rip metadata search", "drive", drivePath, "parsed", parsedTitle, "disc", discName)
+		}
+
+		var match *naming.Result
+		if sessionMatch != nil {
+			match = sessionMatch
+		} else if shouldSearch {
+			// Fallback: search after rip if no auto-match was found. A
+			// classified type runs exactly that type's order; unclassified
+			// runs the auto path (movie pass, then immediate TV pass).
+			var (
+				results []naming.Result
+				err     error
+			)
+			if mt, ok := naming.MediaTypeOf(classified); ok {
+				results, err = s.namer.Search(s.baseCtx, cleanName, mt)
 			} else {
-				// Unclassified: movie pass, then immediate TV pass.
-				results, err := s.namer.SearchAuto(s.baseCtx, cleanName)
-				if err == nil && len(results) > 0 {
-					session.Match = &results[0]
-					logger.Info("Naming suggestion", "title", results[0].Title, "year", results[0].Year, "disc", discName)
-				} else if err != nil {
-					logger.Error("Metadata search after rip failed", "error", err)
-				}
+				results, err = s.namer.SearchAuto(s.baseCtx, cleanName)
+			}
+			if err == nil && len(results) > 0 {
+				match = &results[0]
+				logger.Info("Naming suggestion", "title", results[0].Title, "year", results[0].Year, "disc", discName)
+			} else if err != nil {
+				logger.Error("Metadata search after rip failed", "error", err)
 			}
 		}
+
+		// Persist the search result onto the session under lock.
+		if match != nil {
+			s.mu.Lock()
+			// A manual name set or drive accept that arrived while the
+			// search was in flight wins over the automatic suggestion.
+			if session.Match == nil {
+				session.Match = match
+			}
+			s.mu.Unlock()
+		}
+
+		s.mu.Lock()
 		// Snapshot MoviesDir and session fields under lock to avoid races with concurrent PUT/accept
 		moviesDir := s.cfg.MoviesDir
 		tvDir := s.cfg.TVDir()
-		sessionMatch := session.Match
+		sessionMatch = session.Match
 		sessionMediaType := session.MediaType
 		sessionDiscName := session.DiscName
 		s.mu.Unlock()
@@ -2008,6 +2035,32 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 			updates["tv_shows_dir"] = v
 		}
 	}
+	// L13: the provider keys and metadata orders are validated up front too
+	// (all or nothing) — a malformed providers.X or metadata entry must 400
+	// without partially mutating the live config.
+	if rawProviders, ok := updates["providers"].(map[string]interface{}); ok {
+		for name, raw := range rawProviders {
+			if _, ok := raw.(map[string]interface{}); !ok {
+				http.Error(w, fmt.Sprintf("providers.%s must be an object", name), http.StatusBadRequest)
+				return
+			}
+		}
+	}
+	if rawMeta, ok := updates["metadata"].(map[string]interface{}); ok {
+		for _, key := range []string{"movies", "tv"} {
+			rawList, ok := rawMeta[key].([]interface{})
+			if !ok {
+				continue
+			}
+			for _, raw := range rawList {
+				name, isStr := raw.(string)
+				if !isStr || name == "" {
+					http.Error(w, fmt.Sprintf("metadata.%s entries must be non-empty provider names", key), http.StatusBadRequest)
+					return
+				}
+			}
+		}
+	}
 	s.mu.Lock()
 	if v, ok := updates["movies_dir"].(string); ok && v != "" {
 		s.cfg.MoviesDir = v
@@ -2031,17 +2084,13 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	// Nested provider keys: {"providers": {"tmdb": {"api_key": "..."},
 	// "omdb": {"api_key": "..."}}} — empty string disables a provider.
+	// Shape was validated before the lock (L13); apply without early returns.
 	if rawProviders, ok := updates["providers"].(map[string]interface{}); ok {
 		if s.cfg.Providers == nil {
 			s.cfg.Providers = map[string]config.ProviderConfig{"tmdb": {}, "omdb": {}}
 		}
 		for name, raw := range rawProviders {
-			pcMap, ok := raw.(map[string]interface{})
-			if !ok {
-				http.Error(w, fmt.Sprintf("providers.%s must be an object", name), http.StatusBadRequest)
-				s.mu.Unlock()
-				return
-			}
+			pcMap, _ := raw.(map[string]interface{})
 			newProviderKey, _ := pcMap["api_key"].(string)
 			pc := s.cfg.Providers[name]
 			pc.APIKey = newProviderKey
@@ -2049,23 +2098,15 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Per-media-type provider try-orders: {"metadata": {"movies": [...],
-	// "tv": [...]}} — first entry is the primary provider.
+	// "tv": [...]}} — first entry is the primary provider. Entries were
+	// validated before the lock (L13); apply without early returns.
 	if rawMeta, ok := updates["metadata"].(map[string]interface{}); ok {
 		for key, target := range map[string]*[]string{"movies": &s.cfg.Metadata.Movies, "tv": &s.cfg.Metadata.TV} {
 			rawList, ok := rawMeta[key].([]interface{})
 			if !ok {
 				continue
 			}
-			order := make([]string, 0, len(rawList))
-			for _, raw := range rawList {
-				name, ok := raw.(string)
-				if !ok || name == "" {
-					http.Error(w, fmt.Sprintf("metadata.%s entries must be non-empty provider names", key), http.StatusBadRequest)
-					s.mu.Unlock()
-					return
-				}
-				order = append(order, name)
-			}
+			order := toStringList(rawList)
 			if len(order) > 0 {
 				*target = order
 			}

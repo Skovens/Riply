@@ -260,3 +260,53 @@ func TestHandleGetConfigRedactsAPIKey(t *testing.T) {
 		t.Error("config payload missing movies_dir")
 	}
 }
+
+// L13: a malformed providers payload must 400 without partially mutating
+// the live config — earlier fields in the same PUT are rolled back by never
+// being applied at all.
+func TestPutConfigProvidersValidationAllOrNothing(t *testing.T) {
+	s, _ := newRipServer(t, &instantRipper{outName: "movie.mkv"})
+
+	rec := doJSON(t, s, http.MethodPut, "/api/config", map[string]any{
+		"movies_dir": "/tmp/riply-mutated-test", // would be applied if validation were per-field
+		"providers": map[string]any{
+			"tmdb": "not-an-object",
+		},
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("malformed providers = %d %s, want 400", rec.Code, rec.Body.String())
+	}
+	s.mu.Lock()
+	movies := s.cfg.MoviesDir
+	providerKeys := map[string]string{}
+	for name, pc := range s.cfg.Providers {
+		providerKeys[name] = pc.APIKey
+	}
+	s.mu.Unlock()
+	if movies == "/tmp/riply-mutated-test" {
+		t.Error("movies_dir mutated despite the 400")
+	}
+	if providerKeys["tmdb"] != "" {
+		t.Errorf("tmdb provider key mutated despite the 400: %q", providerKeys["tmdb"])
+	}
+
+	// Malformed metadata entries fail the same way.
+	rec = doJSON(t, s, http.MethodPut, "/api/config", map[string]any{
+		"metadata": map[string]any{"movies": []any{""}},
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("empty provider name = %d, want 400", rec.Code)
+	}
+	rec = doJSON(t, s, http.MethodPut, "/api/config", map[string]any{
+		"metadata": map[string]any{"tv": []any{"omdb", "tmdb"}},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("valid metadata rejected: %d %s", rec.Code, rec.Body.String())
+	}
+	s.mu.Lock()
+	tv := append([]string(nil), s.cfg.Metadata.TV...)
+	s.mu.Unlock()
+	if strings.Join(tv, ",") != "omdb,tmdb" {
+		t.Errorf("tv order = %v, want omdb,tmdb", tv)
+	}
+}

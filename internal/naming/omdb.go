@@ -31,6 +31,15 @@ func (p *omdbProvider) Name() string    { return "omdb" }
 func (p *omdbProvider) Enabled() bool   { return p.hasKey() }
 func (p *omdbProvider) SetAPIKey(key string) { p.setAPIKey(key) }
 
+// omdbNA maps OMDb's literal "N/A" placeholder values (missing poster etc.)
+// to empty strings so the frontend never renders a broken image.
+func omdbNA(s string) string {
+	if s == "N/A" {
+		return ""
+	}
+	return s
+}
+
 // Search runs a media-type-filtered OMDb query:
 // ?apikey=<key>&s=<query>&type=movie|series. Search responses carry no plot,
 // so Overview stays empty; a per-result detail call is a possible follow-up.
@@ -83,10 +92,10 @@ func (p *omdbProvider) Search(ctx context.Context, query string, mediaType Media
 	for _, r := range data.Search {
 		results = append(results, Result{
 			Provider: "omdb",
-			ExtID:    r.ImdbID,
-			Title:    r.Title,
+			ExtID:    omdbNA(r.ImdbID),
+			Title:    omdbNA(r.Title),
 			Year:     yearPrefix(r.Year),
-			Poster:   r.Poster,
+			Poster:   omdbNA(r.Poster),
 			IsTV:     mediaType == TV,
 		})
 	}
